@@ -1,35 +1,54 @@
+import { Queue, Worker } from 'bullmq';
 import { loadConfigOrExit } from '@job-portal/config';
-import { runMigrationsWithLock } from '@job-portal/db';
+import { createDbClient, runMigrationsWithLock } from '@job-portal/db';
 import { createLogger } from '@job-portal/shared';
-
-/**
- * Worker entrypoint. In S0 (Foundations) this is intentionally a stub: it
- * loads config, runs migrations (advisory-lock guarded, racing safely
- * against the api container's own migration attempt), and idles. BullMQ
- * queue registration, scrapers, and the enrichment pipeline land in later
- * sprints (PRD §18 phases 6-7).
- */
+import { ENRICHMENT_QUEUE, SCRAPE_QUEUE, createRedisConnection } from './queues.js';
+import { createScrapeHandler, registerScrapeJobs, type ScrapePayload } from './scrape.js';
 
 const config = loadConfigOrExit();
 const logger = createLogger({ level: config.env.LOG_LEVEL, name: 'worker' });
 
+// Both api and worker run migrations under an advisory lock on startup (PRD §15).
 await runMigrationsWithLock(config.env.DATABASE_URL, { logger });
 
-logger.info(
-  { sourceCount: config.sources.length },
-  'worker started (no queues registered yet — S0 stub)',
+const { db, close: closeDb } = createDbClient(config.env.DATABASE_URL);
+const connection = createRedisConnection(config.env.REDIS_URL);
+
+const scrapeQueue = new Queue(SCRAPE_QUEUE, { connection });
+const enrichmentQueue = new Queue(ENRICHMENT_QUEUE, { connection });
+
+const handleScrape = createScrapeHandler({ db, enrichmentQueue, logger });
+
+// Single scrape Worker, concurrency 1: serializes all scrape jobs, which
+// satisfies "same source must not overlap itself" (PRD §10). Cross-source
+// parallelism is sacrificed — fine for 2 low-volume cron sources. Upgrade to
+// per-source queues if source count/frequency grows.
+const scrapeWorker = new Worker<ScrapePayload>(
+  SCRAPE_QUEUE,
+  async (job) => handleScrape(job.data),
+  { connection, concurrency: 1 },
 );
 
-const heartbeat = setInterval(() => {
-  logger.debug('worker heartbeat');
-}, 60_000);
-heartbeat.unref();
+scrapeWorker.on('failed', (job, err) => {
+  // S1b: log only. S3 wires the errors-table write + n8n error webhook here.
+  logger.error({ jobId: job?.id, source: job?.data?.sourceName, err }, 'scrape job failed');
+});
 
-function shutdown(signal: string): void {
+await registerScrapeJobs(scrapeQueue, config.sources, config.app.retries.scrape);
+logger.info(
+  { enabledSources: config.sources.filter((s) => s.enabled).length },
+  'scrape queue registered, worker running',
+);
+
+async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'shutting down');
-  clearInterval(heartbeat);
+  await scrapeWorker.close();
+  await scrapeQueue.close();
+  await enrichmentQueue.close();
+  connection.disconnect();
+  await closeDb();
   process.exit(0);
 }
 
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));

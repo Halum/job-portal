@@ -13,6 +13,7 @@ export default defineConfig({
       // land (scrapers, llm, worker queues), widen this include list.
       include: [
         'apps/api/src/**/*.ts',
+        'apps/worker/src/**/*.ts',
         'packages/config/src/**/*.ts',
         'packages/db/src/**/*.ts',
         'packages/scrapers/src/**/*.ts',

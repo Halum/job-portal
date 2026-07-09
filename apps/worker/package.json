@@ -13,11 +13,17 @@
   "dependencies": {
     "@job-portal/config": "workspace:*",
     "@job-portal/db": "workspace:*",
-    "@job-portal/shared": "workspace:*"
+    "@job-portal/scrapers": "workspace:*",
+    "@job-portal/shared": "workspace:*",
+    "bullmq": "^5.34.0",
+    "ioredis": "^5.4.2"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "^10.16.0",
+    "@testcontainers/redis": "^10.16.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "undici": "^7.2.0"
   },
   "files": [
     "dist"

@@ -8,6 +8,7 @@
   "references": [
     { "path": "../../packages/config" },
     { "path": "../../packages/db" },
+    { "path": "../../packages/scrapers" },
     { "path": "../../packages/shared" }
   ]
 }

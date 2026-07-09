@@ -7,6 +7,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { runMigrationsWithLock } from '../src/migrate.js';
 import { createDbClient } from '../src/client.js';
+import { insertNewJobs } from '../src/repositories/jobs.js';
 import * as schema from '../src/schema/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -84,6 +85,32 @@ describe.skipIf(!dockerAvailable)('db migrations + constraints (Testcontainers)'
     ).rejects.toThrow();
 
     await sql.end();
+  });
+
+  it('insertNewJobs inserts, dedupes on (source, external_id), returns only new ids', async () => {
+    const client = createDbClient(container.getConnectionUri());
+    const row = (externalId: string) => ({
+      source: 'repo-test',
+      externalId,
+      title: `Job ${externalId}`,
+      company: null,
+      location: null,
+      applyUrl: `https://e/${externalId}`,
+      postedAt: null,
+      raw: {},
+    });
+
+    const first = await insertNewJobs(client.db, [row('r1'), row('r2')]);
+    expect(first).toHaveLength(2);
+
+    // Re-insert the same two plus one new → only the new one comes back.
+    const second = await insertNewJobs(client.db, [row('r1'), row('r2'), row('r3')]);
+    expect(second).toHaveLength(1);
+
+    // Empty input short-circuits without a query.
+    expect(await insertNewJobs(client.db, [])).toEqual([]);
+
+    await client.close();
   });
 
   it('enforces only one active prompt per (source, role)', async () => {
