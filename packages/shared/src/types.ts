@@ -1,8 +1,10 @@
 /** Job lifecycle status, mirrors the `jobs.status` enum in packages/db. */
 export type JobStatus = 'unenriched' | 'matched' | 'filtered_out' | 'enrichment_failed';
 
-/** Prompt role, mirrors the `prompts.role` enum in packages/db. */
-export type PromptRole = 'filter' | 'summary';
+/** Prompt role, mirrors the `prompts.role` enum in packages/db. Single source
+ * of truth — API zod validation derives from this tuple. */
+export const PROMPT_ROLES = ['filter', 'summary'] as const;
+export type PromptRole = (typeof PROMPT_ROLES)[number];
 
 /** Failure stage, mirrors the `errors.stage` enum in packages/db. */
 export type ErrorStage = 'scrape' | 'enrichment' | 'webhook';

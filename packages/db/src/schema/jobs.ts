@@ -42,9 +42,6 @@ export const jobs = pgTable(
     // { filter: { should_notify, reason }, summary: { summary_en, key_points } }
     enrichmentJson: jsonb('enrichment_json'),
 
-    // { filter: <version>, summary: <version> } — which prompt versions produced enrichmentJson.
-    promptVersions: jsonb('prompt_versions'),
-
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),

@@ -1,3 +1,14 @@
+import { PROMPT_ROLES, SOURCE_TYPES } from '@job-portal/shared';
+
+const badRequest = {
+  description: 'Invalid or missing parameters',
+  content: { 'application/json': { example: { error: 'Invalid query' } } },
+};
+const unauthorized = {
+  description: 'Missing or invalid bearer token',
+  content: { 'application/json': { example: { error: 'Unauthorized' } } },
+};
+
 /** Hand-authored OpenAPI 3 spec for the currently-implemented endpoints.
  * Grows alongside the API surface in later sprints. */
 export const openapiSpec = {
@@ -6,6 +17,19 @@ export const openapiSpec = {
   components: {
     securitySchemes: {
       bearerAuth: { type: 'http', scheme: 'bearer' },
+    },
+    schemas: {
+      Prompt: {
+        type: 'object',
+        properties: {
+          id: { type: 'integer' },
+          source: { type: 'string', enum: SOURCE_TYPES },
+          role: { type: 'string', enum: PROMPT_ROLES },
+          template: { type: 'string' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
     },
   },
   paths: {
@@ -41,10 +65,68 @@ export const openapiSpec = {
             description: 'Authenticated',
             content: { 'application/json': { example: { pong: true } } },
           },
-          '401': {
-            description: 'Missing or invalid bearer token',
-            content: { 'application/json': { example: { error: 'Unauthorized' } } },
+          '401': unauthorized,
+        },
+      },
+    },
+    '/api/prompts': {
+      get: {
+        summary: 'Get the prompt for a source + role (admin)',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'source',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', enum: SOURCE_TYPES },
           },
+          {
+            name: 'role',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', enum: PROMPT_ROLES },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'The prompt for this source + role',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/Prompt' } },
+            },
+          },
+          '400': badRequest,
+          '401': unauthorized,
+          '404': { description: 'No prompt for this source + role' },
+        },
+      },
+      post: {
+        summary: 'Create or overwrite the prompt for a source + role (admin)',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['source', 'role', 'template'],
+                properties: {
+                  source: { type: 'string', enum: SOURCE_TYPES },
+                  role: { type: 'string', enum: PROMPT_ROLES },
+                  template: { type: 'string', minLength: 1 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The upserted prompt',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/Prompt' } },
+            },
+          },
+          '400': badRequest,
+          '401': unauthorized,
         },
       },
     },

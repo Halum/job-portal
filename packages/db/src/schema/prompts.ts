@@ -1,18 +1,6 @@
-import { sql } from 'drizzle-orm';
-import {
-  boolean,
-  integer,
-  pgEnum,
-  pgTable,
-  serial,
-  text,
-  timestamp,
-  uniqueIndex,
-} from 'drizzle-orm/pg-core';
+import { pgEnum, pgTable, serial, text, timestamp, unique } from 'drizzle-orm/pg-core';
 
 export const promptRoleEnum = pgEnum('prompt_role', ['filter', 'summary']);
-
-const isActiveTrue = sql`is_active = true`;
 
 export const prompts = pgTable(
   'prompts',
@@ -23,10 +11,7 @@ export const prompts = pgTable(
     source: text('source'),
     role: promptRoleEnum('role').notNull(),
 
-    // Auto-incremented per (source, role) by the admin API's insert transaction.
-    version: integer('version').notNull(),
     template: text('template').notNull(),
-    isActive: boolean('is_active').notNull().default(false),
 
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
@@ -35,15 +20,6 @@ export const prompts = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => [
-    uniqueIndex('prompts_source_role_version_unique').on(
-      table.source,
-      table.role,
-      table.version,
-    ),
-    // Enforces "only one active per (source, role)" at the DB level.
-    uniqueIndex('prompts_one_active_per_source_role_idx')
-      .on(table.source, table.role)
-      .where(isActiveTrue),
-  ],
+  // Destructive prompts: exactly one row per (source, role); edits overwrite.
+  (table) => [unique('prompts_source_role_unique').on(table.source, table.role)],
 );

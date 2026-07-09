@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createLogger } from '@job-portal/shared';
+import type { Database } from '@job-portal/db';
 import { createApp } from '../src/app.js';
+import { openapiSpec } from '../src/openapi.js';
 
 const logger = createLogger({ level: 'silent' });
 const bearerToken = 'test-token';
@@ -11,6 +13,8 @@ function buildApp(overrides: { dbOk?: boolean; redisOk?: boolean } = {}) {
   return createApp({
     bearerToken,
     logger,
+    // These tests never hit /api/prompts, so a stub db is fine.
+    db: {} as Database,
     health: {
       checkDb: async () => {
         if (!dbOk) throw new Error('db down');
@@ -103,6 +107,43 @@ describe('GET /docs (Swagger UI, no auth)', () => {
     // swagger-ui-express redirects /docs -> /docs/ then serves the HTML.
     const res = await request(app).get('/docs/');
     expect(res.status).toBe(200);
+  });
+
+  it('spec documents /api/prompts', () => {
+    expect(openapiSpec.paths).toHaveProperty('/api/prompts');
+  });
+});
+
+describe('/api/prompts auth + validation (no db needed)', () => {
+  const auth = { Authorization: `Bearer ${bearerToken}` };
+
+  it('GET requires auth', async () => {
+    const res = await request(buildApp()).get('/api/prompts?source=feki&role=filter');
+    expect(res.status).toBe(401);
+  });
+
+  it('GET 400 on missing/invalid params', async () => {
+    const res = await request(buildApp()).get('/api/prompts?source=feki').set(auth);
+    expect(res.status).toBe(400);
+    const res2 = await request(buildApp())
+      .get('/api/prompts?source=nope&role=filter')
+      .set(auth);
+    expect(res2.status).toBe(400);
+  });
+
+  it('POST requires auth', async () => {
+    const res = await request(buildApp())
+      .post('/api/prompts')
+      .send({ source: 'feki', role: 'filter', template: 'x' });
+    expect(res.status).toBe(401);
+  });
+
+  it('POST 400 on invalid body', async () => {
+    const res = await request(buildApp())
+      .post('/api/prompts')
+      .set(auth)
+      .send({ source: 'feki', role: 'bogus', template: '' });
+    expect(res.status).toBe(400);
   });
 });
 

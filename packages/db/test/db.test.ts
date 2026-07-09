@@ -3,11 +3,13 @@ import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import postgres from 'postgres';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { runMigrationsWithLock } from '../src/migrate.js';
 import { createDbClient } from '../src/client.js';
 import { insertNewJobs } from '../src/repositories/jobs.js';
+import { getPrompt, upsertPrompt } from '../src/repositories/prompts.js';
 import * as schema from '../src/schema/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -113,38 +115,33 @@ describe.skipIf(!dockerAvailable)('db migrations + constraints (Testcontainers)'
     await client.close();
   });
 
-  it('enforces only one active prompt per (source, role)', async () => {
-    const sql = postgres(container.getConnectionUri(), { max: 1 });
-    const db = drizzle(sql, { schema });
+  it('upsertPrompt inserts, then overwrites in place (one row per source+role)', async () => {
+    const client = createDbClient(container.getConnectionUri());
+    const db = client.db;
 
-    await db.insert(schema.prompts).values({
-      source: 'feki',
-      role: 'filter',
-      version: 1,
-      template: 'v1 template',
-      isActive: true,
-    });
+    const created = await upsertPrompt(db, { source: 'feki', role: 'summary', template: 't1' });
+    expect(created.template).toBe('t1');
+    expect(await getPrompt(db, 'feki', 'summary')).toMatchObject({ template: 't1' });
 
-    await expect(
-      db.insert(schema.prompts).values({
-        source: 'feki',
-        role: 'filter',
-        version: 2,
-        template: 'v2 template',
-        isActive: true,
-      }),
-    ).rejects.toThrow();
+    // Upsert again for the same (source, role): overwrites template, bumps
+    // updated_at, keeps the same id — still exactly one row.
+    const updated = await upsertPrompt(db, { source: 'feki', role: 'summary', template: 't2' });
+    expect(updated.template).toBe('t2');
+    expect(updated.id).toBe(created.id);
+    expect(updated.updatedAt.getTime()).toBeGreaterThanOrEqual(created.updatedAt.getTime());
 
-    // A second inactive version for the same source+role is fine.
-    await db.insert(schema.prompts).values({
-      source: 'feki',
-      role: 'filter',
-      version: 2,
-      template: 'v2 template',
-      isActive: false,
-    });
+    const all = await db
+      .select()
+      .from(schema.prompts)
+      .where(and(eq(schema.prompts.source, 'feki'), eq(schema.prompts.role, 'summary')));
+    expect(all).toHaveLength(1);
 
-    await sql.end();
+    // Different (source, role) is independent; absent one returns null.
+    await upsertPrompt(db, { source: 'arbeitsagentur', role: 'filter', template: 'f1' });
+    expect(await getPrompt(db, 'arbeitsagentur', 'filter')).toMatchObject({ template: 'f1' });
+    expect(await getPrompt(db, 'arbeitsagentur', 'summary')).toBeNull();
+
+    await client.close();
   });
 
   it('createDbClient connects, queries, and closes cleanly', async () => {

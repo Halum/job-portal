@@ -18,7 +18,7 @@ try {
   process.exit(1);
 }
 
-const { sql, close: closeDb } = createDbClient(config.env.DATABASE_URL);
+const { db, sql, close: closeDb } = createDbClient(config.env.DATABASE_URL);
 const redis = new Redis(config.env.REDIS_URL, {
   lazyConnect: true,
   maxRetriesPerRequest: 1,
@@ -27,6 +27,7 @@ const redis = new Redis(config.env.REDIS_URL, {
 const app = createApp({
   bearerToken: config.env.API_BEARER_TOKEN,
   logger,
+  db,
   health: {
     checkDb: async () => {
       await sql`select 1`;
