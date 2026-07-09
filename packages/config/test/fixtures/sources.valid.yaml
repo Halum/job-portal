@@ -1,0 +1,6 @@
+sources:
+  - name: arbeitsagentur-bamberg
+    source_type: arbeitsagentur
+    url: "https://www.arbeitsagentur.de/jobsuche/suche?wo=Bamberg&umkreis=25"
+    cron: "0 */6 * * *"
+    enabled: true

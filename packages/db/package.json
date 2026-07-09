@@ -1,0 +1,32 @@
+{
+  "name": "@job-portal/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "typecheck": "tsc -b tsconfig.json",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/run-migrate.ts"
+  },
+  "dependencies": {
+    "@job-portal/shared": "workspace:*",
+    "drizzle-orm": "^0.38.2",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^10.16.0",
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "files": [
+    "dist",
+    "drizzle"
+  ]
+}

@@ -1,0 +1,6 @@
+sources:
+  - name: bad-source
+    source_type: monster
+    url: "not-a-url"
+    cron: "not a cron"
+    enabled: "yes"
