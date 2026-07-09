@@ -7,8 +7,10 @@ export type PromptRole = 'filter' | 'summary';
 /** Failure stage, mirrors the `errors.stage` enum in packages/db. */
 export type ErrorStage = 'scrape' | 'enrichment' | 'webhook';
 
-/** Source types supported by the scraper adapters (PRD §9). */
-export type SourceType = 'arbeitsagentur' | 'feki';
+/** Source types supported by the scraper adapters (PRD §9). Single source of
+ * truth — the config zod enum and the scrapers package both derive from this. */
+export const SOURCE_TYPES = ['arbeitsagentur', 'feki'] as const;
+export type SourceType = (typeof SOURCE_TYPES)[number];
 
 export interface FilterPassOutput {
   should_notify: boolean;

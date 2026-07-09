@@ -16,7 +16,9 @@
     "build": "tsc -b tsconfig.json",
     "clean": "tsc -b tsconfig.json --clean",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "smoke:arbeitsagentur": "pnpm --filter @job-portal/scrapers smoke:arbeitsagentur",
+    "smoke:feki": "pnpm --filter @job-portal/scrapers smoke:feki"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

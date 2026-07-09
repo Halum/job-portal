@@ -1,23 +1,17 @@
-/**
- * Adapter interface + per-source adapters (PRD §9). Deliberately a stub in
- * S0 (Foundations) — the Arbeitsagentur and feki adapters land in phases 4-5
- * of the phased build plan (PRD §18).
- */
+import type { JobAdapter, SourceType } from './types.js';
+import { arbeitsagenturAdapter } from './arbeitsagentur.js';
+import { fekiAdapter } from './feki.js';
 
-export type SourceType = 'arbeitsagentur' | 'feki';
+export * from './types.js';
+export { arbeitsagenturAdapter } from './arbeitsagentur.js';
+export { fekiAdapter } from './feki.js';
 
-export interface RawJob {
-  externalId: string;
-  title: string;
-  company?: string;
-  location?: string;
-  postedAt?: Date;
-  applyUrl: string;
-  description: string;
-  raw: unknown;
-}
-
-export interface JobAdapter {
-  sourceType: SourceType;
-  fetch(url: string): Promise<RawJob[]>;
+/** Resolve the adapter for a configured source_type (PRD §9 switch). */
+export function getAdapter(sourceType: SourceType): JobAdapter {
+  switch (sourceType) {
+    case 'arbeitsagentur':
+      return arbeitsagenturAdapter;
+    case 'feki':
+      return fekiAdapter;
+  }
 }

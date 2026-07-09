@@ -10,10 +10,17 @@
   },
   "scripts": {
     "build": "tsc -b tsconfig.json",
-    "typecheck": "tsc -b tsconfig.json"
+    "typecheck": "tsc -b tsconfig.json",
+    "smoke:arbeitsagentur": "tsx src/smoke.ts arbeitsagentur",
+    "smoke:feki": "tsx src/smoke.ts feki"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@job-portal/shared": "workspace:*",
+    "cheerio": "^1.0.0",
+    "undici": "^7.2.0"
+  },
   "devDependencies": {
+    "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   },
   "files": [

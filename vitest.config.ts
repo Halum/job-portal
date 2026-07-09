@@ -15,6 +15,7 @@ export default defineConfig({
         'apps/api/src/**/*.ts',
         'packages/config/src/**/*.ts',
         'packages/db/src/**/*.ts',
+        'packages/scrapers/src/**/*.ts',
         'packages/shared/src/**/*.ts',
       ],
       all: true,
@@ -30,6 +31,9 @@ export default defineConfig({
         'packages/db/src/run-migrate.ts',
         // Type/interface declarations only, no executable logic.
         'packages/shared/src/types.ts',
+        'packages/scrapers/src/types.ts',
+        // Live network smoke script — never run in CI/tests by design.
+        'packages/scrapers/src/smoke.ts',
       ],
       thresholds: {
         lines: 80,

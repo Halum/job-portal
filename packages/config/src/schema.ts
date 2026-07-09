@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SOURCE_TYPES } from '@job-portal/shared';
 
 /** A single 5-field cron expression, e.g. "0 star-slash-6 * * *". Loose check
  * — full validity (day ranges etc.) is BullMQ/cron-parser's job at
@@ -9,7 +10,7 @@ const cronSchema = z
     message: 'cron must be a 5-field cron expression',
   });
 
-export const sourceTypeSchema = z.enum(['arbeitsagentur', 'feki']);
+export const sourceTypeSchema = z.enum(SOURCE_TYPES);
 
 export const sourceEntrySchema = z.object({
   name: z.string().min(1),
