@@ -1,9 +1,11 @@
 import { Queue, Worker } from 'bullmq';
 import { loadConfigOrExit } from '@job-portal/config';
-import { createDbClient, runMigrationsWithLock } from '@job-portal/db';
+import { createDbClient, markEnrichmentFailed, runMigrationsWithLock } from '@job-portal/db';
+import { createLlmClient } from '@job-portal/llm';
 import { createLogger } from '@job-portal/shared';
 import { ENRICHMENT_QUEUE, SCRAPE_QUEUE, createRedisConnection } from './queues.js';
 import { createScrapeHandler, registerScrapeJobs, type ScrapePayload } from './scrape.js';
+import { createEnrichmentHandler, type EnrichmentPayload } from './enrich.js';
 
 const config = loadConfigOrExit();
 const logger = createLogger({ level: config.env.LOG_LEVEL, name: 'worker' });
@@ -15,9 +17,21 @@ const { db, close: closeDb } = createDbClient(config.env.DATABASE_URL);
 const connection = createRedisConnection(config.env.REDIS_URL);
 
 const scrapeQueue = new Queue(SCRAPE_QUEUE, { connection });
-const enrichmentQueue = new Queue(ENRICHMENT_QUEUE, { connection });
+// Retry policy attached here so it applies to every enrichment job, however
+// enqueued (scrape today, the S3 reenrich endpoint later).
+const enrichmentQueue = new Queue(ENRICHMENT_QUEUE, {
+  connection,
+  defaultJobOptions: {
+    attempts: config.app.retries.enrichment.attempts,
+    backoff: { type: 'exponential', delay: config.app.retries.enrichment.backoff_ms },
+    removeOnComplete: 100,
+    removeOnFail: 500,
+  },
+});
 
 const handleScrape = createScrapeHandler({ db, enrichmentQueue, logger });
+const llm = createLlmClient({ apiKey: config.env.OPENROUTER_API_KEY });
+const handleEnrichment = createEnrichmentHandler({ db, llm, config, logger });
 
 // Single scrape Worker, concurrency 1: serializes all scrape jobs, which
 // satisfies "same source must not overlap itself" (PRD §10). Cross-source
@@ -34,6 +48,31 @@ scrapeWorker.on('failed', (job, err) => {
   logger.error({ jobId: job?.id, source: job?.data?.sourceName, err }, 'scrape job failed');
 });
 
+// Enrichment worker: concurrency + Redis-backed rate limiter per PRD §11
+// (protects the OpenRouter budget/rate limits shared across all sources).
+const enrichmentWorker = new Worker<EnrichmentPayload>(
+  ENRICHMENT_QUEUE,
+  async (job) => handleEnrichment(job.data),
+  {
+    connection,
+    concurrency: config.app.llm.global_concurrency,
+    limiter: {
+      max: config.app.llm.rate_limit.max_per_window,
+      duration: config.app.llm.rate_limit.window_ms,
+    },
+  },
+);
+
+enrichmentWorker.on('failed', (job, err) => {
+  if (job && job.attemptsMade >= config.app.retries.enrichment.attempts) {
+    // S3: also write an errors-table row + fire the n8n error webhook here.
+    markEnrichmentFailed(db, job.data.jobId).catch((markErr: unknown) => {
+      logger.error({ jobId: job.id, err: markErr }, 'failed to mark enrichment_failed');
+    });
+  }
+  logger.error({ jobId: job?.id, err }, 'enrichment job failed');
+});
+
 await registerScrapeJobs(scrapeQueue, config.sources, config.app.retries.scrape);
 logger.info(
   { enabledSources: config.sources.filter((s) => s.enabled).length },
@@ -43,6 +82,7 @@ logger.info(
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'shutting down');
   await scrapeWorker.close();
+  await enrichmentWorker.close();
   await scrapeQueue.close();
   await enrichmentQueue.close();
   connection.disconnect();

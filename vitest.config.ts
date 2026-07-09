@@ -16,6 +16,7 @@ export default defineConfig({
         'apps/worker/src/**/*.ts',
         'packages/config/src/**/*.ts',
         'packages/db/src/**/*.ts',
+        'packages/llm/src/**/*.ts',
         'packages/scrapers/src/**/*.ts',
         'packages/shared/src/**/*.ts',
       ],

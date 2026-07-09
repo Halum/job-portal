@@ -13,6 +13,7 @@
   "dependencies": {
     "@job-portal/config": "workspace:*",
     "@job-portal/db": "workspace:*",
+    "@job-portal/llm": "workspace:*",
     "@job-portal/scrapers": "workspace:*",
     "@job-portal/shared": "workspace:*",
     "bullmq": "^5.34.0",

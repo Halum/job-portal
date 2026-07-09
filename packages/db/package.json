@@ -15,6 +15,7 @@
     "db:migrate": "tsx src/run-migrate.ts"
   },
   "dependencies": {
+    "@job-portal/llm": "workspace:*",
     "@job-portal/shared": "workspace:*",
     "drizzle-orm": "^0.38.2",
     "postgres": "^3.4.5"

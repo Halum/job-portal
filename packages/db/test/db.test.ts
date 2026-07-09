@@ -8,7 +8,13 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { runMigrationsWithLock } from '../src/migrate.js';
 import { createDbClient } from '../src/client.js';
-import { insertNewJobs } from '../src/repositories/jobs.js';
+import {
+  getJobById,
+  insertNewJobs,
+  markEnrichmentFailed,
+  markFilteredOut,
+  markMatched,
+} from '../src/repositories/jobs.js';
 import { getPrompt, upsertPrompt } from '../src/repositories/prompts.js';
 import * as schema from '../src/schema/index.js';
 
@@ -140,6 +146,73 @@ describe.skipIf(!dockerAvailable)('db migrations + constraints (Testcontainers)'
     await upsertPrompt(db, { source: 'arbeitsagentur', role: 'filter', template: 'f1' });
     expect(await getPrompt(db, 'arbeitsagentur', 'filter')).toMatchObject({ template: 'f1' });
     expect(await getPrompt(db, 'arbeitsagentur', 'summary')).toBeNull();
+
+    await client.close();
+  });
+
+  it('getJobById returns the row or null', async () => {
+    const client = createDbClient(container.getConnectionUri());
+    const [id] = await insertNewJobs(client.db, [
+      {
+        source: 'repo-test',
+        externalId: 'gjb-1',
+        title: 'Job GJB',
+        company: null,
+        location: null,
+        applyUrl: 'https://e/gjb-1',
+        postedAt: null,
+        raw: {},
+      },
+    ]);
+
+    expect(await getJobById(client.db, id!)).toMatchObject({ id, title: 'Job GJB' });
+    expect(await getJobById(client.db, -1)).toBeNull();
+
+    await client.close();
+  });
+
+  it('markFilteredOut / markMatched / markEnrichmentFailed update status + enrichment_json', async () => {
+    const client = createDbClient(container.getConnectionUri());
+    const db = client.db;
+    const row = (externalId: string) => ({
+      source: 'repo-test',
+      externalId,
+      title: `Job ${externalId}`,
+      company: null,
+      location: null,
+      applyUrl: `https://e/${externalId}`,
+      postedAt: null,
+      raw: {},
+    });
+
+    const [filteredId, matchedId, failedId] = await insertNewJobs(db, [
+      row('mf-1'),
+      row('mf-2'),
+      row('mf-3'),
+    ]);
+
+    const filterOutput = { should_notify: false, reason: 'not relevant' };
+    await markFilteredOut(db, filteredId!, filterOutput);
+    const filtered = await getJobById(db, filteredId!);
+    expect(filtered?.status).toBe('filtered_out');
+    expect(filtered?.enrichmentJson).toEqual({ filter: filterOutput });
+    expect(filtered?.enrichedAt).not.toBeNull();
+
+    const matchedFilterOutput = { should_notify: true, reason: 'relevant' };
+    const summaryOutput = { summary_en: 'summary', key_points: ['a'] };
+    await markMatched(db, matchedId!, matchedFilterOutput, summaryOutput);
+    const matched = await getJobById(db, matchedId!);
+    expect(matched?.status).toBe('matched');
+    expect(matched?.enrichmentJson).toEqual({
+      filter: matchedFilterOutput,
+      summary: summaryOutput,
+    });
+    expect(matched?.enrichedAt).not.toBeNull();
+
+    await markEnrichmentFailed(db, failedId!);
+    const failed = await getJobById(db, failedId!);
+    expect(failed?.status).toBe('enrichment_failed');
+    expect(failed?.enrichedAt).toBeNull();
 
     await client.close();
   });
