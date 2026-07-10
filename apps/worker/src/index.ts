@@ -2,10 +2,15 @@ import { Queue, Worker } from 'bullmq';
 import { loadConfigOrExit } from '@job-portal/config';
 import { createDbClient, markEnrichmentFailed, runMigrationsWithLock } from '@job-portal/db';
 import { createLlmClient } from '@job-portal/llm';
-import { createLogger } from '@job-portal/shared';
-import { ENRICHMENT_QUEUE, SCRAPE_QUEUE, createRedisConnection } from './queues.js';
+import {
+  createLogger,
+  createRedisConnection,
+  ENRICHMENT_QUEUE,
+  SCRAPE_QUEUE,
+} from '@job-portal/shared';
 import { createScrapeHandler, registerScrapeJobs, type ScrapePayload } from './scrape.js';
 import { createEnrichmentHandler, type EnrichmentPayload } from './enrich.js';
+import { createErrorNotifier } from './notify.js';
 
 const config = loadConfigOrExit();
 const logger = createLogger({ level: config.env.LOG_LEVEL, name: 'worker' });
@@ -32,6 +37,7 @@ const enrichmentQueue = new Queue(ENRICHMENT_QUEUE, {
 const handleScrape = createScrapeHandler({ db, enrichmentQueue, logger });
 const llm = createLlmClient({ apiKey: config.env.OPENROUTER_API_KEY });
 const handleEnrichment = createEnrichmentHandler({ db, llm, config, logger });
+const notify = createErrorNotifier({ db, config, logger });
 
 // Single scrape Worker, concurrency 1: serializes all scrape jobs, which
 // satisfies "same source must not overlap itself" (PRD §10). Cross-source
@@ -44,8 +50,16 @@ const scrapeWorker = new Worker<ScrapePayload>(
 );
 
 scrapeWorker.on('failed', (job, err) => {
-  // S1b: log only. S3 wires the errors-table write + n8n error webhook here.
   logger.error({ jobId: job?.id, source: job?.data?.sourceName, err }, 'scrape job failed');
+  if (job && job.attemptsMade >= config.app.retries.scrape.attempts) {
+    void notify({
+      event: 'scraper.failed',
+      source: job.data.sourceName,
+      stage: 'scrape',
+      attempts: job.attemptsMade,
+      error: err.message,
+    });
+  }
 });
 
 // Enrichment worker: concurrency + Redis-backed rate limiter per PRD §11
@@ -64,13 +78,20 @@ const enrichmentWorker = new Worker<EnrichmentPayload>(
 );
 
 enrichmentWorker.on('failed', (job, err) => {
+  logger.error({ jobId: job?.id, err }, 'enrichment job failed');
   if (job && job.attemptsMade >= config.app.retries.enrichment.attempts) {
-    // S3: also write an errors-table row + fire the n8n error webhook here.
     markEnrichmentFailed(db, job.data.jobId).catch((markErr: unknown) => {
       logger.error({ jobId: job.id, err: markErr }, 'failed to mark enrichment_failed');
     });
+    void notify({
+      event: 'enrichment.failed',
+      source: null,
+      jobId: job.data.jobId,
+      stage: 'enrichment',
+      attempts: job.attemptsMade,
+      error: err.message,
+    });
   }
-  logger.error({ jobId: job?.id, err }, 'enrichment job failed');
 });
 
 await registerScrapeJobs(scrapeQueue, config.sources, config.app.retries.scrape);

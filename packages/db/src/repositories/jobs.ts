@@ -1,10 +1,43 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, lt, sql } from 'drizzle-orm';
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
+import type { JobStatus } from '@job-portal/shared';
 import type { Database } from '../client.js';
 import { jobs } from '../schema/jobs.js';
 import type { FilterPassOutput, SummaryPassOutput } from '@job-portal/llm';
 
 export type Job = InferSelectModel<typeof jobs>;
+
+export interface ListJobsWindow {
+  status: JobStatus;
+  source?: string;
+  from: Date;
+  to: Date;
+  limit: number;
+  offset: number;
+}
+
+/**
+ * Window pagination over enriched jobs (PRD §12). Filters
+ * `enriched_at >= from AND enriched_at < to AND status = <status>
+ * [AND source = <source>]`, ordered `enriched_at ASC, id ASC` — the stable
+ * sort is what makes offset pagination deterministic within a fixed window.
+ */
+export async function listJobsWindow(db: Database, w: ListJobsWindow): Promise<Job[]> {
+  const conditions = [
+    eq(jobs.status, w.status),
+    gte(jobs.enrichedAt, w.from),
+    lt(jobs.enrichedAt, w.to),
+  ];
+  if (w.source !== undefined) conditions.push(eq(jobs.source, w.source));
+
+  return db
+    .select()
+    .from(jobs)
+    .where(and(...conditions))
+    .orderBy(asc(jobs.enrichedAt), asc(jobs.id))
+    .limit(w.limit)
+    .offset(w.offset);
+}
 
 /** Columns the scrape pipeline sets on insert; the rest default (status,
  * timestamps) or stay null (enrichment_json, prompt_versions, enriched_at). */
@@ -27,6 +60,34 @@ export async function insertNewJobs(db: Database, rows: NewJobRow[]): Promise<nu
     .onConflictDoNothing({ target: [jobs.source, jobs.externalId] })
     .returning({ id: jobs.id });
   return inserted.map((r) => r.id);
+}
+
+export interface SelectJobIdsFilter {
+  source?: string;
+  status?: JobStatus;
+  from?: Date;
+  to?: Date;
+}
+
+/**
+ * Selects job ids for the reenrich admin endpoint (PRD §12). Filters by any
+ * provided subset; the time window is on `created_at` (when we first ingested
+ * the row) rather than `enriched_at`, so never-enriched jobs are reachable
+ * for a re-run. No safety cap — the caller asked, we return everything.
+ */
+export async function selectJobIds(db: Database, f: SelectJobIdsFilter): Promise<number[]> {
+  const conditions = [];
+  if (f.source !== undefined) conditions.push(eq(jobs.source, f.source));
+  if (f.status !== undefined) conditions.push(eq(jobs.status, f.status));
+  if (f.from !== undefined) conditions.push(gte(jobs.createdAt, f.from));
+  if (f.to !== undefined) conditions.push(lt(jobs.createdAt, f.to));
+
+  const rows = await db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(conditions.length ? and(...conditions) : undefined)
+    .orderBy(asc(jobs.id));
+  return rows.map((r) => r.id);
 }
 
 /** Fetches one job row by id, or null if it doesn't exist. */

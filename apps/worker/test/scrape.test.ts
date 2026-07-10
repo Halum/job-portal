@@ -160,15 +160,33 @@ describe.skipIf(!hasDocker)('scrape pipeline (Testcontainers pg + redis)', () =>
   it('insertNewJobs dedupes: returns only genuinely-new ids on repeat', async () => {
     const { insertNewJobs } = await import('@job-portal/db');
     const rows = [
-      mapRawJobToRow('dd', { externalId: 'd1', title: 'a', applyUrl: 'u', description: '', raw: {} }),
-      mapRawJobToRow('dd', { externalId: 'd2', title: 'b', applyUrl: 'u', description: '', raw: {} }),
+      mapRawJobToRow('dd', {
+        externalId: 'd1',
+        title: 'a',
+        applyUrl: 'u',
+        description: '',
+        raw: {},
+      }),
+      mapRawJobToRow('dd', {
+        externalId: 'd2',
+        title: 'b',
+        applyUrl: 'u',
+        description: '',
+        raw: {},
+      }),
     ];
     const first = await insertNewJobs(db, rows);
     expect(first).toHaveLength(2);
 
     const withNew = [
       ...rows,
-      mapRawJobToRow('dd', { externalId: 'd3', title: 'c', applyUrl: 'u', description: '', raw: {} }),
+      mapRawJobToRow('dd', {
+        externalId: 'd3',
+        title: 'c',
+        applyUrl: 'u',
+        description: '',
+        raw: {},
+      }),
     ];
     const second = await insertNewJobs(db, withNew);
     expect(second).toHaveLength(1); // only d3 is new
@@ -176,7 +194,8 @@ describe.skipIf(!hasDocker)('scrape pipeline (Testcontainers pg + redis)', () =>
 
   it('handler inserts new rows and enqueues enrichment once each; rerun enqueues none', async () => {
     const { Queue, Worker } = await import('bullmq');
-    const { createRedisConnection, SCRAPE_QUEUE, ENRICHMENT_QUEUE } = await import('../src/queues.js');
+    const { createRedisConnection, SCRAPE_QUEUE, ENRICHMENT_QUEUE } =
+      await import('@job-portal/shared');
     const { createLogger } = await import('@job-portal/shared');
     const connection = createRedisConnection(redis.getConnectionUrl());
 

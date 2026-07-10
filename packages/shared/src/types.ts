@@ -1,13 +1,17 @@
-/** Job lifecycle status, mirrors the `jobs.status` enum in packages/db. */
-export type JobStatus = 'unenriched' | 'matched' | 'filtered_out' | 'enrichment_failed';
+/** Job lifecycle status, mirrors the `jobs.status` enum in packages/db. Single
+ * source of truth — the API zod query validation derives from this tuple. */
+export const JOB_STATUSES = ['unenriched', 'matched', 'filtered_out', 'enrichment_failed'] as const;
+export type JobStatus = (typeof JOB_STATUSES)[number];
 
 /** Prompt role, mirrors the `prompts.role` enum in packages/db. Single source
  * of truth — API zod validation derives from this tuple. */
 export const PROMPT_ROLES = ['filter', 'summary'] as const;
 export type PromptRole = (typeof PROMPT_ROLES)[number];
 
-/** Failure stage, mirrors the `errors.stage` enum in packages/db. */
-export type ErrorStage = 'scrape' | 'enrichment' | 'webhook';
+/** Failure stage, mirrors the `errors.stage` enum in packages/db. Single
+ * source of truth — the API zod query validation derives from this tuple. */
+export const ERROR_STAGES = ['scrape', 'enrichment', 'webhook'] as const;
+export type ErrorStage = (typeof ERROR_STAGES)[number];
 
 /** Source types supported by the scraper adapters (PRD §9). Single source of
  * truth — the config zod enum and the scrapers package both derive from this. */

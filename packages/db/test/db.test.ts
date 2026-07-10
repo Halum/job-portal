@@ -11,11 +11,14 @@ import { createDbClient } from '../src/client.js';
 import {
   getJobById,
   insertNewJobs,
+  listJobsWindow,
   markEnrichmentFailed,
   markFilteredOut,
   markMatched,
+  selectJobIds,
 } from '../src/repositories/jobs.js';
 import { getPrompt, upsertPrompt } from '../src/repositories/prompts.js';
+import { insertError, listErrorsWindow, markWebhookDelivered } from '../src/repositories/errors.js';
 import * as schema from '../src/schema/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -213,6 +216,145 @@ describe.skipIf(!dockerAvailable)('db migrations + constraints (Testcontainers)'
     const failed = await getJobById(db, failedId!);
     expect(failed?.status).toBe('enrichment_failed');
     expect(failed?.enrichedAt).toBeNull();
+
+    await client.close();
+  });
+
+  it('listJobsWindow filters [from,to) + status + source, orders enriched_at ASC, id ASC', async () => {
+    const client = createDbClient(container.getConnectionUri());
+    const db = client.db;
+    const t1 = new Date('2026-08-01T00:00:00Z');
+    const t2 = new Date('2026-08-02T00:00:00Z');
+    const t3 = new Date('2026-08-03T00:00:00Z');
+    await db.insert(schema.jobs).values([
+      {
+        source: 'win',
+        externalId: 'w1',
+        title: 'W1',
+        applyUrl: 'u',
+        raw: {},
+        status: 'matched',
+        enrichedAt: t1,
+      },
+      {
+        source: 'win',
+        externalId: 'w2',
+        title: 'W2',
+        applyUrl: 'u',
+        raw: {},
+        status: 'matched',
+        enrichedAt: t2,
+      },
+      {
+        source: 'win',
+        externalId: 'w3',
+        title: 'W3',
+        applyUrl: 'u',
+        raw: {},
+        status: 'matched',
+        enrichedAt: t3,
+      },
+      {
+        source: 'other',
+        externalId: 'w4',
+        title: 'W4',
+        applyUrl: 'u',
+        raw: {},
+        status: 'matched',
+        enrichedAt: t2,
+      },
+      {
+        source: 'win',
+        externalId: 'w5',
+        title: 'W5',
+        applyUrl: 'u',
+        raw: {},
+        status: 'filtered_out',
+        enrichedAt: t2,
+      },
+    ]);
+
+    // from inclusive, to exclusive → only t2 (w2), scoped to source 'win'.
+    const win = await listJobsWindow(db, {
+      status: 'matched',
+      source: 'win',
+      from: t2,
+      to: t3,
+      limit: 100,
+      offset: 0,
+    });
+    expect(win.map((j) => j.externalId)).toEqual(['w2']);
+
+    // no source filter, wide window → all matched 'win'+'other' in order.
+    const all = await listJobsWindow(db, {
+      status: 'matched',
+      from: t1,
+      to: new Date('2026-08-04T00:00:00Z'),
+      limit: 2,
+      offset: 0,
+    });
+    expect(all).toHaveLength(2); // limit honored
+    expect(all[0]!.enrichedAt!.getTime()).toBeLessThanOrEqual(all[1]!.enrichedAt!.getTime());
+
+    await client.close();
+  });
+
+  it('selectJobIds filters by any subset, returns [] on no match', async () => {
+    const client = createDbClient(container.getConnectionUri());
+    const db = client.db;
+    await db.insert(schema.jobs).values([
+      {
+        source: 'sel',
+        externalId: 's1',
+        title: 'S1',
+        applyUrl: 'u',
+        raw: {},
+        status: 'unenriched',
+      },
+      { source: 'sel', externalId: 's2', title: 'S2', applyUrl: 'u', raw: {}, status: 'matched' },
+    ]);
+    const unenriched = await selectJobIds(db, { source: 'sel', status: 'unenriched' });
+    expect(unenriched).toHaveLength(1);
+    expect(await selectJobIds(db, { source: 'sel' })).toHaveLength(2);
+    expect(await selectJobIds(db, { source: 'nope' })).toEqual([]);
+
+    await client.close();
+  });
+
+  it('insertError writes a row, markWebhookDelivered flips the flag, listErrorsWindow paginates', async () => {
+    const client = createDbClient(container.getConnectionUri());
+    const db = client.db;
+    const id = await insertError(db, {
+      source: 'feki',
+      jobId: null,
+      stage: 'scrape',
+      attempts: 3,
+      errorMessage: 'boom',
+    });
+    expect(typeof id).toBe('number');
+
+    await markWebhookDelivered(db, id, true);
+
+    const scrapeErrors = await listErrorsWindow(db, {
+      stage: 'scrape',
+      from: new Date(0),
+      to: new Date('2999-01-01T00:00:00Z'),
+      limit: 100,
+      offset: 0,
+    });
+    const row = scrapeErrors.find((e) => e.id === id);
+    expect(row?.webhookDelivered).toBe(true);
+    expect(row?.errorMessage).toBe('boom');
+
+    // stage filter excludes other stages.
+    const enrichmentErrors = await listErrorsWindow(db, {
+      stage: 'enrichment',
+      from: new Date(0),
+      to: new Date('2999-01-01T00:00:00Z'),
+      limit: 100,
+      offset: 0,
+    });
+    expect(enrichmentErrors.some((e) => e.id === id)).toBe(false);
 
     await client.close();
   });

@@ -50,6 +50,9 @@ importers:
       '@job-portal/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      bullmq:
+        specifier: ^5.34.0
+        version: 5.79.3
       express:
         specifier: ^4.21.2
         version: 4.22.2
@@ -203,6 +206,9 @@ importers:
 
   packages/shared:
     dependencies:
+      ioredis:
+        specifier: 5.10.1
+        version: 5.10.1
       pino:
         specifier: ^9.6.0
         version: 9.14.0

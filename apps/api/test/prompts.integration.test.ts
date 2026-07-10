@@ -47,6 +47,8 @@ describe.skipIf(!hasDocker)('/api/prompts (Testcontainers pg)', () => {
       bearerToken,
       logger: createLogger({ level: 'silent' }),
       db: client.db as Database,
+      enrichmentQueue: { add: async () => undefined as never },
+      sources: [],
       health: { checkDb: async () => true, checkRedis: async () => true },
     });
   }, 180_000);

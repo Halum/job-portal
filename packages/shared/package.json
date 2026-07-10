@@ -13,6 +13,7 @@
     "typecheck": "tsc -b tsconfig.json"
   },
   "dependencies": {
+    "ioredis": "^5.4.2",
     "pino": "^9.6.0"
   },
   "devDependencies": {
