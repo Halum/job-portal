@@ -109,7 +109,7 @@ describe('GET /docs (Swagger UI, no auth)', () => {
     expect(res.status).toBe(200);
   });
 
-  it('spec documents all S3 endpoints', () => {
+  it('spec documents the pull + admin endpoints', () => {
     expect(openapiSpec.paths).toHaveProperty('/api/prompts');
     expect(openapiSpec.paths).toHaveProperty('/api/jobs');
     expect(openapiSpec.paths).toHaveProperty('/api/jobs/{id}');
@@ -122,7 +122,7 @@ describe('GET /docs (Swagger UI, no auth)', () => {
   });
 });
 
-describe('S3 endpoints auth (no db needed)', () => {
+describe('pull + admin endpoints auth (no db needed)', () => {
   it('GET /api/jobs requires auth', async () => {
     expect((await request(buildApp()).get('/api/jobs')).status).toBe(401);
   });

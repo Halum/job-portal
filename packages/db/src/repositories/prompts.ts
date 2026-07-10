@@ -27,7 +27,7 @@ export interface UpsertPromptInput {
 }
 
 /**
- * Destructive upsert (PRD S2a rework): INSERT ... ON CONFLICT (source, role)
+ * Destructive upsert: INSERT ... ON CONFLICT (source, role)
  * DO UPDATE SET template, updated_at. Exactly one row per (source, role) —
  * editing overwrites in place. Returns the resulting row.
  */

@@ -30,6 +30,7 @@ const config = {
 };
 
 const silentLogger: Logger = createLogger({ level: 'silent' });
+const notify = vi.fn();
 
 function makeJob(over: Partial<Job> = {}): Job {
   return {
@@ -78,7 +79,13 @@ describe('createEnrichmentHandler', () => {
   it('job not found: logs and returns without touching the llm', async () => {
     getJobById.mockResolvedValueOnce(null);
     const llm = makeLlm();
-    const handler = createEnrichmentHandler({ db: {} as never, llm, config, logger: silentLogger });
+    const handler = createEnrichmentHandler({
+      db: {} as never,
+      llm,
+      config,
+      logger: silentLogger,
+      notify,
+    });
 
     await handler({ jobId: 999 });
 
@@ -90,12 +97,26 @@ describe('createEnrichmentHandler', () => {
     getJobById.mockResolvedValueOnce(makeJob());
     getPrompt.mockResolvedValueOnce(null);
     const llm = makeLlm();
-    const handler = createEnrichmentHandler({ db: {} as never, llm, config, logger: silentLogger });
+    const handler = createEnrichmentHandler({
+      db: {} as never,
+      llm,
+      config,
+      logger: silentLogger,
+      notify,
+    });
 
     await handler({ jobId: 1 });
 
     expect(llm.filter).not.toHaveBeenCalled();
     expect(markEnrichmentFailed).toHaveBeenCalledWith({}, 1);
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'enrichment.failed',
+        source: 'feki',
+        jobId: 1,
+        stage: 'enrichment',
+      }),
+    );
   });
 
   it('should_notify false: marks filtered_out, never runs the summary pass', async () => {
@@ -103,7 +124,13 @@ describe('createEnrichmentHandler', () => {
     getPrompt.mockResolvedValueOnce(makePrompt('filter', 'Filter {{title}} at {{company}}'));
     const filterOutput = { should_notify: false, reason: 'not relevant' };
     const llm = makeLlm({ filter: vi.fn().mockResolvedValue(filterOutput) });
-    const handler = createEnrichmentHandler({ db: {} as never, llm, config, logger: silentLogger });
+    const handler = createEnrichmentHandler({
+      db: {} as never,
+      llm,
+      config,
+      logger: silentLogger,
+      notify,
+    });
 
     await handler({ jobId: 1 });
 
@@ -125,7 +152,13 @@ describe('createEnrichmentHandler', () => {
       filter: vi.fn().mockResolvedValue(filterOutput),
       summary: vi.fn().mockResolvedValue(summaryOutput),
     });
-    const handler = createEnrichmentHandler({ db: {} as never, llm, config, logger: silentLogger });
+    const handler = createEnrichmentHandler({
+      db: {} as never,
+      llm,
+      config,
+      logger: silentLogger,
+      notify,
+    });
 
     await handler({ jobId: 1 });
 
@@ -142,20 +175,41 @@ describe('createEnrichmentHandler', () => {
       .mockResolvedValueOnce(null);
     const filterOutput = { should_notify: true, reason: 'relevant' };
     const llm = makeLlm({ filter: vi.fn().mockResolvedValue(filterOutput) });
-    const handler = createEnrichmentHandler({ db: {} as never, llm, config, logger: silentLogger });
+    const handler = createEnrichmentHandler({
+      db: {} as never,
+      llm,
+      config,
+      logger: silentLogger,
+      notify,
+    });
 
     await handler({ jobId: 1 });
 
     expect(llm.summary).not.toHaveBeenCalled();
     expect(markEnrichmentFailed).toHaveBeenCalledWith({}, 1);
     expect(markMatched).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'enrichment.failed',
+        source: 'feki',
+        jobId: 1,
+        stage: 'enrichment',
+        error: 'no summary prompt for source feki',
+      }),
+    );
   });
 
   it('llm.filter throw propagates (BullMQ retries), no status mutation', async () => {
     getJobById.mockResolvedValueOnce(makeJob());
     getPrompt.mockResolvedValueOnce(makePrompt('filter', 'Filter {{title}}'));
     const llm = makeLlm({ filter: vi.fn().mockRejectedValue(new Error('rate limited')) });
-    const handler = createEnrichmentHandler({ db: {} as never, llm, config, logger: silentLogger });
+    const handler = createEnrichmentHandler({
+      db: {} as never,
+      llm,
+      config,
+      logger: silentLogger,
+      notify,
+    });
 
     await expect(handler({ jobId: 1 })).rejects.toThrow('rate limited');
     expect(markEnrichmentFailed).not.toHaveBeenCalled();

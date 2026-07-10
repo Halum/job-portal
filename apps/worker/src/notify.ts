@@ -17,6 +17,10 @@ export interface ErrorNotifierDeps {
   logger: Logger;
 }
 
+/** The best-effort notify function returned by `createErrorNotifier` (never
+ * throws — safe to call and await from any failure path). */
+export type ErrorNotifier = ReturnType<typeof createErrorNotifier>;
+
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**

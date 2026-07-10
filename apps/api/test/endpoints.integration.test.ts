@@ -24,7 +24,7 @@ function dockerAvailable(): boolean {
   }
 }
 const hasDocker = dockerAvailable();
-if (!hasDocker) console.warn('[s3.integration] Docker not available — skipping');
+if (!hasDocker) console.warn('[endpoints.integration] Docker not available — skipping');
 
 const T1 = new Date('2026-07-01T00:00:00Z');
 const T2 = new Date('2026-07-02T00:00:00Z');
@@ -34,7 +34,7 @@ const sources: SourceEntry[] = [
   { name: 'feki', source_type: 'feki', url: 'https://feki/x', cron: '0 * * * *', enabled: true },
 ];
 
-describe.skipIf(!hasDocker)('S3 API (Testcontainers pg)', () => {
+describe.skipIf(!hasDocker)('pull/admin API (Testcontainers pg)', () => {
   let pg: Awaited<ReturnType<typeof startPg>>;
   let close: () => Promise<void>;
   let db: Database;

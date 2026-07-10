@@ -11,6 +11,7 @@ import { renderTemplate } from '@job-portal/llm';
 import type { AppConfigFile } from '@job-portal/config';
 import type { Logger, SourceType } from '@job-portal/shared';
 import type { EnrichmentPayload } from './scrape.js';
+import type { ErrorNotifier } from './notify.js';
 
 export type { EnrichmentPayload } from './scrape.js';
 
@@ -19,18 +20,20 @@ export interface EnrichmentHandlerDeps {
   llm: LlmClient;
   config: { app: AppConfigFile };
   logger: Logger;
+  notify: ErrorNotifier;
 }
 
 /**
  * Enrichment job handler — two-pass LLM pipeline (PRD §11 steps 1–7).
- * Missing-prompt failures are terminal (return without throwing, so BullMQ
- * doesn't retry a condition retrying can't fix); LLM call failures propagate
- * so BullMQ retries per `retries.enrichment`.
+ * Missing-prompt failures are terminal (mark enrichment_failed + error-notify,
+ * then return without throwing, so BullMQ doesn't retry a condition retrying
+ * can't fix — PRD §11 step 2); LLM call failures propagate so BullMQ retries
+ * per `retries.enrichment`.
  */
 export function createEnrichmentHandler(deps: EnrichmentHandlerDeps) {
   return async function handleEnrichment(payload: EnrichmentPayload): Promise<void> {
     const start = Date.now();
-    const { db, llm, config, logger } = deps;
+    const { db, llm, config, logger, notify } = deps;
 
     // 1. Load the job.
     const job = await getJobById(db, payload.jobId);
@@ -46,12 +49,19 @@ export function createEnrichmentHandler(deps: EnrichmentHandlerDeps) {
     // 2. Load the filter prompt for this source.
     const filterPrompt = await getPrompt(db, source, 'filter');
     if (!filterPrompt) {
-      // S3: write an errors-table row + fire the n8n error webhook here.
       await markEnrichmentFailed(db, job.id);
       logger.error(
         { job_id: job.id, source: job.source },
         'enrichment: no filter prompt configured',
       );
+      await notify({
+        event: 'enrichment.failed',
+        source: job.source,
+        jobId: job.id,
+        stage: 'enrichment',
+        attempts: 1,
+        error: 'no filter prompt for source ' + job.source,
+      });
       return;
     }
 
@@ -94,12 +104,19 @@ export function createEnrichmentHandler(deps: EnrichmentHandlerDeps) {
     // 6. Match — run the summary pass.
     const summaryPrompt = await getPrompt(db, source, 'summary');
     if (!summaryPrompt) {
-      // S3: write an errors-table row + fire the n8n error webhook here.
       await markEnrichmentFailed(db, job.id);
       logger.error(
         { job_id: job.id, source: job.source },
         'enrichment: no summary prompt configured',
       );
+      await notify({
+        event: 'enrichment.failed',
+        source: job.source,
+        jobId: job.id,
+        stage: 'enrichment',
+        attempts: 1,
+        error: 'no summary prompt for source ' + job.source,
+      });
       return;
     }
     const summaryOutput = await llm.summary({

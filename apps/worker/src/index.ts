@@ -22,8 +22,8 @@ const { db, close: closeDb } = createDbClient(config.env.DATABASE_URL);
 const connection = createRedisConnection(config.env.REDIS_URL);
 
 const scrapeQueue = new Queue(SCRAPE_QUEUE, { connection });
-// Retry policy attached here so it applies to every enrichment job, however
-// enqueued (scrape today, the S3 reenrich endpoint later).
+// Retry policy attached here so it applies to every enrichment job, whether
+// enqueued by scrape or the reenrich endpoint.
 const enrichmentQueue = new Queue(ENRICHMENT_QUEUE, {
   connection,
   defaultJobOptions: {
@@ -36,8 +36,10 @@ const enrichmentQueue = new Queue(ENRICHMENT_QUEUE, {
 
 const handleScrape = createScrapeHandler({ db, enrichmentQueue, logger });
 const llm = createLlmClient({ apiKey: config.env.OPENROUTER_API_KEY });
-const handleEnrichment = createEnrichmentHandler({ db, llm, config, logger });
+// One notifier instance, shared by the enrichment handler (missing-prompt
+// terminal paths, PRD §11 step 2) and the worker `failed` handlers (PRD §13).
 const notify = createErrorNotifier({ db, config, logger });
+const handleEnrichment = createEnrichmentHandler({ db, llm, config, logger, notify });
 
 // Single scrape Worker, concurrency 1: serializes all scrape jobs, which
 // satisfies "same source must not overlap itself" (PRD §10). Cross-source

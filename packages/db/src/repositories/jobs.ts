@@ -40,7 +40,7 @@ export async function listJobsWindow(db: Database, w: ListJobsWindow): Promise<J
 }
 
 /** Columns the scrape pipeline sets on insert; the rest default (status,
- * timestamps) or stay null (enrichment_json, prompt_versions, enriched_at). */
+ * timestamps) or stay null (enrichment_json, enriched_at). */
 export type NewJobRow = Pick<
   InferInsertModel<typeof jobs>,
   'source' | 'externalId' | 'title' | 'company' | 'location' | 'applyUrl' | 'postedAt' | 'raw'
