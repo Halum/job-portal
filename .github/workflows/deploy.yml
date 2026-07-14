@@ -50,8 +50,10 @@ jobs:
       - name: Run migrations
         working-directory: ${{ env.APP_DIR }}
         run: |
+          # --prod=false: migrate needs tsx, a devDependency. Sourcing .env
+          # (NODE_ENV=production) before install would make pnpm skip it.
+          pnpm install --frozen-lockfile --prod=false
           set -a && . ./.env && set +a
-          pnpm install --frozen-lockfile
           pnpm --filter @job-portal/db db:migrate
 
       - name: Deploy with Docker Compose
