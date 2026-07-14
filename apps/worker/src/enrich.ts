@@ -8,8 +8,8 @@ import {
 } from '@job-portal/db';
 import type { LlmClient } from '@job-portal/llm';
 import { renderTemplate } from '@job-portal/llm';
-import type { AppConfigFile } from '@job-portal/config';
-import type { Logger, SourceType } from '@job-portal/shared';
+import type { AppConfigFile, SourceEntry } from '@job-portal/config';
+import type { Logger } from '@job-portal/shared';
 import type { EnrichmentPayload } from './scrape.js';
 import type { ErrorNotifier } from './notify.js';
 
@@ -18,7 +18,7 @@ export type { EnrichmentPayload } from './scrape.js';
 export interface EnrichmentHandlerDeps {
   db: Database;
   llm: LlmClient;
-  config: { app: AppConfigFile };
+  config: { app: AppConfigFile; sources: SourceEntry[] };
   logger: Logger;
   notify: ErrorNotifier;
 }
@@ -42,9 +42,29 @@ export function createEnrichmentHandler(deps: EnrichmentHandlerDeps) {
       return;
     }
 
-    // jobs.source is a free-text column (any adapter can register a source),
-    // but prompts are only ever configured for the known SourceType set.
-    const source = job.source as SourceType;
+    // jobs.source holds the sources.yaml `name` (e.g. "arbeitsagentur-bamberg"),
+    // which is distinct from `source_type` — multiple named sources can share
+    // one type (PRD §9: "a second entry with source_type: feki"). Prompts are
+    // keyed by source_type, so resolve it via the loaded source config rather
+    // than assuming source_type === job.source.
+    const sourceEntry = config.sources.find((s) => s.name === job.source);
+    if (!sourceEntry) {
+      await markEnrichmentFailed(db, job.id);
+      logger.error(
+        { job_id: job.id, source: job.source },
+        'enrichment: job source not found in configured sources',
+      );
+      await notify({
+        event: 'enrichment.failed',
+        source: job.source,
+        jobId: job.id,
+        stage: 'enrichment',
+        attempts: 1,
+        error: `job source "${job.source}" not found in configured sources`,
+      });
+      return;
+    }
+    const source = sourceEntry.source_type;
 
     // 2. Load the filter prompt for this source.
     const filterPrompt = await getPrompt(db, source, 'filter');

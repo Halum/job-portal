@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLogger, type Logger } from '@job-portal/shared';
 import type { LlmClient } from '@job-portal/llm';
-import type { AppConfigFile } from '@job-portal/config';
+import type { AppConfigFile, SourceEntry } from '@job-portal/config';
 import type { Job, Prompt } from '@job-portal/db';
 
 const getJobById = vi.fn();
@@ -20,6 +20,14 @@ vi.mock('@job-portal/db', () => ({
 
 const { createEnrichmentHandler } = await import('../src/enrich.js');
 
+const sourceEntry: SourceEntry = {
+  name: 'feki',
+  source_type: 'feki',
+  url: 'https://example.test/jobs',
+  cron: '0 * * * *',
+  enabled: true,
+};
+
 const config = {
   app: {
     llm: {
@@ -27,6 +35,7 @@ const config = {
       summary: { model: 'summary-model', max_tokens: 200, temperature: 0.3 },
     },
   } as AppConfigFile,
+  sources: [sourceEntry],
 };
 
 const silentLogger: Logger = createLogger({ level: 'silent' });
@@ -91,6 +100,64 @@ describe('createEnrichmentHandler', () => {
 
     expect(llm.filter).not.toHaveBeenCalled();
     expect(markEnrichmentFailed).not.toHaveBeenCalled();
+  });
+
+  it('resolves prompt lookup by source_type, not the raw job.source name', async () => {
+    // job.source is the sources.yaml `name` (can differ from source_type,
+    // e.g. "arbeitsagentur-bamberg" vs source_type "arbeitsagentur") — the
+    // handler must resolve source_type via config.sources, not cast job.source.
+    const namedConfig = {
+      ...config,
+      sources: [
+        { name: 'arbeitsagentur-bamberg', source_type: 'arbeitsagentur', url: 'https://x', cron: '0 * * * *', enabled: true } satisfies SourceEntry,
+      ],
+    };
+    getJobById.mockResolvedValueOnce(makeJob({ source: 'arbeitsagentur-bamberg' }));
+    getPrompt
+      .mockResolvedValueOnce(makePrompt('filter', 'Filter {{title}}'))
+      .mockResolvedValueOnce(makePrompt('summary', 'Summarize {{title}}'));
+    const llm = makeLlm({
+      filter: vi.fn().mockResolvedValue({ should_notify: true, reason: 'ok' }),
+      summary: vi.fn().mockResolvedValue({ summary_en: 's', key_points: [] }),
+    });
+    const handler = createEnrichmentHandler({
+      db: {} as never,
+      llm,
+      config: namedConfig,
+      logger: silentLogger,
+      notify,
+    });
+
+    await handler({ jobId: 1 });
+
+    expect(getPrompt).toHaveBeenNthCalledWith(1, {}, 'arbeitsagentur', 'filter');
+    expect(getPrompt).toHaveBeenNthCalledWith(2, {}, 'arbeitsagentur', 'summary');
+  });
+
+  it('job source not in configured sources: marks enrichment_failed, notifies', async () => {
+    getJobById.mockResolvedValueOnce(makeJob({ source: 'unknown-source' }));
+    const llm = makeLlm();
+    const handler = createEnrichmentHandler({
+      db: {} as never,
+      llm,
+      config,
+      logger: silentLogger,
+      notify,
+    });
+
+    await handler({ jobId: 1 });
+
+    expect(getPrompt).not.toHaveBeenCalled();
+    expect(llm.filter).not.toHaveBeenCalled();
+    expect(markEnrichmentFailed).toHaveBeenCalledWith({}, 1);
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'enrichment.failed',
+        source: 'unknown-source',
+        jobId: 1,
+        stage: 'enrichment',
+      }),
+    );
   });
 
   it('missing filter prompt: marks enrichment_failed, returns without calling llm', async () => {
