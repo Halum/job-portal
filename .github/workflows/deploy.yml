@@ -55,6 +55,9 @@ jobs:
           # --prod=false: migrate needs tsx, a devDependency. Sourcing .env
           # (NODE_ENV=production) before install would make pnpm skip it.
           pnpm install --frozen-lockfile --prod=false
+          # Build workspace dist: run-migrate.ts imports @job-portal/shared,
+          # which resolves to its built dist/index.js.
+          pnpm --filter @job-portal/db... build
           set -a && . ./.env && set +a
           pnpm --filter @job-portal/db db:migrate
 
