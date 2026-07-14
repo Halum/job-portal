@@ -37,8 +37,10 @@ jobs:
       # Single source of truth for every secret. Compose reads it via `env_file`,
       # and the migration step below sources it for DATABASE_URL.
       - name: Write .env from ENV_FILE secret
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
         run: |
-          printf '%s\n' '${{ secrets.ENV_FILE }}' > ${{ env.APP_DIR }}/.env
+          printf '%s\n' "$ENV_FILE" > ${{ env.APP_DIR }}/.env
           chmod 600 ${{ env.APP_DIR }}/.env
 
       # Migrations run on the runner, not in the image: `db:migrate` needs tsx,
