@@ -1,0 +1,1 @@
+ALTER TABLE "jobs" ADD COLUMN "llm_cost_json" jsonb;

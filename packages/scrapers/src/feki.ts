@@ -61,7 +61,6 @@ export function parseFekiHtml(html: string): RawJob[] {
       location: location || undefined,
       postedAt,
       applyUrl: new URL(href, BASE).toString(),
-      description: $el.text().replace(/\s+/g, ' ').trim(),
       raw: { html: $.html($el), href, title, company, location },
     });
   });
@@ -79,5 +78,15 @@ export const fekiAdapter: JobAdapter = {
       throw new Error(`feki returned HTTP ${res.statusCode}`);
     }
     return parseFekiHtml(await res.body.text());
+  },
+  async fetchDescription(job: { applyUrl: string }): Promise<string> {
+    const res = await request(job.applyUrl, {
+      headers: { 'user-agent': 'Mozilla/5.0 (job-portal scraper)' },
+    });
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw new Error(`feki returned HTTP ${res.statusCode}`);
+    }
+    const $ = cheerio.load(await res.body.text());
+    return $('.job-detail-description').text().replace(/\s+/g, ' ').trim();
   },
 };

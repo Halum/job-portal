@@ -2,11 +2,15 @@
 # in env vars (.env / GitHub secrets / host env) — see .env.example.
 llm:
   filter:
-    model: "openai/gpt-4o-mini"
+    # 70b, not 8b: the German-language filter needs the model to actually read
+    # the requirements block. Benchmarked on 10 real feki postings — 8b scored
+    # 8/10 only by rubber-stamping every job `should_notify: true`; 70b hit
+    # 10/10 and quotes the German phrase it rejected on. ~10x cost, ~$1/month.
+    model: "meta-llama/llama-3.3-70b-instruct"
     max_tokens: 300
     temperature: 0
   summary:
-    model: "openai/gpt-4o"
+    model: "meta-llama/llama-3.1-8b-instruct"
     max_tokens: 800
     temperature: 0.3
   global_concurrency: 4

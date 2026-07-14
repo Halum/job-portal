@@ -4,7 +4,7 @@
 sources:
   - name: arbeitsagentur-bamberg
     source_type: arbeitsagentur
-    url: "https://www.arbeitsagentur.de/jobsuche/suche?wo=Bamberg&umkreis=25"
+    url: "https://www.arbeitsagentur.de/jobsuche/suche?angebotsart=1&wo=96052%20Bamberg&umkreis=15&arbeitszeit=tz;mj&sort=veroeffdatum"
     cron: "0 */6 * * *"
     enabled: true
 

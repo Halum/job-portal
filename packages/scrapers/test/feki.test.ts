@@ -29,12 +29,11 @@ describe('parseFekiHtml (real fixture)', () => {
     expect(j!.postedAt?.getFullYear()).toBe(2026);
   });
 
-  it('every job has a stable id, title, applyUrl and description', () => {
+  it('every job has a stable id, title and applyUrl', () => {
     for (const j of jobs) {
       expect(j.externalId).toMatch(/^\d+$/);
       expect(j.title.length).toBeGreaterThan(0);
       expect(j.applyUrl.startsWith('https://www.feki.de/')).toBe(true);
-      expect(j.description.length).toBeGreaterThan(0);
     }
   });
 });
@@ -72,5 +71,46 @@ describe('fekiAdapter.fetch (mocked HTTP)', () => {
       .reply(500, '');
 
     await expect(fekiAdapter.fetch('https://www.feki.de/jobboerse')).rejects.toThrow(/HTTP 500/);
+  });
+});
+
+describe('fekiAdapter.fetchDescription (mocked HTTP)', () => {
+  afterEach(() => setGlobalDispatcher(new MockAgent()));
+
+  it('extracts and whitespace-collapses the description container text', async () => {
+    const detailHtml = `<html><body><div class="job-detail-description">
+        Line one.
+        Line   two.
+      </div></body></html>`;
+    const agent = new MockAgent();
+    agent.disableNetConnect();
+    setGlobalDispatcher(agent);
+    agent
+      .get('https://www.feki.de')
+      .intercept({ path: '/jobboerse/details/38526-x', method: 'GET' })
+      .reply(200, detailHtml);
+
+    const description = await fekiAdapter.fetchDescription({
+      externalId: '38526',
+      applyUrl: 'https://www.feki.de/jobboerse/details/38526-x',
+    });
+    expect(description).toBe('Line one. Line two.');
+  });
+
+  it('throws on non-2xx', async () => {
+    const agent = new MockAgent();
+    agent.disableNetConnect();
+    setGlobalDispatcher(agent);
+    agent
+      .get('https://www.feki.de')
+      .intercept({ path: '/jobboerse/details/1-x', method: 'GET' })
+      .reply(500, '');
+
+    await expect(
+      fekiAdapter.fetchDescription({
+        externalId: '1',
+        applyUrl: 'https://www.feki.de/jobboerse/details/1-x',
+      }),
+    ).rejects.toThrow(/HTTP 500/);
   });
 });

@@ -16,9 +16,7 @@ export interface EnrichmentPayload {
   jobId: number;
 }
 
-/** RawJob (adapter output) → jobs table insert row. `description` is not a
- * jobs column (it lives inside the source payload in `raw`); enrichment reads
- * from `raw`. */
+/** RawJob (adapter output) → jobs table insert row. */
 export function mapRawJobToRow(sourceName: string, raw: RawJob): NewJobRow {
   return {
     source: sourceName,

@@ -4,16 +4,22 @@ import {
   markEnrichmentFailed,
   markFilteredOut,
   markMatched,
+  setJobDescription,
   type Database,
 } from '@job-portal/db';
+import { getAdapter } from '@job-portal/scrapers';
 import type { LlmClient } from '@job-portal/llm';
-import { renderTemplate } from '@job-portal/llm';
+import { renderTemplate, shouldNotify } from '@job-portal/llm';
 import type { AppConfigFile, SourceEntry } from '@job-portal/config';
 import type { Logger } from '@job-portal/shared';
 import type { EnrichmentPayload } from './scrape.js';
 import type { ErrorNotifier } from './notify.js';
 
 export type { EnrichmentPayload } from './scrape.js';
+
+// ponytail: bounds LLM token cost on outlier postings (max seen: ~7k chars);
+// move to config if it ever needs tuning.
+const MAX_DESCRIPTION_CHARS = 5000;
 
 export interface EnrichmentHandlerDeps {
   db: Database;
@@ -85,35 +91,43 @@ export function createEnrichmentHandler(deps: EnrichmentHandlerDeps) {
       return;
     }
 
-    // 3. Render the filter template. ponytail: there is no `description`
-    // column on jobs (it only lives inside source-specific `raw`), so
-    // `{{description}}` always resolves to '' — upgrade if a source's filter
-    // prompt actually needs it.
+    // 3. Lazily fetch + cache the description. Throws propagate → BullMQ
+    // retries (intended, not caught).
+    let description = job.description ?? '';
+    if (!description) {
+      description = await getAdapter(source).fetchDescription(job);
+      await setJobDescription(db, job.id, description);
+    }
+
+    // 4. Render the filter template.
     const vars = {
       title: job.title,
       company: job.company ?? '',
       location: job.location ?? '',
       apply_url: job.applyUrl,
       source: job.source,
+      description: description.slice(0, MAX_DESCRIPTION_CHARS),
     };
     const renderedFilterPrompt = renderTemplate(filterPrompt.template, vars);
 
-    // 4. Filter pass. Throws propagate → BullMQ retries.
-    const filterOutput = await llm.filter({
+    // 5. Filter pass. Throws propagate → BullMQ retries.
+    const { output: filterOutput, cost: filterCost } = await llm.filter({
       model: config.app.llm.filter.model,
       max_tokens: config.app.llm.filter.max_tokens,
       temperature: config.app.llm.filter.temperature,
       prompt: renderedFilterPrompt,
     });
 
-    // 5. Not a match — done.
-    if (!filterOutput.should_notify) {
-      await markFilteredOut(db, job.id, filterOutput);
+    // 6. Not a match — done. The filter pass only EXTRACTS what the posting says
+    // about German; the verdict is derived here, not taken from the model.
+    if (!shouldNotify(filterOutput)) {
+      await markFilteredOut(db, job.id, filterOutput, filterCost);
       logger.info(
         {
           job_id: job.id,
           source: job.source,
           status: 'filtered_out',
+          german_phrase: filterOutput.german_phrase,
           duration_ms: Date.now() - start,
         },
         'enrichment: filtered out',
@@ -121,7 +135,7 @@ export function createEnrichmentHandler(deps: EnrichmentHandlerDeps) {
       return;
     }
 
-    // 6. Match — run the summary pass.
+    // 7. Match — run the summary pass.
     const summaryPrompt = await getPrompt(db, source, 'summary');
     if (!summaryPrompt) {
       await markEnrichmentFailed(db, job.id);
@@ -139,15 +153,15 @@ export function createEnrichmentHandler(deps: EnrichmentHandlerDeps) {
       });
       return;
     }
-    const summaryOutput = await llm.summary({
+    const { output: summaryOutput, cost: summaryCost } = await llm.summary({
       model: config.app.llm.summary.model,
       max_tokens: config.app.llm.summary.max_tokens,
       temperature: config.app.llm.summary.temperature,
       prompt: renderTemplate(summaryPrompt.template, vars),
     });
 
-    // 7. Matched.
-    await markMatched(db, job.id, filterOutput, summaryOutput);
+    // 8. Matched.
+    await markMatched(db, job.id, filterOutput, summaryOutput, filterCost, summaryCost);
     logger.info(
       { job_id: job.id, source: job.source, status: 'matched', duration_ms: Date.now() - start },
       'enrichment: matched',

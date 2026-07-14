@@ -15,6 +15,20 @@
       "when": 1783628970036,
       "tag": "0001_robust_rage",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784039898798,
+      "tag": "0002_quiet_sharon_carter",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784043567076,
+      "tag": "0003_groovy_boomer",
+      "breakpoints": true
     }
   ]
 }

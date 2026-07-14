@@ -83,3 +83,40 @@ describe('arbeitsagenturAdapter.fetch (mocked HTTP)', () => {
     ).rejects.toThrow(/HTTP 503/);
   });
 });
+
+describe('arbeitsagenturAdapter.fetchDescription (mocked HTTP)', () => {
+  afterEach(() => setGlobalDispatcher(new MockAgent()));
+
+  it('base64-encodes the refnr into the detail path and extracts the description', async () => {
+    const refnr = '10000-1234567890-S';
+    const expectedPath = `/jobboerse/jobsuche-service/pc/v4/jobdetails/${Buffer.from(refnr).toString('base64')}`;
+    const agent = new MockAgent();
+    agent.disableNetConnect();
+    setGlobalDispatcher(agent);
+    agent
+      .get('https://rest.arbeitsagentur.de')
+      .intercept({ path: expectedPath, method: 'GET' })
+      .reply(200, { stellenangebotsBeschreibung: 'Full description text.' });
+
+    const description = await arbeitsagenturAdapter.fetchDescription({
+      externalId: refnr,
+      applyUrl: 'https://www.arbeitsagentur.de/jobsuche/jobdetail/x',
+    });
+    expect(description).toBe('Full description text.');
+  });
+
+  it('throws on non-2xx', async () => {
+    const refnr = 'R1';
+    const agent = new MockAgent();
+    agent.disableNetConnect();
+    setGlobalDispatcher(agent);
+    agent
+      .get('https://rest.arbeitsagentur.de')
+      .intercept({ path: /\/pc\/v4\/jobdetails\//, method: 'GET' })
+      .reply(403, '');
+
+    await expect(
+      arbeitsagenturAdapter.fetchDescription({ externalId: refnr, applyUrl: 'x' }),
+    ).rejects.toThrow(/HTTP 403/);
+  });
+});

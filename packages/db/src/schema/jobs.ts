@@ -33,6 +33,7 @@ export const jobs = pgTable(
     location: text('location'),
     applyUrl: text('apply_url').notNull(),
     postedAt: timestamp('posted_at', { withTimezone: true, mode: 'date' }),
+    description: text('description'),
 
     // Full adapter payload, exactly as fetched.
     raw: jsonb('raw').notNull(),
@@ -41,6 +42,10 @@ export const jobs = pgTable(
 
     // { filter: { should_notify, reason }, summary: { summary_en, key_points } }
     enrichmentJson: jsonb('enrichment_json'),
+
+    // OpenRouter usage.cost_details per pass, e.g.
+    // { filter: { cost, upstream_inference_prompt_cost, ... }, summary: {...} }
+    llmCostJson: jsonb('llm_cost_json'),
 
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()

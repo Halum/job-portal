@@ -53,7 +53,6 @@ describe('mapRawJobToRow', () => {
       externalId: 'X1',
       title: 'T',
       applyUrl: 'https://e/x1',
-      description: 'ignored — not a column',
       raw: { a: 1 },
     };
     expect(mapRawJobToRow('feki', raw)).toEqual({
@@ -164,14 +163,12 @@ describe.skipIf(!hasDocker)('scrape pipeline (Testcontainers pg + redis)', () =>
         externalId: 'd1',
         title: 'a',
         applyUrl: 'u',
-        description: '',
         raw: {},
       }),
       mapRawJobToRow('dd', {
         externalId: 'd2',
         title: 'b',
         applyUrl: 'u',
-        description: '',
         raw: {},
       }),
     ];
@@ -184,7 +181,6 @@ describe.skipIf(!hasDocker)('scrape pipeline (Testcontainers pg + redis)', () =>
         externalId: 'd3',
         title: 'c',
         applyUrl: 'u',
-        description: '',
         raw: {},
       }),
     ];

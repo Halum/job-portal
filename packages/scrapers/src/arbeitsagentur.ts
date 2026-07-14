@@ -3,6 +3,8 @@ import type { JobAdapter, RawJob } from './types.js';
 
 const API_URL =
   'https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs';
+const DETAIL_API_URL =
+  'https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobdetails';
 const API_KEY = 'jobboerse-jobsuche'; // public key documented for this endpoint
 
 /** Human-URL query params (PRD §9) mapped to the REST API's param names. */
@@ -46,9 +48,6 @@ export function normalizeResult(r: AgenturResult): RawJob | null {
     location: r.stellenlokationen?.[0]?.adresse?.ort,
     postedAt: posted ? new Date(posted) : undefined,
     applyUrl: `https://www.arbeitsagentur.de/jobsuche/jobdetail/${encodeURIComponent(refnr)}`,
-    // ponytail: list endpoint carries no free-text description; the detail
-    // endpoint does. Enrichment (S1c) fetches detail if it needs body text.
-    description: '',
     raw: r,
   };
 }
@@ -69,5 +68,16 @@ export const arbeitsagenturAdapter: JobAdapter = {
       throw new Error(`arbeitsagentur API returned HTTP ${res.statusCode}`);
     }
     return normalizeResponse(await res.body.json());
+  },
+  async fetchDescription(job: { externalId: string }): Promise<string> {
+    const id = Buffer.from(job.externalId).toString('base64');
+    const res = await request(`${DETAIL_API_URL}/${id}`, {
+      headers: { 'X-API-Key': API_KEY },
+    });
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw new Error(`arbeitsagentur detail API returned HTTP ${res.statusCode}`);
+    }
+    const body = (await res.body.json()) as { stellenangebotsBeschreibung?: string };
+    return body.stellenangebotsBeschreibung ?? '';
   },
 };

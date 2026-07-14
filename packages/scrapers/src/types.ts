@@ -8,11 +8,11 @@ export interface RawJob {
   location?: string;
   postedAt?: Date;
   applyUrl: string;
-  description: string;
   raw: unknown; // full source payload, stored as JSONB
 }
 
 export interface JobAdapter {
   sourceType: SourceType;
   fetch(url: string): Promise<RawJob[]>;
+  fetchDescription(job: { externalId: string; applyUrl: string }): Promise<string>;
 }

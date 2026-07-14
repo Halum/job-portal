@@ -3,7 +3,7 @@ import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 import type { JobStatus } from '@job-portal/shared';
 import type { Database } from '../client.js';
 import { jobs } from '../schema/jobs.js';
-import type { FilterPassOutput, SummaryPassOutput } from '@job-portal/llm';
+import type { FilterPassOutput, LlmCostDetails, SummaryPassOutput } from '@job-portal/llm';
 
 export type Job = InferSelectModel<typeof jobs>;
 
@@ -101,12 +101,14 @@ export async function markFilteredOut(
   db: Database,
   id: number,
   filterOutput: FilterPassOutput,
+  filterCost: LlmCostDetails,
 ): Promise<void> {
   await db
     .update(jobs)
     .set({
       status: 'filtered_out',
       enrichmentJson: { filter: filterOutput },
+      llmCostJson: { filter: filterCost },
       enrichedAt: sql`now()`,
     })
     .where(eq(jobs.id, id));
@@ -118,15 +120,23 @@ export async function markMatched(
   id: number,
   filterOutput: FilterPassOutput,
   summaryOutput: SummaryPassOutput,
+  filterCost: LlmCostDetails,
+  summaryCost: LlmCostDetails,
 ): Promise<void> {
   await db
     .update(jobs)
     .set({
       status: 'matched',
       enrichmentJson: { filter: filterOutput, summary: summaryOutput },
+      llmCostJson: { filter: filterCost, summary: summaryCost },
       enrichedAt: sql`now()`,
     })
     .where(eq(jobs.id, id));
+}
+
+/** Caches a lazily-fetched job description on the row. */
+export async function setJobDescription(db: Database, id: number, description: string): Promise<void> {
+  await db.update(jobs).set({ description }).where(eq(jobs.id, id));
 }
 
 /** Enrichment could not run at all (missing prompt, or retries exhausted).
