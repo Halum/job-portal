@@ -70,6 +70,12 @@
               "name": "LIMIT",
               "value": "500",
               "type": "string"
+            },
+            {
+              "id": "e0000000-0000-0000-0000-000000000007",
+              "name": "TOPIC_ERRORS",
+              "value": "13",
+              "type": "string"
             }
           ]
         },
@@ -238,7 +244,8 @@
         "text": "=⚠️ <b>Enrichment Failed</b>\n<a href=\"{{ $json.apply_url }}\">{{ $json.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</a>\n<i>{{ $('Loop Over Errors').item.json.source }} · {{ $('Loop Over Errors').item.json.stage }} · attempt {{ $('Loop Over Errors').item.json.attempts }}</i>\n🕒 {{ DateTime.fromISO($('Loop Over Errors').item.json.created_at).setZone('Europe/Berlin').toFormat('dd LLL yyyy, HH:mm') }}\n\n<pre>{{ $('Loop Over Errors').item.json.error_message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</pre>",
         "additionalFields": {
           "appendAttribution": false,
-          "parse_mode": "HTML"
+          "parse_mode": "HTML",
+          "message_thread_id": "={{ $('Set Config').item.json.TOPIC_ERRORS }}"
         }
       },
       "id": "b1000000-0000-4000-8000-00000000000b",
@@ -260,7 +267,8 @@
         "text": "=⚠️ <b>{{ $json.stage === 'scrape' ? 'Scrape Failed' : 'Failed' }}</b>\n<i>{{ $json.source || 'unknown source' }} · {{ $json.stage }} · attempt {{ $json.attempts }}</i>\n🕒 {{ DateTime.fromISO($json.created_at).setZone('Europe/Berlin').toFormat('dd LLL yyyy, HH:mm') }}\n\n<pre>{{ $json.error_message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</pre>",
         "additionalFields": {
           "appendAttribution": false,
-          "parse_mode": "HTML"
+          "parse_mode": "HTML",
+          "message_thread_id": "={{ $('Set Config').item.json.TOPIC_ERRORS }}"
         }
       },
       "id": "b1000000-0000-4000-8000-00000000000c",

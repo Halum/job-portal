@@ -70,6 +70,18 @@
               "name": "LIMIT",
               "value": "500",
               "type": "string"
+            },
+            {
+              "id": "c0000000-0000-0000-0000-000000000007",
+              "name": "TOPIC_FEKI",
+              "value": "7",
+              "type": "string"
+            },
+            {
+              "id": "c0000000-0000-0000-0000-000000000008",
+              "name": "TOPIC_ARBEIT",
+              "value": "10",
+              "type": "string"
             }
           ]
         },
@@ -188,7 +200,8 @@
         "text": "=<b>💼 <a href=\"{{ $json.apply_url }}\">{{ ($json.enrichment_json.summary.title_en || $json.title).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</a></b>\n{{ [$json.company ? '🏢 ' + $json.company : '', $json.location ? '📍 ' + $json.location : ''].filter(Boolean).join(' · ').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}\n🕒 Posted {{ $json.posted_at ? DateTime.fromISO($json.posted_at).setZone('Europe/Berlin').toFormat('dd LLL yyyy, HH:mm') : 'n/a' }}\n\n<blockquote>{{ $json.enrichment_json.summary.summary_en.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</blockquote>{{ ($json.enrichment_json.summary.key_points && $json.enrichment_json.summary.key_points.length) ? '\\n\\n<b>Highlights</b>\\n' + $json.enrichment_json.summary.key_points.map(p => '• ' + p.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')).join('\\n') : '' }}",
         "additionalFields": {
           "appendAttribution": false,
-          "parse_mode": "HTML"
+          "parse_mode": "HTML",
+          "message_thread_id": "={{ ($json.source || '').startsWith('feki') ? $('Set Config').item.json.TOPIC_FEKI : $('Set Config').item.json.TOPIC_ARBEIT }}"
         }
       },
       "id": "a1000000-0000-4000-8000-000000000009",
