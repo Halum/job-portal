@@ -134,6 +134,9 @@ clear message if anything is missing or malformed.
 
 ## Running locally
 
+Full step-by-step (DB/user creation, `.env`, troubleshooting) is in
+[`docs/local-dev.md`](./docs/local-dev.md). Quick version:
+
 ```bash
 corepack enable
 pnpm install
