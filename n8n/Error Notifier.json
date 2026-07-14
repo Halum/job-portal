@@ -235,7 +235,7 @@
     {
       "parameters": {
         "chatId": "={{ $('Set Config').item.json.TELEGRAM_CHANNEL }}",
-        "text": "=<b><a href=\"{{ $json.apply_url }}\">{{ $json.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</a></b>\n{{ $('Split Errors').item.json.source }} · {{ $('Split Errors').item.json.stage }} · attempt {{ $('Split Errors').item.json.attempts }}\n\n<code>{{ $('Split Errors').item.json.error_message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</code>",
+        "text": "=<b><a href=\"{{ $json.apply_url }}\">{{ $json.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</a></b>\n{{ $('Loop Over Errors').item.json.source }} · {{ $('Loop Over Errors').item.json.stage }} · attempt {{ $('Loop Over Errors').item.json.attempts }}\n\n<code>{{ $('Loop Over Errors').item.json.error_message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</code>",
         "additionalFields": {
           "appendAttribution": false,
           "parse_mode": "HTML"
@@ -275,6 +275,17 @@
           "name": "Alert Bot"
         }
       }
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "b1000000-0000-4000-8000-00000000000d",
+      "name": "Loop Over Errors",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [900, 140]
     }
   ],
   "connections": {
@@ -300,10 +311,13 @@
       ]
     },
     "Split Errors": {
-      "main": [[{ "node": "Wait 1s", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Loop Over Errors", "type": "main", "index": 0 }]]
     },
-    "Wait 1s": {
-      "main": [[{ "node": "If - Has Job", "type": "main", "index": 0 }]]
+    "Loop Over Errors": {
+      "main": [
+        [],
+        [{ "node": "If - Has Job", "type": "main", "index": 0 }]
+      ]
     },
     "If - Has Job": {
       "main": [
@@ -313,6 +327,15 @@
     },
     "Get Job": {
       "main": [[{ "node": "Telegram Job Error", "type": "main", "index": 0 }]]
+    },
+    "Telegram Job Error": {
+      "main": [[{ "node": "Wait 1s", "type": "main", "index": 0 }]]
+    },
+    "Telegram Source Error": {
+      "main": [[{ "node": "Wait 1s", "type": "main", "index": 0 }]]
+    },
+    "Wait 1s": {
+      "main": [[{ "node": "Loop Over Errors", "type": "main", "index": 0 }]]
     }
   },
   "settings": {

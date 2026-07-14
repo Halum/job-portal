@@ -179,7 +179,7 @@
       "name": "Wait 1s",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [900, 140],
+      "position": [1340, 140],
       "webhookId": "a1000000-0000-4000-8000-0000000000w2"
     },
     {
@@ -203,6 +203,17 @@
           "name": "Alert Bot"
         }
       }
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-00000000000a",
+      "name": "Loop Over Jobs",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [900, 140]
     }
   ],
   "connections": {
@@ -228,10 +239,19 @@
       ]
     },
     "Split Jobs": {
+      "main": [[{ "node": "Loop Over Jobs", "type": "main", "index": 0 }]]
+    },
+    "Loop Over Jobs": {
+      "main": [
+        [],
+        [{ "node": "Telegram Job", "type": "main", "index": 0 }]
+      ]
+    },
+    "Telegram Job": {
       "main": [[{ "node": "Wait 1s", "type": "main", "index": 0 }]]
     },
     "Wait 1s": {
-      "main": [[{ "node": "Telegram Job", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Loop Over Jobs", "type": "main", "index": 0 }]]
     }
   },
   "settings": {
