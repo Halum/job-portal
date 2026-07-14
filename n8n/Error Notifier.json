@@ -235,7 +235,7 @@
     {
       "parameters": {
         "chatId": "={{ $('Set Config').item.json.TELEGRAM_CHANNEL }}",
-        "text": "=<b><a href=\"{{ $json.apply_url }}\">{{ $json.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</a></b>\n{{ $('Loop Over Errors').item.json.source }} · {{ $('Loop Over Errors').item.json.stage }} · attempt {{ $('Loop Over Errors').item.json.attempts }}\n\n<code>{{ $('Loop Over Errors').item.json.error_message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</code>",
+        "text": "=<b><a href=\"{{ $json.apply_url }}\">{{ $json.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</a></b>\n{{ $('Loop Over Errors').item.json.source }} · {{ $('Loop Over Errors').item.json.stage }} · attempt {{ $('Loop Over Errors').item.json.attempts }}\n🕒 {{ DateTime.fromISO($('Loop Over Errors').item.json.created_at).setZone('Europe/Berlin').toFormat('dd LLL yyyy, HH:mm') }}\n\n<code>{{ $('Loop Over Errors').item.json.error_message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</code>",
         "additionalFields": {
           "appendAttribution": false,
           "parse_mode": "HTML"
@@ -257,7 +257,7 @@
     {
       "parameters": {
         "chatId": "={{ $('Set Config').item.json.TELEGRAM_CHANNEL }}",
-        "text": "=<b>{{ $json.source || 'unknown source' }} · {{ $json.stage }}</b>\nattempt {{ $json.attempts }} · no job linked\n\n<code>{{ $json.error_message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</code>",
+        "text": "=<b>{{ $json.source || 'unknown source' }} · {{ $json.stage }}</b>\nattempt {{ $json.attempts }} · no job linked\n🕒 {{ DateTime.fromISO($json.created_at).setZone('Europe/Berlin').toFormat('dd LLL yyyy, HH:mm') }}\n\n<code>{{ $json.error_message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</code>",
         "additionalFields": {
           "appendAttribution": false,
           "parse_mode": "HTML"

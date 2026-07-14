@@ -185,7 +185,7 @@
     {
       "parameters": {
         "chatId": "={{ $('Set Config').item.json.TELEGRAM_CHANNEL }}",
-        "text": "=<b><a href=\"{{ $json.apply_url }}\">{{ ($json.enrichment_json.summary.title_en || $json.title).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</a></b>\n{{ [$json.company, $json.location].filter(Boolean).join(' — ').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}\n\n{{ $json.enrichment_json.summary.summary_en.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
+        "text": "=<b><a href=\"{{ $json.apply_url }}\">{{ ($json.enrichment_json.summary.title_en || $json.title).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</a></b>\n{{ [$json.company, $json.location].filter(Boolean).join(' — ').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}\n🕒 Posted {{ $json.posted_at ? DateTime.fromISO($json.posted_at).setZone('Europe/Berlin').toFormat('dd LLL yyyy, HH:mm') : 'n/a' }}\n\n{{ $json.enrichment_json.summary.summary_en.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
         "additionalFields": {
           "appendAttribution": false,
           "parse_mode": "HTML"
