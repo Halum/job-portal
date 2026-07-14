@@ -1,0 +1,37 @@
+# Application-level config (non-secret). Secrets and connection strings live
+# in env vars (.env / GitHub secrets / host env) — see .env.example.
+llm:
+  filter:
+    # 70b, not 8b: the German-language filter needs the model to actually read
+    # the requirements block. Benchmarked on 10 real feki postings — 8b scored
+    # 8/10 only by rubber-stamping every job `should_notify: true`; 70b hit
+    # 10/10 and quotes the German phrase it rejected on. ~10x cost, ~$1/month.
+    model: "meta-llama/llama-3.3-70b-instruct"
+    max_tokens: 300
+    temperature: 0
+  summary:
+    model: "meta-llama/llama-3.1-8b-instruct"
+    max_tokens: 800
+    temperature: 0.3
+  global_concurrency: 4
+  rate_limit:
+    max_per_window: 20
+    window_ms: 60000
+
+retries:
+  scrape:
+    attempts: 3
+    backoff_ms: 5000
+  enrichment:
+    attempts: 3
+    backoff_ms: 10000
+  webhook_error:
+    attempts: 5
+    backoff_ms: 2000
+
+n8n:
+  # Empty on purpose — n8n pulls errors from GET /api/errors (see n8n/Error
+  # Notifier.json). Set a URL only if you want the app to push as well.
+  error_webhook_url: ""
+
+timezone: "Europe/Berlin"

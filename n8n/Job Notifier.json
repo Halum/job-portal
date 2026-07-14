@@ -1,0 +1,242 @@
+{
+  "name": "Job Notifier",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8,20 * * *"
+            }
+          ]
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-200, 0]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "notify-jobs",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-200, 180],
+      "webhookId": "a1000000-0000-4000-8000-0000000000w1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c0000000-0000-0000-0000-000000000001",
+              "name": "BASE_URL",
+              "value": "{{BASE_URL}}",
+              "type": "string"
+            },
+            {
+              "id": "c0000000-0000-0000-0000-000000000002",
+              "name": "API_TOKEN",
+              "value": "{{API_TOKEN}}",
+              "type": "string"
+            },
+            {
+              "id": "c0000000-0000-0000-0000-000000000003",
+              "name": "TELEGRAM_CHANNEL",
+              "value": "{{TELEGRAM_CHANNEL}}",
+              "type": "string"
+            },
+            {
+              "id": "c0000000-0000-0000-0000-000000000004",
+              "name": "FROM",
+              "value": "={{ $now.minus({ hours: 12 }).toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "c0000000-0000-0000-0000-000000000005",
+              "name": "TO",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "c0000000-0000-0000-0000-000000000006",
+              "name": "LIMIT",
+              "value": "500",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "Set Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [20, 80]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.BASE_URL }}/api/jobs",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "status", "value": "matched" },
+            { "name": "from", "value": "={{ $json.FROM }}" },
+            { "name": "to", "value": "={{ $json.TO }}" },
+            { "name": "limit", "value": "={{ $json.LIMIT }}" },
+            { "name": "offset", "value": "0" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $json.API_TOKEN }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "Get Matched Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 80]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d0000000-0000-0000-0000-000000000001",
+              "leftValue": "={{ $json.count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "If - Has Jobs",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [460, 80]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Set Config').item.json.TELEGRAM_CHANNEL }}",
+        "text": "=*New Jobs: * {{ $json.count }}\n--------------------------------------------------",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "Telegram Started",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [680, -40],
+      "credentials": {
+        "telegramApi": {
+          "id": "f4pv9xKThTzvoWsK",
+          "name": "Alert Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "jobs",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000007",
+      "name": "Split Jobs",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [680, 140]
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "seconds"
+      },
+      "id": "a1000000-0000-4000-8000-000000000008",
+      "name": "Wait 1s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [900, 140],
+      "webhookId": "a1000000-0000-4000-8000-0000000000w2"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Set Config').item.json.TELEGRAM_CHANNEL }}",
+        "text": "=<b><a href=\"{{ $json.apply_url }}\">{{ ($json.enrichment_json.summary.title_en || $json.title).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</a></b>\n{{ [$json.company, $json.location].filter(Boolean).join(' — ').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}\n\n{{ $json.enrichment_json.summary.summary_en.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000009",
+      "name": "Telegram Job",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1120, 140],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "telegramApi": {
+          "id": "f4pv9xKThTzvoWsK",
+          "name": "Alert Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{ "node": "Set Config", "type": "main", "index": 0 }]]
+    },
+    "Webhook": {
+      "main": [[{ "node": "Set Config", "type": "main", "index": 0 }]]
+    },
+    "Set Config": {
+      "main": [[{ "node": "Get Matched Jobs", "type": "main", "index": 0 }]]
+    },
+    "Get Matched Jobs": {
+      "main": [[{ "node": "If - Has Jobs", "type": "main", "index": 0 }]]
+    },
+    "If - Has Jobs": {
+      "main": [
+        [
+          { "node": "Telegram Started", "type": "main", "index": 0 },
+          { "node": "Split Jobs", "type": "main", "index": 0 }
+        ],
+        []
+      ]
+    },
+    "Split Jobs": {
+      "main": [[{ "node": "Wait 1s", "type": "main", "index": 0 }]]
+    },
+    "Wait 1s": {
+      "main": [[{ "node": "Telegram Job", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  }
+}

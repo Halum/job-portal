@@ -1,0 +1,73 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  APP_DIR: /root/job-portal-deployed
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Sync code to app directory
+        run: |
+          mkdir -p ${{ env.APP_DIR }}
+          rsync -a --delete \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude 'coverage' \
+            --exclude 'tmp' \
+            --exclude '.env' \
+            ./ ${{ env.APP_DIR }}/
+
+      # Single source of truth for every secret. Compose reads it via `env_file`,
+      # and the migration step below sources it for DATABASE_URL.
+      - name: Write .env from ENV_FILE secret
+        run: |
+          printf '%s\n' '${{ secrets.ENV_FILE }}' > ${{ env.APP_DIR }}/.env
+          chmod 600 ${{ env.APP_DIR }}/.env
+
+      # Migrations run on the runner, not in the image: `db:migrate` needs tsx,
+      # which is a devDependency the production image deliberately doesn't ship.
+      # runMigrationsWithLock takes a Postgres advisory lock, so a concurrent
+      # deploy waits rather than racing.
+      - name: Run migrations
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          set -a && . ./.env && set +a
+          pnpm install --frozen-lockfile
+          pnpm --filter @job-portal/db db:migrate
+
+      - name: Deploy with Docker Compose
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          docker compose -f docker/docker-compose.yml build
+          docker compose -f docker/docker-compose.yml up -d --force-recreate --remove-orphans
+
+      - name: Wait for health check
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/health > /dev/null 2>&1; then
+              echo "API is healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Health check failed"
+          docker compose -f docker/docker-compose.yml logs --tail=50
+          exit 1

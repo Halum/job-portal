@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "packages/config" },
+    { "path": "packages/db" },
+    { "path": "packages/scrapers" },
+    { "path": "packages/llm" },
+    { "path": "apps/api" },
+    { "path": "apps/worker" }
+  ]
+}

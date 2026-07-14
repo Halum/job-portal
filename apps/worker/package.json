@@ -1,0 +1,32 @@
+{
+  "name": "@job-portal/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "cd ../.. && tsx watch --env-file=.env apps/worker/src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -b tsconfig.json",
+    "typecheck": "tsc -b tsconfig.json"
+  },
+  "dependencies": {
+    "@job-portal/config": "workspace:*",
+    "@job-portal/db": "workspace:*",
+    "@job-portal/llm": "workspace:*",
+    "@job-portal/scrapers": "workspace:*",
+    "@job-portal/shared": "workspace:*",
+    "bullmq": "^5.34.0",
+    "ioredis": "^5.4.2"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^10.16.0",
+    "@testcontainers/redis": "^10.16.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "undici": "^7.2.0"
+  },
+  "files": [
+    "dist"
+  ]
+}

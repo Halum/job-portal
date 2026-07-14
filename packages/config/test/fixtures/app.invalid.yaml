@@ -1,0 +1,29 @@
+llm:
+  filter:
+    model: "openai/gpt-4o-mini"
+    max_tokens: -5
+    temperature: 0
+  summary:
+    model: "openai/gpt-4o"
+    max_tokens: 800
+    temperature: 0.3
+  global_concurrency: 4
+  rate_limit:
+    max_per_window: 20
+    window_ms: 60000
+
+retries:
+  scrape:
+    attempts: 3
+    backoff_ms: 5000
+  enrichment:
+    attempts: 3
+    backoff_ms: 10000
+  webhook_error:
+    attempts: 5
+    backoff_ms: 2000
+
+n8n:
+  error_webhook_url: "not-a-url"
+
+timezone: "Europe/Berlin"

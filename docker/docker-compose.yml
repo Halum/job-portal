@@ -1,0 +1,27 @@
+# Single profile — no dev/prod split (PRD §15). Postgres and Redis are
+# existing services on the home server and are NOT managed here; they're
+# referenced purely by connection string via DATABASE_URL / REDIS_URL.
+services:
+  api:
+    image: job-portal:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: ["node", "apps/api/dist/index.js"]
+    # One env file for every secret (repo root, gitignored). CI writes it from
+    # the ENV_FILE GitHub secret; locally it's your own .env.
+    env_file:
+      - ../.env
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  worker:
+    image: job-portal:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: ["node", "apps/worker/dist/index.js"]
+    env_file:
+      - ../.env
+    restart: unless-stopped

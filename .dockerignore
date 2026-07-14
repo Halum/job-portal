@@ -1,0 +1,16 @@
+# Build context hygiene — keep the daemon context small and never ship host
+# artifacts or local-only docs into any build layer.
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+.git
+.github
+coverage
+*.lcov
+tmp
+docs
+.env
+.env.*
+!.env.example
+**/.DS_Store
+.claude
