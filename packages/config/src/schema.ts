@@ -51,7 +51,9 @@ export const appConfigFileSchema = z.object({
     webhook_error: retryConfigSchema,
   }),
   n8n: z.object({
-    error_webhook_url: z.string().url(),
+    // Empty = no push. n8n pulls errors from GET /api/errors instead; the
+    // `errors` row is still written either way.
+    error_webhook_url: z.string().url().or(z.literal('')),
   }),
   timezone: z.string().min(1),
 });

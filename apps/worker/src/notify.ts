@@ -51,7 +51,12 @@ export function createErrorNotifier(deps: ErrorNotifierDeps) {
       logger.error({ err, event: input.event }, 'failed to write errors row');
     }
 
-    // 2. POST the webhook with exponential-backoff retries.
+    // 2. No webhook configured — the errors row above is the whole contract,
+    // and n8n reads it via GET /api/errors. Skip the push (and its 5-attempt
+    // retry budget) rather than POSTing at nothing.
+    if (!error_webhook_url) return;
+
+    // 3. POST the webhook with exponential-backoff retries.
     const body = JSON.stringify({
       event: input.event,
       source: input.source,
@@ -70,7 +75,7 @@ export function createErrorNotifier(deps: ErrorNotifierDeps) {
           body,
         });
         if (res.ok) {
-          // 3. Delivered.
+          // 4. Delivered.
           if (errorId !== undefined) await markWebhookDelivered(db, errorId, true);
           return;
         }
@@ -81,7 +86,7 @@ export function createErrorNotifier(deps: ErrorNotifierDeps) {
       if (attempt < attempts) await sleep(backoff_ms * 2 ** (attempt - 1));
     }
 
-    // Exhausted — leave webhook_delivered = false (terminal, PRD §13 step 4).
+    // 5. Exhausted — leave webhook_delivered = false (terminal, PRD §13 step 4).
     logger.error({ event: input.event, errorId }, 'error webhook undelivered after retries');
   };
 }

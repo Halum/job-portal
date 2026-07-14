@@ -1,0 +1,323 @@
+{
+  "name": "Error Notifier",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8,20 * * *"
+            }
+          ]
+        }
+      },
+      "id": "b1000000-0000-4000-8000-000000000001",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-200, 0]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "notify-errors",
+        "options": {}
+      },
+      "id": "b1000000-0000-4000-8000-000000000002",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-200, 180],
+      "webhookId": "b1000000-0000-4000-8000-0000000000w1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e0000000-0000-0000-0000-000000000001",
+              "name": "BASE_URL",
+              "value": "{{BASE_URL}}",
+              "type": "string"
+            },
+            {
+              "id": "e0000000-0000-0000-0000-000000000002",
+              "name": "API_TOKEN",
+              "value": "{{API_TOKEN}}",
+              "type": "string"
+            },
+            {
+              "id": "e0000000-0000-0000-0000-000000000003",
+              "name": "TELEGRAM_CHANNEL",
+              "value": "{{TELEGRAM_CHANNEL}}",
+              "type": "string"
+            },
+            {
+              "id": "e0000000-0000-0000-0000-000000000004",
+              "name": "FROM",
+              "value": "={{ $now.minus({ hours: 12 }).toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "e0000000-0000-0000-0000-000000000005",
+              "name": "TO",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "e0000000-0000-0000-0000-000000000006",
+              "name": "LIMIT",
+              "value": "500",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "b1000000-0000-4000-8000-000000000003",
+      "name": "Set Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [20, 80]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.BASE_URL }}/api/errors",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "from", "value": "={{ $json.FROM }}" },
+            { "name": "to", "value": "={{ $json.TO }}" },
+            { "name": "limit", "value": "={{ $json.LIMIT }}" },
+            { "name": "offset", "value": "0" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $json.API_TOKEN }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1000000-0000-4000-8000-000000000004",
+      "name": "Get Errors",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 80]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f0000000-0000-0000-0000-000000000001",
+              "leftValue": "={{ $json.count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1000000-0000-4000-8000-000000000005",
+      "name": "If - Has Errors",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [460, 80]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Set Config').item.json.TELEGRAM_CHANNEL }}",
+        "text": "=*Errors: * {{ $json.count }}\n--------------------------------------------------",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "b1000000-0000-4000-8000-000000000006",
+      "name": "Telegram Started",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [680, -40],
+      "credentials": {
+        "telegramApi": {
+          "id": "f4pv9xKThTzvoWsK",
+          "name": "Alert Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "errors",
+        "options": {}
+      },
+      "id": "b1000000-0000-4000-8000-000000000007",
+      "name": "Split Errors",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [680, 140]
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "seconds"
+      },
+      "id": "b1000000-0000-4000-8000-000000000008",
+      "name": "Wait 1s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [900, 140],
+      "webhookId": "b1000000-0000-4000-8000-0000000000w2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f0000000-0000-0000-0000-000000000002",
+              "leftValue": "={{ $json.job_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1000000-0000-4000-8000-000000000009",
+      "name": "If - Has Job",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1120, 140]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Set Config').first().json.BASE_URL }}/api/jobs/{{ $json.job_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Set Config').first().json.API_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1000000-0000-4000-8000-00000000000a",
+      "name": "Get Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 40]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Set Config').item.json.TELEGRAM_CHANNEL }}",
+        "text": "=<b><a href=\"{{ $json.apply_url }}\">{{ $json.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</a></b>\n{{ $('Split Errors').item.json.source }} · {{ $('Split Errors').item.json.stage }} · attempt {{ $('Split Errors').item.json.attempts }}\n\n<code>{{ $('Split Errors').item.json.error_message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</code>",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "b1000000-0000-4000-8000-00000000000b",
+      "name": "Telegram Job Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1560, 40],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "telegramApi": {
+          "id": "f4pv9xKThTzvoWsK",
+          "name": "Alert Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Set Config').item.json.TELEGRAM_CHANNEL }}",
+        "text": "=<b>{{ $json.source || 'unknown source' }} · {{ $json.stage }}</b>\nattempt {{ $json.attempts }} · no job linked\n\n<code>{{ $json.error_message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</code>",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "b1000000-0000-4000-8000-00000000000c",
+      "name": "Telegram Source Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1340, 260],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "telegramApi": {
+          "id": "f4pv9xKThTzvoWsK",
+          "name": "Alert Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{ "node": "Set Config", "type": "main", "index": 0 }]]
+    },
+    "Webhook": {
+      "main": [[{ "node": "Set Config", "type": "main", "index": 0 }]]
+    },
+    "Set Config": {
+      "main": [[{ "node": "Get Errors", "type": "main", "index": 0 }]]
+    },
+    "Get Errors": {
+      "main": [[{ "node": "If - Has Errors", "type": "main", "index": 0 }]]
+    },
+    "If - Has Errors": {
+      "main": [
+        [
+          { "node": "Telegram Started", "type": "main", "index": 0 },
+          { "node": "Split Errors", "type": "main", "index": 0 }
+        ],
+        []
+      ]
+    },
+    "Split Errors": {
+      "main": [[{ "node": "Wait 1s", "type": "main", "index": 0 }]]
+    },
+    "Wait 1s": {
+      "main": [[{ "node": "If - Has Job", "type": "main", "index": 0 }]]
+    },
+    "If - Has Job": {
+      "main": [
+        [{ "node": "Get Job", "type": "main", "index": 0 }],
+        [{ "node": "Telegram Source Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Job": {
+      "main": [[{ "node": "Telegram Job Error", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  }
+}

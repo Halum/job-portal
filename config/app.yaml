@@ -30,6 +30,8 @@ retries:
     backoff_ms: 2000
 
 n8n:
-  error_webhook_url: "https://n8n.example.com/webhook/job-portal-errors"
+  # Empty on purpose — n8n pulls errors from GET /api/errors (see n8n/Error
+  # Notifier.json). Set a URL only if you want the app to push as well.
+  error_webhook_url: ""
 
 timezone: "Europe/Berlin"

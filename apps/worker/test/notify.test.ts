@@ -38,6 +38,20 @@ afterEach(() => {
 });
 
 describe('createErrorNotifier', () => {
+  it('empty webhook url: writes the row, never POSTs', async () => {
+    insertError.mockResolvedValueOnce(7);
+    const pullOnly = {
+      app: { ...config.app, n8n: { error_webhook_url: '' } } as AppConfigFile,
+    };
+    const notify = createErrorNotifier({ db: {} as never, config: pullOnly, logger: silentLogger });
+
+    await notify(input);
+
+    expect(insertError).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(markWebhookDelivered).not.toHaveBeenCalled();
+  });
+
   it('2xx: writes the row, POSTs once, marks delivered true', async () => {
     insertError.mockResolvedValueOnce(7);
     fetchMock.mockResolvedValueOnce({ ok: true, status: 200 });
