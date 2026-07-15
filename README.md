@@ -12,14 +12,18 @@ to run for years on a home server with an existing Postgres and Redis.
 1. **Scrape** — a BullMQ cron job fetches each enabled source (Arbeitsagentur
    REST API, feki.de HTML) on its own schedule, normalizes listings, and inserts
    new ones (deduped on `source + external_id`).
-2. **Enrich** — every new job is run through two LLM passes on OpenRouter: a
-   cheap **filter** pass (`should_notify`?) and, for matches, a richer
-   **summary** pass. Prompts are per-source and per-role, editable at runtime.
-3. **Serve** — n8n polls `GET /api/jobs` over contiguous time windows and routes
-   matched jobs onward (email, Slack, etc. — outside this repo).
+2. **Enrich** — the job's description is fetched, then run through two LLM passes
+   on OpenRouter. The **filter** pass *extracts* what the posting says about the
+   candidate's German (`{german_phrase, german_requirement, reason}`) and the
+   worker derives the match verdict in code (German required ⇒ filtered out).
+   Matches get a richer **summary** pass (English title, summary, key points).
+   Prompts are per-source and per-role, editable at runtime.
+3. **Serve** — n8n polls `GET /api/jobs` over contiguous time windows and fans
+   matched jobs out to Telegram (workflows in [`n8n/`](./n8n)).
 
-Failures at any stage are recorded in an `errors` table and pushed to an n8n
-error webhook.
+Failures at any stage are recorded in an `errors` table. n8n pulls them from
+`GET /api/errors` (same windowed poll). Optionally the worker can also *push* to
+an n8n webhook — off by default (`n8n.error_webhook_url: ""`).
 
 ## System design
 
@@ -45,7 +49,7 @@ error webhook.
   │                                     OpenRouter LLM                       │
   │                                     filter ──► summary                   │
   │                                            │                             │
-  │      on final failure ─► errors row + POST n8n error webhook            │
+  │      on final failure ─► errors row (n8n pulls via GET /api/errors)      │
   └────────────────────────────────┬─────────────────────────────────────────┘
                                     │  status = matched | filtered_out |
                                     │           enrichment_failed | unenriched
@@ -64,7 +68,7 @@ error webhook.
                                      │  Authorization: Bearer <token>
                                      ▼
                                  ┌───────┐
-                                 │  n8n  │  polls each window, routes matches
+                                 │  n8n  │  polls each window ─► Telegram topics
                                  └───────┘
 ```
 
@@ -94,9 +98,14 @@ config/
 docker/
   Dockerfile         Multi-stage build; one image, different CMD per service
   docker-compose.yml api + worker services (Postgres/Redis are external)
+n8n/
+  Job Notifier.json    Polls GET /api/jobs, fans out to per-source Telegram topics
+  Error Notifier.json  Polls GET /api/errors, posts to the errors topic
 docs/
   testing.md         Test layers + coverage strategy
-.github/workflows/ci.yml   lint · typecheck · test:coverage · docker build
+.github/workflows/
+  ci.yml       lint · typecheck · test:coverage (push to main/develop + PRs)
+  deploy.yml   self-hosted runner, push to main: rsync · .env · compose up · health
 ```
 
 ## Requirements
@@ -115,8 +124,8 @@ Two layers (see PRD §7):
 
 - **`config/*.yaml`** — non-secret structure. `sources.yaml` declares each source
   (URL, 5-field cron in `Europe/Berlin`, `enabled`); `app.yaml` holds LLM models,
-  retry/backoff, rate limits, the n8n error webhook URL, and timezone. Both ship
-  with working sample values.
+  retry/backoff, rate limits, the optional n8n error webhook URL (empty = n8n
+  pulls instead), and timezone. Both ship with working sample values.
 - **Env vars** (`.env` locally, host env / secrets in prod) — connection strings
   and secrets:
 
@@ -177,27 +186,35 @@ Before enrichment can match anything, seed the prompts for each source:
 ```bash
 curl -X POST localhost:3000/api/prompts \
   -H "Authorization: Bearer $API_BEARER_TOKEN" -H 'content-type: application/json' \
-  -d '{"source":"feki","role":"filter","template":"Job: {{title}} at {{company}} in {{location}}. Reply JSON {should_notify:boolean, reason:string}."}'
+  -d '{"source":"feki","role":"filter","template":"Job: {{title}} at {{company}}. Description: {{description}}. Extract JSON {german_phrase:string|null, german_requirement:\"NONE\"|\"OPTIONAL\"|\"REQUIRED\", reason:string}."}'
 ```
+
+The filter template must *extract* — it reports `german_requirement`, and the
+worker decides `matched` vs `filtered_out` from it. Don't ask the model for a
+notify boolean; deriving it in code is what makes the German-language filter
+reliable.
 
 ## Running in production
 
 Postgres and Redis are assumed to already exist on the host. The api and worker
 share one image; migrations self-apply at startup under an advisory lock.
 
-**Option A — build and run with Compose** (on the host):
+**Automated — push to `main`.** `.github/workflows/deploy.yml` runs on a
+**self-hosted runner** on the home server: rsyncs the repo to `APP_DIR`, writes
+`.env` from the single `ENV_FILE` GitHub secret, `docker compose up -d --build`,
+then polls `/health`. Migrations self-apply at boot (advisory lock), so there's
+no separate migrate step. Set `ENV_FILE` (repo secret) to the full `.env`
+content — see `.env.example` for the keys.
+
+**Manual — Compose on the host:**
 
 ```bash
 cp .env.example .env      # fill in real DATABASE_URL / REDIS_URL / secrets
-docker compose -f docker/docker-compose.yml --env-file .env up -d --build
+docker compose -f docker/docker-compose.yml up -d --build
 ```
 
-Compose reads env from the file; `api` is published on `:3000`, both restart
-`unless-stopped`.
-
-**Option B — pull the CI-built image.** On a push to `main`, CI builds and pushes
-`ghcr.io/<owner>/<repo>:latest` (and `:<sha>`). Point the compose `image:` at that
-tag (drop the `build:` block) and `docker compose ... up -d`.
+Compose reads env from `.env` via `env_file`; `api` is published on `:3000`,
+both restart `unless-stopped`.
 
 Operational notes:
 
