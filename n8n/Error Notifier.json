@@ -177,11 +177,11 @@
     },
     {
       "parameters": {
-        "amount": 1,
+        "amount": 4,
         "unit": "seconds"
       },
       "id": "b1000000-0000-4000-8000-000000000008",
-      "name": "Wait 1s",
+      "name": "Throttle",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [900, 140],
@@ -254,6 +254,9 @@
       "typeVersion": 1.2,
       "position": [1560, 40],
       "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000,
       "credentials": {
         "telegramApi": {
           "id": "f4pv9xKThTzvoWsK",
@@ -277,6 +280,9 @@
       "typeVersion": 1.2,
       "position": [1340, 260],
       "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000,
       "credentials": {
         "telegramApi": {
           "id": "f4pv9xKThTzvoWsK",
@@ -337,12 +343,12 @@
       "main": [[{ "node": "Telegram Job Error", "type": "main", "index": 0 }]]
     },
     "Telegram Job Error": {
-      "main": [[{ "node": "Wait 1s", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Throttle", "type": "main", "index": 0 }]]
     },
     "Telegram Source Error": {
-      "main": [[{ "node": "Wait 1s", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Throttle", "type": "main", "index": 0 }]]
     },
-    "Wait 1s": {
+    "Throttle": {
       "main": [[{ "node": "Loop Over Errors", "type": "main", "index": 0 }]]
     }
   },
