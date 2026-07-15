@@ -70,6 +70,18 @@
               "name": "LIMIT",
               "value": "500",
               "type": "string"
+            },
+            {
+              "id": "c0000000-0000-0000-0000-000000000007",
+              "name": "TOPIC_FEKI",
+              "value": "7",
+              "type": "string"
+            },
+            {
+              "id": "c0000000-0000-0000-0000-000000000008",
+              "name": "TOPIC_ARBEIT",
+              "value": "10",
+              "type": "string"
             }
           ]
         },
@@ -172,23 +184,45 @@
     },
     {
       "parameters": {
-        "amount": 1,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c0000000-0000-0000-0000-00000000000b",
+              "name": "thread_id",
+              "value": "={{ ($json.source || '').startsWith('feki') ? 7 : 10 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-00000000000b",
+      "name": "Add Thread",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [790, 140]
+    },
+    {
+      "parameters": {
+        "amount": 4,
         "unit": "seconds"
       },
       "id": "a1000000-0000-4000-8000-000000000008",
-      "name": "Wait 1s",
+      "name": "Throttle",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [900, 140],
+      "position": [1340, 140],
       "webhookId": "a1000000-0000-4000-8000-0000000000w2"
     },
     {
       "parameters": {
         "chatId": "={{ $('Set Config').item.json.TELEGRAM_CHANNEL }}",
-        "text": "=<b><a href=\"{{ $json.apply_url }}\">{{ ($json.enrichment_json.summary.title_en || $json.title).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</a></b>\n{{ [$json.company, $json.location].filter(Boolean).join(' — ').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}\n\n{{ $json.enrichment_json.summary.summary_en.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
+        "text": "=<b>💼 <a href=\"{{ $json.apply_url }}\">{{ ($json.enrichment_json.summary.title_en || $json.title).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</a></b>\n{{ [$json.company ? '🏢 ' + $json.company : '', $json.location ? '📍 ' + $json.location : ''].filter(Boolean).join(' · ').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}\n🕒 Posted {{ $json.posted_at ? DateTime.fromISO($json.posted_at).setZone('Europe/Berlin').toFormat('dd LLL yyyy, HH:mm') : 'n/a' }}\n\n<blockquote>{{ $json.enrichment_json.summary.summary_en.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</blockquote>{{ ($json.enrichment_json.summary.key_points && $json.enrichment_json.summary.key_points.length) ? '\\n\\n<b>Highlights</b>\\n' + $json.enrichment_json.summary.key_points.map(p => '• ' + p.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')).join('\\n') : '' }}",
         "additionalFields": {
           "appendAttribution": false,
-          "parse_mode": "HTML"
+          "parse_mode": "HTML",
+          "message_thread_id": "={{ $json.thread_id }}"
         }
       },
       "id": "a1000000-0000-4000-8000-000000000009",
@@ -197,12 +231,26 @@
       "typeVersion": 1.2,
       "position": [1120, 140],
       "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000,
       "credentials": {
         "telegramApi": {
           "id": "f4pv9xKThTzvoWsK",
           "name": "Alert Bot"
         }
       }
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-00000000000a",
+      "name": "Loop Over Jobs",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [900, 140]
     }
   ],
   "connections": {
@@ -228,10 +276,22 @@
       ]
     },
     "Split Jobs": {
-      "main": [[{ "node": "Wait 1s", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Add Thread", "type": "main", "index": 0 }]]
     },
-    "Wait 1s": {
-      "main": [[{ "node": "Telegram Job", "type": "main", "index": 0 }]]
+    "Add Thread": {
+      "main": [[{ "node": "Loop Over Jobs", "type": "main", "index": 0 }]]
+    },
+    "Loop Over Jobs": {
+      "main": [
+        [],
+        [{ "node": "Telegram Job", "type": "main", "index": 0 }]
+      ]
+    },
+    "Telegram Job": {
+      "main": [[{ "node": "Throttle", "type": "main", "index": 0 }]]
+    },
+    "Throttle": {
+      "main": [[{ "node": "Loop Over Jobs", "type": "main", "index": 0 }]]
     }
   },
   "settings": {

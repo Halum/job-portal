@@ -16,13 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: pnpm
-
       - name: Sync code to app directory
         run: |
           mkdir -p ${{ env.APP_DIR }}
@@ -34,8 +27,7 @@ jobs:
             --exclude '.env' \
             ./ ${{ env.APP_DIR }}/
 
-      # Single source of truth for every secret. Compose reads it via `env_file`,
-      # and the migration step below sources it for DATABASE_URL.
+      # Single source of truth for every secret. Compose reads it via `env_file`.
       - name: Write .env from ENV_FILE secret
         env:
           ENV_FILE: ${{ secrets.ENV_FILE }}
@@ -43,19 +35,9 @@ jobs:
           printf '%s\n' "$ENV_FILE" > ${{ env.APP_DIR }}/.env
           chmod 600 ${{ env.APP_DIR }}/.env
 
-      # Migrations run on the runner, not in the image: `db:migrate` needs tsx,
-      # which is a devDependency the production image deliberately doesn't ship.
-      # runMigrationsWithLock takes a Postgres advisory lock, so a concurrent
-      # deploy waits rather than racing.
-      - name: Run migrations
-        working-directory: ${{ env.APP_DIR }}
-        run: |
-          # --prod=false: migrate needs tsx, a devDependency. Sourcing .env
-          # (NODE_ENV=production) before install would make pnpm skip it.
-          pnpm install --frozen-lockfile --prod=false
-          set -a && . ./.env && set +a
-          pnpm --filter @job-portal/db db:migrate
-
+      # No migrate step: the api/worker run runMigrationsWithLock at boot under a
+      # Postgres advisory lock, and the prod image ships the drizzle SQL, so
+      # migrations self-apply on startup without tsx on the runner.
       - name: Deploy with Docker Compose
         working-directory: ${{ env.APP_DIR }}
         run: |

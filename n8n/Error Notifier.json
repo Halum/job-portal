@@ -70,6 +70,12 @@
               "name": "LIMIT",
               "value": "500",
               "type": "string"
+            },
+            {
+              "id": "e0000000-0000-0000-0000-000000000007",
+              "name": "TOPIC_ERRORS",
+              "value": "13",
+              "type": "string"
             }
           ]
         },
@@ -171,11 +177,11 @@
     },
     {
       "parameters": {
-        "amount": 1,
+        "amount": 4,
         "unit": "seconds"
       },
       "id": "b1000000-0000-4000-8000-000000000008",
-      "name": "Wait 1s",
+      "name": "Throttle",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [900, 140],
@@ -235,10 +241,11 @@
     {
       "parameters": {
         "chatId": "={{ $('Set Config').item.json.TELEGRAM_CHANNEL }}",
-        "text": "=<b><a href=\"{{ $json.apply_url }}\">{{ $json.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</a></b>\n{{ $('Split Errors').item.json.source }} · {{ $('Split Errors').item.json.stage }} · attempt {{ $('Split Errors').item.json.attempts }}\n\n<code>{{ $('Split Errors').item.json.error_message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</code>",
+        "text": "=⚠️ <b>Enrichment Failed</b>\n<a href=\"{{ $json.apply_url }}\">{{ $json.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</a>\n<i>{{ $('Loop Over Errors').item.json.source }} · {{ $('Loop Over Errors').item.json.stage }} · attempt {{ $('Loop Over Errors').item.json.attempts }}</i>\n🕒 {{ DateTime.fromISO($('Loop Over Errors').item.json.created_at).setZone('Europe/Berlin').toFormat('dd LLL yyyy, HH:mm') }}\n\n<pre>{{ $('Loop Over Errors').item.json.error_message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</pre>",
         "additionalFields": {
           "appendAttribution": false,
-          "parse_mode": "HTML"
+          "parse_mode": "HTML",
+          "message_thread_id": "={{ $('Set Config').item.json.TOPIC_ERRORS }}"
         }
       },
       "id": "b1000000-0000-4000-8000-00000000000b",
@@ -247,6 +254,9 @@
       "typeVersion": 1.2,
       "position": [1560, 40],
       "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000,
       "credentials": {
         "telegramApi": {
           "id": "f4pv9xKThTzvoWsK",
@@ -257,10 +267,11 @@
     {
       "parameters": {
         "chatId": "={{ $('Set Config').item.json.TELEGRAM_CHANNEL }}",
-        "text": "=<b>{{ $json.source || 'unknown source' }} · {{ $json.stage }}</b>\nattempt {{ $json.attempts }} · no job linked\n\n<code>{{ $json.error_message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</code>",
+        "text": "=⚠️ <b>{{ $json.stage === 'scrape' ? 'Scrape Failed' : 'Failed' }}</b>\n<i>{{ $json.source || 'unknown source' }} · {{ $json.stage }} · attempt {{ $json.attempts }}</i>\n🕒 {{ DateTime.fromISO($json.created_at).setZone('Europe/Berlin').toFormat('dd LLL yyyy, HH:mm') }}\n\n<pre>{{ $json.error_message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}</pre>",
         "additionalFields": {
           "appendAttribution": false,
-          "parse_mode": "HTML"
+          "parse_mode": "HTML",
+          "message_thread_id": "={{ $('Set Config').item.json.TOPIC_ERRORS }}"
         }
       },
       "id": "b1000000-0000-4000-8000-00000000000c",
@@ -269,12 +280,26 @@
       "typeVersion": 1.2,
       "position": [1340, 260],
       "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000,
       "credentials": {
         "telegramApi": {
           "id": "f4pv9xKThTzvoWsK",
           "name": "Alert Bot"
         }
       }
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "b1000000-0000-4000-8000-00000000000d",
+      "name": "Loop Over Errors",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [900, 140]
     }
   ],
   "connections": {
@@ -300,10 +325,13 @@
       ]
     },
     "Split Errors": {
-      "main": [[{ "node": "Wait 1s", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Loop Over Errors", "type": "main", "index": 0 }]]
     },
-    "Wait 1s": {
-      "main": [[{ "node": "If - Has Job", "type": "main", "index": 0 }]]
+    "Loop Over Errors": {
+      "main": [
+        [],
+        [{ "node": "If - Has Job", "type": "main", "index": 0 }]
+      ]
     },
     "If - Has Job": {
       "main": [
@@ -313,6 +341,15 @@
     },
     "Get Job": {
       "main": [[{ "node": "Telegram Job Error", "type": "main", "index": 0 }]]
+    },
+    "Telegram Job Error": {
+      "main": [[{ "node": "Throttle", "type": "main", "index": 0 }]]
+    },
+    "Telegram Source Error": {
+      "main": [[{ "node": "Throttle", "type": "main", "index": 0 }]]
+    },
+    "Throttle": {
+      "main": [[{ "node": "Loop Over Errors", "type": "main", "index": 0 }]]
     }
   },
   "settings": {
