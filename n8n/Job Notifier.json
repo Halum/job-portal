@@ -189,7 +189,7 @@
             {
               "id": "c0000000-0000-0000-0000-00000000000b",
               "name": "thread_id",
-              "value": "={{ ($json.source || '').startsWith('feki') ? $('Set Config').first().json.TOPIC_FEKI : $('Set Config').first().json.TOPIC_ARBEIT }}",
+              "value": "={{ ($json.source || '').startsWith('feki') ? 7 : 10 }}",
               "type": "number"
             }
           ]
