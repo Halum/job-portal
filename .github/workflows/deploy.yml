@@ -2,9 +2,7 @@ name: Deploy
 
 on:
   push:
-    # TODO: switch back to [main] once a deploy succeeds end-to-end. On develop
-    # for now so fixes deploy without a main round-trip.
-    branches: [develop]
+    branches: [main]
   workflow_dispatch:
 
 env:
