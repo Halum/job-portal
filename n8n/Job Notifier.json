@@ -184,6 +184,27 @@
     },
     {
       "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c0000000-0000-0000-0000-00000000000b",
+              "name": "thread_id",
+              "value": "={{ ($json.source || '').startsWith('feki') ? $('Set Config').first().json.TOPIC_FEKI : $('Set Config').first().json.TOPIC_ARBEIT }}",
+              "type": "number"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-00000000000b",
+      "name": "Add Thread",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [790, 140]
+    },
+    {
+      "parameters": {
         "amount": 1,
         "unit": "seconds"
       },
@@ -201,7 +222,7 @@
         "additionalFields": {
           "appendAttribution": false,
           "parse_mode": "HTML",
-          "message_thread_id": "={{ ($json.source || '').startsWith('feki') ? $('Set Config').item.json.TOPIC_FEKI : $('Set Config').item.json.TOPIC_ARBEIT }}"
+          "message_thread_id": "={{ $json.thread_id }}"
         }
       },
       "id": "a1000000-0000-4000-8000-000000000009",
@@ -252,6 +273,9 @@
       ]
     },
     "Split Jobs": {
+      "main": [[{ "node": "Add Thread", "type": "main", "index": 0 }]]
+    },
+    "Add Thread": {
       "main": [[{ "node": "Loop Over Jobs", "type": "main", "index": 0 }]]
     },
     "Loop Over Jobs": {
