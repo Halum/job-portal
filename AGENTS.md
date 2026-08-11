@@ -66,6 +66,7 @@ Job `status`: `unenriched` → `matched` | `filtered_out` | `enrichment_failed`.
 - **New API endpoint** → also add it to the hand-authored OpenAPI spec `apps/api/src/openapi.ts` (served at `/docs`) in the same change. (Project rule: every endpoint gets OpenAPI docs in the same sprint.)
 - **New scrape source** → add a `sources.yaml` entry; add an adapter in `packages/scrapers` implementing the adapter interface (`types.ts`) and register it in `getAdapter`; test against a saved fixture in `test/fixtures/`.
 - **Schema change** → edit `packages/db/src/schema/*.ts`, then `db:generate` to emit the SQL migration; commit both.
+- **n8n workflow change** (live edit via n8n MCP/UI) → export the updated workflow JSON into `n8n/*.json` in the same commit. The repo copy is documentation of what's live, not the source of truth — a commit that changes routing/config touching a live workflow without updating its `n8n/*.json` counterpart leaves the repo lying about production.
 
 ## Keeping this file current
 
