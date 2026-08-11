@@ -18,6 +18,20 @@ export type ErrorStage = (typeof ERROR_STAGES)[number];
 export const SOURCE_TYPES = ['arbeitsagentur', 'feki'] as const;
 export type SourceType = (typeof SOURCE_TYPES)[number];
 
+/** BullMQ scrape-queue job payload. Single source of truth for both
+ * producers (worker's cron registration, api's /api/admin/rescrape) and the
+ * worker's consumer, so they can't drift out of sync with each other. */
+export interface ScrapePayload {
+  sourceName: string;
+  sourceType: SourceType;
+  url: string;
+}
+
+/** BullMQ enrichment-queue job payload. */
+export interface EnrichmentPayload {
+  jobId: number;
+}
+
 export interface FilterPassOutput {
   should_notify: boolean;
   reason: string;

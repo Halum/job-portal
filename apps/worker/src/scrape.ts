@@ -1,20 +1,12 @@
 import type { Queue } from 'bullmq';
-import { getAdapter, type RawJob, type SourceType } from '@job-portal/scrapers';
+import { getAdapter, type RawJob } from '@job-portal/scrapers';
 import { insertNewJobs, type Database, type NewJobRow } from '@job-portal/db';
-import type { Logger } from '@job-portal/shared';
+import type { EnrichmentPayload, Logger, ScrapePayload } from '@job-portal/shared';
 import type { SourceEntry } from '@job-portal/config';
 
 const TIMEZONE = 'Europe/Berlin';
 
-export interface ScrapePayload {
-  sourceName: string;
-  sourceType: SourceType;
-  url: string;
-}
-
-export interface EnrichmentPayload {
-  jobId: number;
-}
+export type { EnrichmentPayload, ScrapePayload };
 
 /** RawJob (adapter output) → jobs table insert row. */
 export function mapRawJobToRow(sourceName: string, raw: RawJob): NewJobRow {

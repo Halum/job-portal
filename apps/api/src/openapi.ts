@@ -299,6 +299,35 @@ export const openapiSpec = {
         },
       },
     },
+    '/api/admin/rescrape': {
+      post: {
+        summary: 'Enqueue a one-off scrape run, separate from the cron (admin)',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                description: 'source omitted = every enabled source; unknown source = 404.',
+                properties: {
+                  source: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Names of the sources enqueued',
+            content: { 'application/json': { example: { queued: ['arbeitsagentur-coburg'] } } },
+          },
+          '400': badRequest,
+          '401': unauthorized,
+          '404': { description: 'Unknown source name' },
+        },
+      },
+    },
     '/api/sources': {
       get: {
         summary: 'List configured sources (in-memory, not DB) (admin, PRD §12)',
