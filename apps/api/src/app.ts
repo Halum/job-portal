@@ -20,6 +20,7 @@ export interface CreateAppOptions {
   health: HealthDeps;
   db: Database;
   enrichmentQueue: Pick<Queue, 'add'>;
+  scrapeQueue: Pick<Queue, 'add'>;
   sources: SourceEntry[];
 }
 
@@ -28,7 +29,7 @@ export interface CreateAppOptions {
  * apps/api/src/index.ts so tests can exercise it in-process with supertest.
  */
 export function createApp(options: CreateAppOptions): Express {
-  const { bearerToken, logger, health, db, enrichmentQueue, sources } = options;
+  const { bearerToken, logger, health, db, enrichmentQueue, scrapeQueue, sources } = options;
   const auth = bearerAuth(bearerToken);
 
   const app = express();
@@ -54,7 +55,7 @@ export function createApp(options: CreateAppOptions): Express {
   app.use(createPingRouter(auth));
   app.use(createPromptsRouter(auth, db));
   app.use(createJobsRouter(auth, db));
-  app.use(createAdminRouter({ auth, db, enrichmentQueue, sources }));
+  app.use(createAdminRouter({ auth, db, enrichmentQueue, scrapeQueue, sources }));
 
   app.use((req, res) => {
     res.status(404).json({ error: 'Not found' });

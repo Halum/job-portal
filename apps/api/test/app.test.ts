@@ -16,6 +16,7 @@ function buildApp(overrides: { dbOk?: boolean; redisOk?: boolean } = {}) {
     // These tests never hit /api/prompts, so a stub db is fine.
     db: {} as Database,
     enrichmentQueue: { add: async () => undefined as never },
+    scrapeQueue: { add: async () => undefined as never },
     sources: [],
     health: {
       checkDb: async () => {
@@ -114,6 +115,7 @@ describe('GET /docs (Swagger UI, no auth)', () => {
     expect(openapiSpec.paths).toHaveProperty('/api/jobs');
     expect(openapiSpec.paths).toHaveProperty('/api/jobs/{id}');
     expect(openapiSpec.paths).toHaveProperty('/api/admin/reenrich');
+    expect(openapiSpec.paths).toHaveProperty('/api/admin/rescrape');
     expect(openapiSpec.paths).toHaveProperty('/api/sources');
     expect(openapiSpec.paths).toHaveProperty('/api/errors');
     expect(openapiSpec.components.schemas).toHaveProperty('Job');
@@ -131,6 +133,9 @@ describe('pull + admin endpoints auth (no db needed)', () => {
   });
   it('POST /api/admin/reenrich requires auth', async () => {
     expect((await request(buildApp()).post('/api/admin/reenrich').send({})).status).toBe(401);
+  });
+  it('POST /api/admin/rescrape requires auth', async () => {
+    expect((await request(buildApp()).post('/api/admin/rescrape').send({})).status).toBe(401);
   });
   it('GET /api/errors requires auth', async () => {
     expect((await request(buildApp()).get('/api/errors')).status).toBe(401);
@@ -151,6 +156,7 @@ describe('pull + admin endpoints auth (no db needed)', () => {
       logger,
       db: {} as Database,
       enrichmentQueue: { add: async () => undefined as never },
+    scrapeQueue: { add: async () => undefined as never },
       sources,
       health: { checkDb: async () => true, checkRedis: async () => true },
     });

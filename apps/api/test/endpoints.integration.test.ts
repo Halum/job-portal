@@ -32,6 +32,20 @@ const T3 = new Date('2026-07-03T00:00:00Z');
 
 const sources: SourceEntry[] = [
   { name: 'feki', source_type: 'feki', url: 'https://feki/x', cron: '0 * * * *', enabled: true },
+  {
+    name: 'arbeitsagentur-coburg',
+    source_type: 'arbeitsagentur',
+    url: 'https://aa/coburg',
+    cron: '0 */6 * * *',
+    enabled: true,
+  },
+  {
+    name: 'disabled-src',
+    source_type: 'feki',
+    url: 'https://feki/disabled',
+    cron: '0 * * * *',
+    enabled: false,
+  },
 ];
 
 describe.skipIf(!hasDocker)('pull/admin API (Testcontainers pg)', () => {
@@ -40,6 +54,7 @@ describe.skipIf(!hasDocker)('pull/admin API (Testcontainers pg)', () => {
   let db: Database;
   let app: ReturnType<typeof createApp>;
   const queued: { name: string; data: unknown }[] = [];
+  const scrapeQueued: { name: string; data: unknown }[] = [];
 
   async function startPg() {
     const { PostgreSqlContainer } = await import('@testcontainers/postgresql');
@@ -119,6 +134,12 @@ describe.skipIf(!hasDocker)('pull/admin API (Testcontainers pg)', () => {
           return undefined as never;
         },
       },
+      scrapeQueue: {
+        add: async (name: string, data: unknown) => {
+          scrapeQueued.push({ name, data });
+          return undefined as never;
+        },
+      },
       sources,
       health: { checkDb: async () => true, checkRedis: async () => true },
     });
@@ -185,6 +206,43 @@ describe.skipIf(!hasDocker)('pull/admin API (Testcontainers pg)', () => {
     const scrape = await request(app).get('/api/errors?stage=scrape').set(auth);
     expect(scrape.body.count).toBe(1);
     expect(scrape.body.errors[0].stage).toBe('scrape');
+  });
+
+  it('POST /api/admin/rescrape with a source name enqueues just that source', async () => {
+    scrapeQueued.length = 0;
+    const res = await request(app)
+      .post('/api/admin/rescrape')
+      .set(auth)
+      .send({ source: 'arbeitsagentur-coburg' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ queued: ['arbeitsagentur-coburg'] });
+    expect(scrapeQueued).toHaveLength(1);
+    expect(scrapeQueued[0]).toEqual({
+      name: 'arbeitsagentur-coburg',
+      data: {
+        sourceName: 'arbeitsagentur-coburg',
+        sourceType: 'arbeitsagentur',
+        url: 'https://aa/coburg',
+      },
+    });
+  });
+
+  it('POST /api/admin/rescrape with no body enqueues every enabled source', async () => {
+    scrapeQueued.length = 0;
+    const res = await request(app).post('/api/admin/rescrape').set(auth).send({});
+    expect(res.status).toBe(200);
+    expect(res.body.queued.sort()).toEqual(['arbeitsagentur-coburg', 'feki']);
+    expect(scrapeQueued).toHaveLength(2);
+  });
+
+  it('POST /api/admin/rescrape 404s on an unknown source', async () => {
+    const res = await request(app).post('/api/admin/rescrape').set(auth).send({ source: 'nope' });
+    expect(res.status).toBe(404);
+  });
+
+  it('POST /api/admin/rescrape requires auth', async () => {
+    const res = await request(app).post('/api/admin/rescrape').send({});
+    expect(res.status).toBe(401);
   });
 
   it('POST /api/admin/reenrich with job_ids enqueues one enrich job per id', async () => {

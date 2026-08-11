@@ -2,7 +2,7 @@ import { Redis } from 'ioredis';
 import { Queue } from 'bullmq';
 import { loadConfigOrExit } from '@job-portal/config';
 import { createDbClient, runMigrationsWithLock } from '@job-portal/db';
-import { createLogger, createRedisConnection, ENRICHMENT_QUEUE } from '@job-portal/shared';
+import { createLogger, createRedisConnection, ENRICHMENT_QUEUE, SCRAPE_QUEUE } from '@job-portal/shared';
 import { createApp } from './app.js';
 
 const config = loadConfigOrExit();
@@ -38,11 +38,25 @@ const enrichmentQueue = new Queue(ENRICHMENT_QUEUE, {
   },
 });
 
+// Scrape queue producer for /api/admin/rescrape — no repeat block, just a
+// one-off job alongside the worker's cron registration (registerScrapeJobs).
+const scrapeConnection = createRedisConnection(config.env.REDIS_URL);
+const scrapeQueue = new Queue(SCRAPE_QUEUE, {
+  connection: scrapeConnection,
+  defaultJobOptions: {
+    attempts: config.app.retries.scrape.attempts,
+    backoff: { type: 'exponential', delay: config.app.retries.scrape.backoff_ms },
+    removeOnComplete: 100,
+    removeOnFail: 500,
+  },
+});
+
 const app = createApp({
   bearerToken: config.env.API_BEARER_TOKEN,
   logger,
   db,
   enrichmentQueue,
+  scrapeQueue,
   sources: config.sources,
   health: {
     checkDb: async () => {
@@ -66,6 +80,8 @@ async function shutdown(signal: string): Promise<void> {
   server.close();
   await enrichmentQueue.close();
   enrichmentConnection.disconnect();
+  await scrapeQueue.close();
+  scrapeConnection.disconnect();
   await closeDb();
   redis.disconnect();
   process.exit(0);

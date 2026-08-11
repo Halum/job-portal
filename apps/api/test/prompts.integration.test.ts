@@ -48,6 +48,7 @@ describe.skipIf(!hasDocker)('/api/prompts (Testcontainers pg)', () => {
       logger: createLogger({ level: 'silent' }),
       db: client.db as Database,
       enrichmentQueue: { add: async () => undefined as never },
+      scrapeQueue: { add: async () => undefined as never },
       sources: [],
       health: { checkDb: async () => true, checkRedis: async () => true },
     });

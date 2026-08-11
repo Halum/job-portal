@@ -8,6 +8,12 @@ sources:
     cron: "0 */6 * * *"
     enabled: true
 
+  - name: arbeitsagentur-coburg
+    source_type: arbeitsagentur
+    url: "https://www.arbeitsagentur.de/jobsuche/suche?angebotsart=1&wo=96476%20Bad%20Rodach&umkreis=15&arbeitszeit=tz;snw;mj&sort=veroeffdatum&suchbereich=jobs"
+    cron: "0 */6 * * *"
+    enabled: true
+
   - name: feki-jobboerse
     source_type: feki
     url: "https://www.feki.de/jobboerse"
