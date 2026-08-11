@@ -96,8 +96,8 @@
     },
     {
       "parameters": {
-        "url": "={{ $json.BASE_URL }}/api/jobs",
-        "sendQuery": true,
+        "url": "={{ $json.BASE_URL + '/api/jobs?status=matched&from=' + encodeURIComponent($json.FROM) + '&to=' + encodeURIComponent($json.TO) + '&limit=' + $json.LIMIT + '&offset=0' + ($json.source ? '&source=' + encodeURIComponent($json.source) : '') }}",
+        "sendQuery": false,
         "queryParameters": {
           "parameters": [
             { "name": "status", "value": "matched" },
