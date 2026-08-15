@@ -120,7 +120,9 @@ export function createEnrichmentHandler(deps: EnrichmentHandlerDeps) {
 
     // 6. Not a match — done. The filter pass only EXTRACTS what the posting says
     // about German; the verdict is derived here, not taken from the model.
-    if (!shouldNotify(filterOutput)) {
+    // Sources with skip_language_filter (e.g. no German-requirement filtering
+    // wanted) ignore the verdict and always proceed to summary/match.
+    if (!sourceEntry.skip_language_filter && !shouldNotify(filterOutput)) {
       await markFilteredOut(db, job.id, filterOutput, filterCost);
       logger.info(
         {

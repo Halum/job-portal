@@ -189,7 +189,7 @@
             {
               "id": "c0000000-0000-0000-0000-00000000000b",
               "name": "thread_id",
-              "value": "={{ $json.source === 'feki-jobboerse' ? 7 : $json.source === 'arbeitsagentur-coburg' ? 412 : 10 }}",
+              "value": "={{ $json.source === 'feki-jobboerse' ? 7 : $json.source === 'arbeitsagentur-coburg' ? 412 : $json.source === 'arbeitsagentur-frankfurt-part' ? 512 : $json.source === 'arbeitsagentur-frankfurt-full' ? 513 : 10 }}",
               "type": "number"
             }
           ]

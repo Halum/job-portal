@@ -18,6 +18,7 @@ export const sourceEntrySchema = z.object({
   url: z.string().url(),
   cron: cronSchema,
   enabled: z.boolean(),
+  skip_language_filter: z.boolean().default(false),
 });
 
 export const sourcesFileSchema = z.object({
