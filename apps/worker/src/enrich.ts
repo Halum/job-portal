@@ -4,6 +4,7 @@ import {
   markEnrichmentFailed,
   markFilteredOut,
   markMatched,
+  markMatchedDirect,
   setJobDescription,
   type Database,
 } from '@job-portal/db';
@@ -71,6 +72,16 @@ export function createEnrichmentHandler(deps: EnrichmentHandlerDeps) {
       return;
     }
     const source = sourceEntry.source_type;
+
+    // skip_enrichment: no LLM calls, mark matched directly.
+    if (sourceEntry.skip_enrichment) {
+      await markMatchedDirect(db, job.id);
+      logger.info(
+        { job_id: job.id, source: job.source, status: 'matched', duration_ms: Date.now() - start },
+        'enrichment: skip_enrichment, matched directly',
+      );
+      return;
+    }
 
     // 2. Load the filter prompt for this source.
     const filterPrompt = await getPrompt(db, source, 'filter');

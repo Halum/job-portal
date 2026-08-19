@@ -19,13 +19,14 @@ sources:
     url: "https://www.arbeitsagentur.de/jobsuche/suche?angebotsart=1&wo=60385%20Frankfurt%20am%20Main&umkreis=15&arbeitszeit=tz;snw;mj&sort=veroeffdatum&suchbereich=jobs"
     cron: "10 */6 * * *"
     enabled: true
+    skip_enrichment: true
 
   - name: arbeitsagentur-frankfurt-full
     source_type: arbeitsagentur
     url: "https://www.arbeitsagentur.de/jobsuche/suche?angebotsart=1&wo=60385%20Frankfurt%20am%20Main&umkreis=15&arbeitszeit=vz&sort=veroeffdatum&suchbereich=jobs"
     cron: "15 */6 * * *"
     enabled: true
-    skip_language_filter: true
+    skip_enrichment: true
 
   - name: feki-jobboerse
     source_type: feki
