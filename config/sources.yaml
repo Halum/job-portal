@@ -14,9 +14,9 @@ sources:
     cron: "5 */6 * * *"
     enabled: true
 
-  - name: arbeitsagentur-frankfurt-part
+  - name: arbeitsagentur-frankfurt
     source_type: arbeitsagentur
-    url: "https://www.arbeitsagentur.de/jobsuche/suche?angebotsart=1&wo=60385%20Frankfurt%20am%20Main&umkreis=15&arbeitszeit=tz;snw;mj&sort=veroeffdatum&suchbereich=jobs"
+    url: "https://www.arbeitsagentur.de/jobsuche/suche?angebotsart=1&wo=60385%20Frankfurt%20am%20Main&umkreis=15&arbeitszeit=vz;tz;snw;mj&sort=veroeffdatum&suchbereich=jobs"
     cron: "10 */6 * * *"
     enabled: true
     skip_enrichment: true
