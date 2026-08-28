@@ -154,7 +154,7 @@
     {
       "parameters": {
         "chatId": "={{ $('Set Config').item.json.TELEGRAM_CHANNEL }}",
-        "text": "=*New Jobs: * {{ $json.count }}\n--------------------------------------------------",
+        "text": "=*New Jobs: * {{ $json.count }}\n--------------------------------------------------\n\n{{ (() => { const names = {'feki-jobboerse':'Feki','arbeitsagentur-bamberg':'Bamberg','arbeitsagentur-coburg':'Coburg','arbeitsagentur-frankfurt':'Frankfurt'}; const counts = $json.jobs.reduce((a,j) => { const n = names[j.source] || j.source; a[n] = (a[n]||0)+1; return a; }, {}); return Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>k+': '+v).join('\\n'); })() }}\n--------------------------------------------------",
         "additionalFields": {
           "appendAttribution": false
         }
