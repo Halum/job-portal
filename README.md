@@ -99,8 +99,8 @@ docker/
   Dockerfile         Multi-stage build; one image, different CMD per service
   docker-compose.yml api + worker services (Postgres/Redis are external)
 n8n/
-  Job Notifier.json    Polls GET /api/jobs, fans out to per-source Telegram topics
-  Error Notifier.json  Polls GET /api/errors, posts to the errors topic
+  [job-portal] Job Notifier.json    Polls GET /api/jobs, fans out to per-source Telegram topics
+  [job-portal] Error Notifier.json  Polls GET /api/errors, posts to the errors topic
 docs/
   testing.md         Test layers + coverage strategy
 .github/workflows/
