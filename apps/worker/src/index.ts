@@ -11,6 +11,7 @@ import {
 import { createScrapeHandler, registerScrapeJobs, type ScrapePayload } from './scrape.js';
 import { createEnrichmentHandler, type EnrichmentPayload } from './enrich.js';
 import { createErrorNotifier } from './notify.js';
+import { createWatchdog } from './watchdog.js';
 
 const config = loadConfigOrExit();
 const logger = createLogger({ level: config.env.LOG_LEVEL, name: 'worker' });
@@ -50,6 +51,15 @@ const scrapeWorker = new Worker<ScrapePayload>(
   async (job) => handleScrape(job.data),
   { connection, concurrency: 1 },
 );
+
+const watchdog = createWatchdog({
+  redisStatus: () => connection.status,
+  notify,
+  logger,
+  exit: (code) => process.exit(code),
+});
+scrapeWorker.on('completed', () => watchdog.markScrapeOk());
+const watchdogTimer = setInterval(() => void watchdog.check(), 60_000);
 
 scrapeWorker.on('failed', (job, err) => {
   logger.error({ jobId: job?.id, source: job?.data?.sourceName, err }, 'scrape job failed');
@@ -104,6 +114,7 @@ logger.info(
 
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'shutting down');
+  clearInterval(watchdogTimer);
   await scrapeWorker.close();
   await enrichmentWorker.close();
   await scrapeQueue.close();
