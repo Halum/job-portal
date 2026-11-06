@@ -57,6 +57,8 @@ Job `status`: `unenriched` → `matched` | `filtered_out` | `enrichment_failed`.
 
 - **Config is two layers, both loaded + zod-validated at boot** (`packages/config`): `config/sources.yaml` (per-source `name`, `source_type`, `url`, 5-field `Europe/Berlin` cron, `enabled`) and `config/app.yaml` (LLM models, retries/backoff, rate limit, n8n webhook, timezone). Secrets come from env only (`DATABASE_URL`, `REDIS_URL`, `OPENROUTER_API_KEY`, `API_BEARER_TOKEN`). Boot fails loudly on any missing/malformed value.
 
+- **Scrape handler takes the source `url` from loaded config, not the job payload.** BullMQ repeatables carry their data forward run to run and re-adding with new data does not overwrite the scheduled job, so `payload.url` goes stale after a `sources.yaml` url change. Keep the config lookup in `createScrapeHandler`.
+
 - **Queue names live in `packages/shared/src/queues.ts`** — single source of truth so `api` (the reenrich producer) and `worker` (consumer) never depend on each other. BullMQ Workers need `maxRetriesPerRequest: null` on the Redis connection; use `createRedisConnection()`.
 
 - **Every route except `/health` requires `Authorization: Bearer <API_BEARER_TOKEN>`** (constant-time compare, `apps/api/src/middleware/auth.ts`).
