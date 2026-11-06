@@ -2,39 +2,61 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MockAgent, setGlobalDispatcher } from 'undici';
-import { fekiAdapter, parseFekiHtml } from '../src/feki.js';
+import { fekiAdapter, parseFekiHtml, parseRelativeGerman } from '../src/feki.js';
 import { getAdapter } from '../src/index.js';
 
+// Saved from https://bambase.de/jobs on 2026-11-06 (feki.de Jobbörse moved there).
 const html = readFileSync(
-  fileURLToPath(new URL('./fixtures/feki/jobboerse.html', import.meta.url)),
+  fileURLToPath(new URL('./fixtures/feki/jobs.html', import.meta.url)),
   'utf8',
 );
+const NOW = new Date('2026-11-06T12:00:00Z');
 
-describe('parseFekiHtml (real fixture)', () => {
-  const jobs = parseFekiHtml(html);
+describe('parseFekiHtml (real bambase fixture)', () => {
+  const jobs = parseFekiHtml(html, NOW);
 
-  it('extracts all listings on the page', () => {
-    expect(jobs.length).toBe(10);
+  it('extracts all 12 listings on the page and skips /job/new', () => {
+    expect(jobs.length).toBe(12);
+    expect(jobs.some((j) => j.externalId === 'new')).toBe(false);
   });
 
-  it('derives numeric externalId from the detail slug', () => {
-    const j = jobs.find((x) => x.externalId === '38526');
+  it('uses the slug as externalId and reads company/location', () => {
+    const j = jobs.find((x) => x.externalId === 'aushilfe-fuer-augenarztpraxis-bamberg-innenstadt');
     expect(j).toBeDefined();
-    expect(j!.title).toContain('Fahrradkurier');
-    expect(j!.company).toBe('Labor Becker MVZ eGbR');
+    expect(j!.title).toBe('Aushilfe für Augenarztpraxis Bamberg-Innenstadt');
+    expect(j!.company).toBe('Augenarztpraxis Dr. Knorr');
     expect(j!.location).toBe('Bamberg');
     expect(j!.applyUrl).toBe(
-      'https://www.feki.de/jobboerse/details/38526-Fahrradkurier-/-Medizinischer-Probenfahrer-%28m/w/d%29-%E2%80%93-Minijob-im-Herzen-von-Bamberg',
+      'https://bambase.de/job/aushilfe-fuer-augenarztpraxis-bamberg-innenstadt',
     );
-    expect(j!.postedAt?.getFullYear()).toBe(2026);
+    // "vor 17 Stunden"
+    expect(j!.postedAt?.toISOString()).toBe('2026-11-05T19:00:00.000Z');
   });
 
-  it('every job has a stable id, title and applyUrl', () => {
+  it('every job has a stable id, title, applyUrl and postedAt', () => {
     for (const j of jobs) {
-      expect(j.externalId).toMatch(/^\d+$/);
+      expect(j.externalId).toMatch(/^[a-z0-9-]+$/);
       expect(j.title.length).toBeGreaterThan(0);
-      expect(j.applyUrl.startsWith('https://www.feki.de/')).toBe(true);
+      expect(j.applyUrl.startsWith('https://bambase.de/job/')).toBe(true);
+      expect(j.postedAt).toBeInstanceOf(Date);
     }
+  });
+});
+
+describe('parseRelativeGerman', () => {
+  it.each([
+    ['vor 17 Stunden', 17 * 3_600_000],
+    ['vor einem Tag', 86_400_000],
+    ['vor 2 Tagen', 2 * 86_400_000],
+    ['vor einer Stunde', 3_600_000],
+    ['vor 5 Minuten', 5 * 60_000],
+    ['vor 3 Wochen', 3 * 604_800_000],
+  ])('%s', (text, ms) => {
+    expect(NOW.getTime() - parseRelativeGerman(text, NOW)!.getTime()).toBe(ms);
+  });
+
+  it('returns undefined for unknown text', () => {
+    expect(parseRelativeGerman('gerade eben', NOW)).toBeUndefined();
   });
 });
 
@@ -45,72 +67,50 @@ describe('getAdapter', () => {
   });
 });
 
+function mock(path: string, status: number, body: string) {
+  const agent = new MockAgent();
+  agent.disableNetConnect();
+  setGlobalDispatcher(agent);
+  agent.get('https://bambase.de').intercept({ path, method: 'GET' }).reply(status, body);
+}
+
 describe('fekiAdapter.fetch (mocked HTTP)', () => {
   afterEach(() => setGlobalDispatcher(new MockAgent()));
 
   it('fetches and parses', async () => {
-    const agent = new MockAgent();
-    agent.disableNetConnect();
-    setGlobalDispatcher(agent);
-    agent
-      .get('https://www.feki.de')
-      .intercept({ path: '/jobboerse', method: 'GET' })
-      .reply(200, html);
-
-    const jobs = await fekiAdapter.fetch('https://www.feki.de/jobboerse');
-    expect(jobs.length).toBe(10);
+    mock('/jobs', 200, html);
+    expect((await fekiAdapter.fetch('https://bambase.de/jobs')).length).toBe(12);
   });
 
   it('throws on non-2xx', async () => {
-    const agent = new MockAgent();
-    agent.disableNetConnect();
-    setGlobalDispatcher(agent);
-    agent
-      .get('https://www.feki.de')
-      .intercept({ path: '/jobboerse', method: 'GET' })
-      .reply(500, '');
-
-    await expect(fekiAdapter.fetch('https://www.feki.de/jobboerse')).rejects.toThrow(/HTTP 500/);
+    mock('/jobs', 500, '');
+    await expect(fekiAdapter.fetch('https://bambase.de/jobs')).rejects.toThrow(/HTTP 500/);
   });
 });
 
 describe('fekiAdapter.fetchDescription (mocked HTTP)', () => {
   afterEach(() => setGlobalDispatcher(new MockAgent()));
 
-  it('extracts and whitespace-collapses the description container text', async () => {
-    const detailHtml = `<html><body><div class="job-detail-description">
+  it('extracts and whitespace-collapses the description text', async () => {
+    mock(
+      '/job/x',
+      200,
+      `<html><body><main><div class="prose"><p class="whitespace-pre-wrap">
         Line one.
         Line   two.
-      </div></body></html>`;
-    const agent = new MockAgent();
-    agent.disableNetConnect();
-    setGlobalDispatcher(agent);
-    agent
-      .get('https://www.feki.de')
-      .intercept({ path: '/jobboerse/details/38526-x', method: 'GET' })
-      .reply(200, detailHtml);
-
+      </p></div></main></body></html>`,
+    );
     const description = await fekiAdapter.fetchDescription({
-      externalId: '38526',
-      applyUrl: 'https://www.feki.de/jobboerse/details/38526-x',
+      externalId: 'x',
+      applyUrl: 'https://bambase.de/job/x',
     });
     expect(description).toBe('Line one. Line two.');
   });
 
   it('throws on non-2xx', async () => {
-    const agent = new MockAgent();
-    agent.disableNetConnect();
-    setGlobalDispatcher(agent);
-    agent
-      .get('https://www.feki.de')
-      .intercept({ path: '/jobboerse/details/1-x', method: 'GET' })
-      .reply(500, '');
-
+    mock('/job/y', 500, '');
     await expect(
-      fekiAdapter.fetchDescription({
-        externalId: '1',
-        applyUrl: 'https://www.feki.de/jobboerse/details/1-x',
-      }),
+      fekiAdapter.fetchDescription({ externalId: 'y', applyUrl: 'https://bambase.de/job/y' }),
     ).rejects.toThrow(/HTTP 500/);
   });
 });
