@@ -69,6 +69,8 @@ export interface ScrapeHandlerDeps {
   db: Database;
   enrichmentQueue: Pick<Queue, 'add'>;
   logger: Logger;
+  /** Current config; its url wins over the payload's (see handleScrape). */
+  sources?: SourceEntry[];
 }
 
 export interface ScrapeResult {
@@ -84,7 +86,11 @@ export interface ScrapeResult {
 export function createScrapeHandler(deps: ScrapeHandlerDeps) {
   return async function handleScrape(payload: ScrapePayload): Promise<ScrapeResult> {
     const start = Date.now();
-    const rawJobs = await getAdapter(payload.sourceType).fetch(payload.url);
+    // BullMQ repeatables reuse the previous run's data and re-adding does not
+    // overwrite the scheduled job, so payload.url goes stale after a
+    // sources.yaml url change. Resolve it from the loaded config instead.
+    const url = deps.sources?.find((s) => s.name === payload.sourceName)?.url ?? payload.url;
+    const rawJobs = await getAdapter(payload.sourceType).fetch(url);
     const rows = rawJobs.map((r) => mapRawJobToRow(payload.sourceName, r));
     const newIds = await insertNewJobs(deps.db, rows);
 

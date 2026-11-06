@@ -35,7 +35,12 @@ const enrichmentQueue = new Queue(ENRICHMENT_QUEUE, {
   },
 });
 
-const handleScrape = createScrapeHandler({ db, enrichmentQueue, logger });
+const handleScrape = createScrapeHandler({
+  db,
+  enrichmentQueue,
+  logger,
+  sources: config.sources,
+});
 const llm = createLlmClient({ apiKey: config.env.OPENROUTER_API_KEY });
 // One notifier instance, shared by the enrichment handler (missing-prompt
 // terminal paths, PRD §11 step 2) and the worker `failed` handlers (PRD §13).

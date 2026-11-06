@@ -79,11 +79,10 @@ describe('registerScrapeJobs', () => {
       source({ name: 'c', enabled: true, source_type: 'feki', url: 'https://feki/x' }),
     ];
 
-    await registerScrapeJobs(
-      { add, getRepeatableJobs, removeRepeatableByKey },
-      sources,
-      { attempts: 3, backoff_ms: 5000 },
-    );
+    await registerScrapeJobs({ add, getRepeatableJobs, removeRepeatableByKey }, sources, {
+      attempts: 3,
+      backoff_ms: 5000,
+    });
 
     expect(add).toHaveBeenCalledTimes(2);
     const names = add.mock.calls.map((c) => c[0]);
@@ -112,11 +111,10 @@ describe('registerScrapeJobs', () => {
       source({ name: 'c', enabled: true, cron: '0 7 * * *' }),
     ];
 
-    await registerScrapeJobs(
-      { add, getRepeatableJobs, removeRepeatableByKey },
-      sources,
-      { attempts: 3, backoff_ms: 5000 },
-    );
+    await registerScrapeJobs({ add, getRepeatableJobs, removeRepeatableByKey }, sources, {
+      attempts: 3,
+      backoff_ms: 5000,
+    });
 
     expect(removeRepeatableByKey.mock.calls.map((c) => c[0])).toEqual(['a-old-key', 'b-key']);
   });
@@ -261,4 +259,36 @@ describe.skipIf(!hasDocker)('scrape pipeline (Testcontainers pg + redis)', () =>
     await enrichmentQueue.close();
     connection.disconnect();
   }, 30_000);
+
+  it('handler fetches the CURRENT config url, not the stale one in the repeatable payload', async () => {
+    // BullMQ repeatables carry their data forward run to run, and re-adding one
+    // with new data does not overwrite the already-scheduled next job, so a
+    // sources.yaml url change never reaches the payload.
+    const { createLogger } = await import('@job-portal/shared');
+    const handler = createScrapeHandler({
+      db,
+      enrichmentQueue: { add: vi.fn() },
+      logger: createLogger({ level: 'silent' }),
+      sources: [
+        {
+          name: 'moved',
+          source_type: 'arbeitsagentur',
+          url: 'https://www.arbeitsagentur.de/jobsuche/suche?wo=Bamberg',
+          cron: '0 * * * *',
+          enabled: true,
+        } as SourceEntry,
+      ],
+    });
+    mockAgent
+      .get('https://rest.arbeitsagentur.de')
+      .intercept({ path: /wo=Bamberg/, method: 'GET' })
+      .reply(200, AGENTUR_BODY);
+
+    const res = await handler({
+      sourceName: 'moved',
+      sourceType: 'arbeitsagentur',
+      url: 'https://www.arbeitsagentur.de/jobsuche/suche?wo=Coburg', // stale
+    });
+    expect(res.fetched).toBe(2);
+  });
 });
