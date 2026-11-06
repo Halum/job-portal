@@ -2,91 +2,86 @@ import { request } from 'undici';
 import * as cheerio from 'cheerio';
 import type { JobAdapter, RawJob } from './types.js';
 
-const BASE = 'https://www.feki.de';
+// feki.de's Jobbörse moved to bambase.de (Nov 2026); source_type stays `feki`
+// so prompts, the sources.yaml name and the n8n routing keep working.
+const BASE = 'https://bambase.de';
 
-/** "08.07.2026 um 18:20 Uhr" → Date, or undefined if unparseable. */
-function parseGermanDate(text: string): Date | undefined {
-  const m = /(\d{2})\.(\d{2})\.(\d{4})(?:\s+um\s+(\d{2}):(\d{2}))?/.exec(text);
+const UNIT_MS: Record<string, number> = {
+  minute: 60_000,
+  stunde: 3_600_000,
+  tag: 86_400_000,
+  woche: 604_800_000,
+  monat: 2_592_000_000,
+};
+
+/**
+ * "vor 17 Stunden" / "vor einem Tag" / "vor 2 Tagen" → Date relative to `now`.
+ * ponytail: listing only shows relative age (month = 30 days); the detail page
+ * has the exact day, parse it there if precision ever matters.
+ */
+export function parseRelativeGerman(text: string, now = new Date()): Date | undefined {
+  const m = /vor\s+(\d+|einer?m?)\s+(minute|stunde|tag|woche|monat)/i.exec(text);
   if (!m) return undefined;
-  const [, d, mo, y, h = '0', min = '0'] = m;
-  return new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(min));
+  const n = /^\d+$/.test(m[1]!) ? Number(m[1]) : 1;
+  return new Date(now.getTime() - n * UNIT_MS[m[2]!.toLowerCase()]!);
 }
 
-/** Parse the feki jobboerse listing HTML into RawJobs (pure — no network). */
-export function parseFekiHtml(html: string): RawJob[] {
+/** Parse the bambase.de /jobs listing HTML into RawJobs (pure, no network). */
+export function parseFekiHtml(html: string, now = new Date()): RawJob[] {
   const $ = cheerio.load(html);
   const jobs: RawJob[] = [];
 
-  $('.feki_jobboerse_job').each((_, el) => {
+  $('a[href^="/job/"]').each((_, el) => {
     const $el = $(el);
-    const href = $el.find('a[href*="/jobboerse/details/"]').attr('href');
-    if (!href) return; // no detail link → no stable id, skip
+    const href = $el.attr('href')!;
+    // /job/<slug> → slug; skips /job/new and anything without a card title
+    const slug = /^\/job\/([^/?#]+)$/.exec(href)?.[1];
+    const title = $el.find('h3').first().text().trim();
+    if (!slug || slug === 'new' || !title) return;
 
-    // /jobboerse/details/38526-Fahrradkurier... → "38526"
-    const idMatch = /\/jobboerse\/details\/(\d+)-/.exec(href);
-    if (!idMatch) return;
-    const externalId = idMatch[1]!;
-
-    const title = $el.find('h4').first().text().trim();
-
-    // "<strong>Bei</strong> Labor Becker MVZ eGbR  in Bamberg <br/>"
-    // The text node between the "Bei" strong and the next <br> holds both.
-    const beiStrong = $el
-      .find('strong')
-      .filter((_, s) => $(s).text().trim() === 'Bei')
-      .first();
-    const beiText = (beiStrong[0]?.nextSibling as { data?: string } | undefined)?.data ?? '';
-    let company: string | undefined;
-    let location: string | undefined;
-    const trimmed = beiText.trim();
-    if (trimmed) {
-      // ponytail: split on the LAST " in " — company names may contain " in ",
-      // location is the trailing token. Upgrade to detail-page parse if this
-      // misclassifies real listings.
-      const idx = trimmed.lastIndexOf(' in ');
-      if (idx >= 0) {
-        company = trimmed.slice(0, idx).trim().replace(/,\s*$/, '');
-        location = trimmed.slice(idx + 4).trim();
-      } else {
-        company = trimmed;
-      }
-    }
-
-    const postedAt = parseGermanDate($el.text());
+    // meta row: [company span (has .truncate)] [location span] [hours span]
+    const meta = $el.find('h3').next('div').children('span');
+    const company = meta.find('.truncate').first().text().trim() || undefined;
+    const location =
+      meta
+        .filter((_, s) => $(s).find('.truncate').length === 0)
+        .first()
+        .text()
+        .trim() || undefined;
+    const type = $el.find('.badge').first().text().trim() || undefined;
+    const age = $el.find('.text-xs').first().text().trim();
 
     jobs.push({
-      externalId,
+      externalId: slug,
       title,
-      company: company || undefined,
-      location: location || undefined,
-      postedAt,
+      company,
+      location,
+      postedAt: parseRelativeGerman(age, now),
       applyUrl: new URL(href, BASE).toString(),
-      raw: { html: $.html($el), href, title, company, location },
+      raw: { html: $.html($el), href, title, company, location, type, age },
     });
   });
 
   return jobs;
 }
 
+async function get(url: string): Promise<string> {
+  const res = await request(url, {
+    headers: { 'user-agent': 'Mozilla/5.0 (job-portal scraper)' },
+  });
+  if (res.statusCode < 200 || res.statusCode >= 300) {
+    throw new Error(`bambase returned HTTP ${res.statusCode}`);
+  }
+  return res.body.text();
+}
+
 export const fekiAdapter: JobAdapter = {
   sourceType: 'feki',
   async fetch(url: string): Promise<RawJob[]> {
-    const res = await request(url, {
-      headers: { 'user-agent': 'Mozilla/5.0 (job-portal scraper)' },
-    });
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw new Error(`feki returned HTTP ${res.statusCode}`);
-    }
-    return parseFekiHtml(await res.body.text());
+    return parseFekiHtml(await get(url));
   },
   async fetchDescription(job: { applyUrl: string }): Promise<string> {
-    const res = await request(job.applyUrl, {
-      headers: { 'user-agent': 'Mozilla/5.0 (job-portal scraper)' },
-    });
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw new Error(`feki returned HTTP ${res.statusCode}`);
-    }
-    const $ = cheerio.load(await res.body.text());
-    return $('.job-detail-description').text().replace(/\s+/g, ' ').trim();
+    const $ = cheerio.load(await get(job.applyUrl));
+    return $('main .prose').first().text().replace(/\s+/g, ' ').trim();
   },
 };

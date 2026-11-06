@@ -10,7 +10,7 @@ to run for years on a home server with an existing Postgres and Redis.
 ## What it does
 
 1. **Scrape** — a BullMQ cron job fetches each enabled source (Arbeitsagentur
-   REST API, feki.de HTML) on its own schedule, normalizes listings, and inserts
+   REST API, bambase.de HTML, formerly feki.de) on its own schedule, normalizes listings, and inserts
    new ones (deduped on `source + external_id`).
 2. **Enrich** — the job's description is fetched, then run through two LLM passes
    on OpenRouter. The **filter** pass *extracts* what the posting says about the
