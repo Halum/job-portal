@@ -4,6 +4,7 @@ import {
   markEnrichmentFailed,
   markFilteredOut,
   markMatched,
+  markMatchedDirect,
   setJobDescription,
   type Database,
 } from '@job-portal/db';
@@ -72,6 +73,16 @@ export function createEnrichmentHandler(deps: EnrichmentHandlerDeps) {
     }
     const source = sourceEntry.source_type;
 
+    // skip_enrichment: no LLM calls, mark matched directly.
+    if (sourceEntry.skip_enrichment) {
+      await markMatchedDirect(db, job.id);
+      logger.info(
+        { job_id: job.id, source: job.source, status: 'matched', duration_ms: Date.now() - start },
+        'enrichment: skip_enrichment, matched directly',
+      );
+      return;
+    }
+
     // 2. Load the filter prompt for this source.
     const filterPrompt = await getPrompt(db, source, 'filter');
     if (!filterPrompt) {
@@ -120,7 +131,9 @@ export function createEnrichmentHandler(deps: EnrichmentHandlerDeps) {
 
     // 6. Not a match — done. The filter pass only EXTRACTS what the posting says
     // about German; the verdict is derived here, not taken from the model.
-    if (!shouldNotify(filterOutput)) {
+    // Sources with skip_language_filter (e.g. no German-requirement filtering
+    // wanted) ignore the verdict and always proceed to summary/match.
+    if (!sourceEntry.skip_language_filter && !shouldNotify(filterOutput)) {
       await markFilteredOut(db, job.id, filterOutput, filterCost);
       logger.info(
         {

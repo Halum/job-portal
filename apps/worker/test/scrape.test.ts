@@ -71,13 +71,19 @@ describe('mapRawJobToRow', () => {
 describe('registerScrapeJobs', () => {
   it('registers repeatables for enabled sources only, with cron + tz + retries', async () => {
     const add = vi.fn().mockResolvedValue(undefined);
+    const getRepeatableJobs = vi.fn().mockResolvedValue([]);
+    const removeRepeatableByKey = vi.fn().mockResolvedValue(undefined);
     const sources = [
       source({ name: 'a', enabled: true, cron: '0 7 * * *' }),
       source({ name: 'b', enabled: false }),
       source({ name: 'c', enabled: true, source_type: 'feki', url: 'https://feki/x' }),
     ];
 
-    await registerScrapeJobs({ add }, sources, { attempts: 3, backoff_ms: 5000 });
+    await registerScrapeJobs(
+      { add, getRepeatableJobs, removeRepeatableByKey },
+      sources,
+      { attempts: 3, backoff_ms: 5000 },
+    );
 
     expect(add).toHaveBeenCalledTimes(2);
     const names = add.mock.calls.map((c) => c[0]);
@@ -91,6 +97,28 @@ describe('registerScrapeJobs', () => {
     expect(opts.repeat).toEqual({ pattern: '0 7 * * *', tz: 'Europe/Berlin' });
     expect(opts.attempts).toBe(3);
     expect(opts.backoff).toEqual({ type: 'exponential', delay: 5000 });
+  });
+
+  it('prunes stale repeatables (changed cron, disabled/removed source) before re-registering', async () => {
+    const add = vi.fn().mockResolvedValue(undefined);
+    const getRepeatableJobs = vi.fn().mockResolvedValue([
+      { name: 'a', pattern: '0 */6 * * *', key: 'a-old-key' }, // cron changed
+      { name: 'b', pattern: '0 7 * * *', key: 'b-key' }, // source no longer present
+      { name: 'c', pattern: '0 7 * * *', key: 'c-key' }, // unchanged, should survive
+    ]);
+    const removeRepeatableByKey = vi.fn().mockResolvedValue(undefined);
+    const sources = [
+      source({ name: 'a', enabled: true, cron: '0 7 * * *' }),
+      source({ name: 'c', enabled: true, cron: '0 7 * * *' }),
+    ];
+
+    await registerScrapeJobs(
+      { add, getRepeatableJobs, removeRepeatableByKey },
+      sources,
+      { attempts: 3, backoff_ms: 5000 },
+    );
+
+    expect(removeRepeatableByKey.mock.calls.map((c) => c[0])).toEqual(['a-old-key', 'b-key']);
   });
 });
 

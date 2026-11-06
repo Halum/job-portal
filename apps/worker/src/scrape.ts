@@ -28,17 +28,28 @@ export interface ScrapeRetryConfig {
 }
 
 /**
- * Register one BullMQ repeatable job per ENABLED source (PRD §10). Idempotent
- * across restarts — BullMQ upserts repeatables by their repeat key. Retry
- * opts are attached here so each cron-produced job inherits them.
+ * Register one BullMQ repeatable job per ENABLED source (PRD §10). BullMQ
+ * keys a repeatable by name + cron pattern, so a changed cron (or a removed/
+ * disabled source) would otherwise leave the old schedule running forever
+ * alongside the new one — prune any repeatable that doesn't match a current
+ * enabled source's {name, cron} exactly before re-registering.
  */
 export async function registerScrapeJobs(
-  scrapeQueue: Pick<Queue, 'add'>,
+  scrapeQueue: Pick<Queue, 'add' | 'getRepeatableJobs' | 'removeRepeatableByKey'>,
   sources: SourceEntry[],
   retry: ScrapeRetryConfig,
 ): Promise<void> {
-  for (const s of sources) {
-    if (!s.enabled) continue;
+  const enabled = sources.filter((s) => s.enabled);
+  const desired = new Set(enabled.map((s) => `${s.name}::${s.cron}`));
+
+  const existing = await scrapeQueue.getRepeatableJobs();
+  for (const job of existing) {
+    if (!job.pattern || !desired.has(`${job.name}::${job.pattern}`)) {
+      await scrapeQueue.removeRepeatableByKey(job.key);
+    }
+  }
+
+  for (const s of enabled) {
     const payload: ScrapePayload = {
       sourceName: s.name,
       sourceType: s.source_type,

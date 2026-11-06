@@ -139,6 +139,19 @@ export async function setJobDescription(db: Database, id: number, description: s
   await db.update(jobs).set({ description }).where(eq(jobs.id, id));
 }
 
+/** Source has skip_enrichment — no LLM calls, straight to matched. */
+export async function markMatchedDirect(db: Database, id: number): Promise<void> {
+  await db
+    .update(jobs)
+    .set({
+      status: 'matched',
+      enrichmentJson: null,
+      llmCostJson: null,
+      enrichedAt: sql`now()`,
+    })
+    .where(eq(jobs.id, id));
+}
+
 /** Enrichment could not run at all (missing prompt, or retries exhausted).
  * `enrichedAt` stays null — the job was never actually enriched. */
 export async function markEnrichmentFailed(db: Database, id: number): Promise<void> {

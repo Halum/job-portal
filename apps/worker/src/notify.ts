@@ -3,7 +3,7 @@ import type { ErrorStage, Logger } from '@job-portal/shared';
 import type { AppConfigFile } from '@job-portal/config';
 
 export interface NotifyInput {
-  event: 'scraper.failed' | 'enrichment.failed' | 'webhook.failed';
+  event: 'scraper.failed' | 'enrichment.failed' | 'webhook.failed' | 'worker.stalled';
   source: string | null;
   jobId?: number | null;
   stage: ErrorStage;

@@ -8,6 +8,7 @@ const getJobById = vi.fn();
 const getPrompt = vi.fn();
 const markFilteredOut = vi.fn();
 const markMatched = vi.fn();
+const markMatchedDirect = vi.fn();
 const markEnrichmentFailed = vi.fn();
 const setJobDescription = vi.fn();
 
@@ -16,6 +17,7 @@ vi.mock('@job-portal/db', () => ({
   getPrompt,
   markFilteredOut,
   markMatched,
+  markMatchedDirect,
   markEnrichmentFailed,
   setJobDescription,
 }));
@@ -392,6 +394,28 @@ describe('createEnrichmentHandler', () => {
     expect(llm.filter).toHaveBeenCalledWith(
       expect.objectContaining({ prompt: 'Filter Backend Engineer: Already cached.' }),
     );
+  });
+
+  it('skip_enrichment: marks matched directly, no LLM calls', async () => {
+    const skipSource: SourceEntry = { ...sourceEntry, name: 'frankfurt', skip_enrichment: true };
+    const skipConfig = { ...config, sources: [skipSource] };
+    getJobById.mockResolvedValueOnce(makeJob({ source: 'frankfurt' }));
+    markMatchedDirect.mockResolvedValueOnce(undefined);
+    const llm = makeLlm();
+    const handler = createEnrichmentHandler({
+      db: {} as never,
+      llm,
+      config: skipConfig,
+      logger: silentLogger,
+      notify,
+    });
+
+    await handler({ jobId: 1 });
+
+    expect(markMatchedDirect).toHaveBeenCalledWith({}, 1);
+    expect(llm.filter).not.toHaveBeenCalled();
+    expect(llm.summary).not.toHaveBeenCalled();
+    expect(getPrompt).not.toHaveBeenCalled();
   });
 
   it('llm.filter throw propagates (BullMQ retries), no status mutation', async () => {

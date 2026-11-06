@@ -7,7 +7,7 @@ import { getAdapter } from './index.js';
 
 const DEFAULT_URL: Record<SourceType, string> = {
   arbeitsagentur: 'https://www.arbeitsagentur.de/jobsuche/suche?wo=Bamberg&umkreis=25',
-  feki: 'https://www.feki.de/jobboerse',
+  feki: 'https://bambase.de/jobs',
 };
 
 const sourceType = process.argv[2] as SourceType;
