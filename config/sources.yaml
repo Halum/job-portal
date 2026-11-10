@@ -4,8 +4,39 @@
 sources:
   - name: arbeitsagentur-bamberg
     source_type: arbeitsagentur
-    url: "https://www.arbeitsagentur.de/jobsuche/suche?angebotsart=1&wo=96052%20Bamberg&umkreis=15&arbeitszeit=tz;mj&sort=veroeffdatum"
+    url: "https://www.arbeitsagentur.de/jobsuche/suche?angebotsart=1&wo=96052%20Bamberg&umkreis=15&arbeitszeit=tz;snw;mj&sort=veroeffdatum"
     cron: "0 */6 * * *"
+    enabled: true
+
+  # Towns within about 30 min by train from Bamberg; small radius keeps villages without a station out.
+  - name: arbeitsagentur-forchheim
+    source_type: arbeitsagentur
+    url: "https://www.arbeitsagentur.de/jobsuche/suche?angebotsart=1&wo=91301%20Forchheim&umkreis=5&arbeitszeit=tz;snw;mj&sort=veroeffdatum"
+    cron: "15 */6 * * *"
+    enabled: true
+
+  - name: arbeitsagentur-erlangen
+    source_type: arbeitsagentur
+    url: "https://www.arbeitsagentur.de/jobsuche/suche?angebotsart=1&wo=91052%20Erlangen&umkreis=5&arbeitszeit=tz;snw;mj&sort=veroeffdatum"
+    cron: "20 */6 * * *"
+    enabled: true
+
+  - name: arbeitsagentur-schweinfurt
+    source_type: arbeitsagentur
+    url: "https://www.arbeitsagentur.de/jobsuche/suche?angebotsart=1&wo=97421%20Schweinfurt&umkreis=5&arbeitszeit=tz;snw;mj&sort=veroeffdatum"
+    cron: "25 */6 * * *"
+    enabled: true
+
+  - name: arbeitsagentur-lichtenfels
+    source_type: arbeitsagentur
+    url: "https://www.arbeitsagentur.de/jobsuche/suche?angebotsart=1&wo=96215%20Lichtenfels&umkreis=5&arbeitszeit=tz;snw;mj&sort=veroeffdatum"
+    cron: "30 */6 * * *"
+    enabled: true
+
+  - name: arbeitsagentur-hassfurt
+    source_type: arbeitsagentur
+    url: "https://www.arbeitsagentur.de/jobsuche/suche?angebotsart=1&wo=97437%20Ha%C3%9Ffurt&umkreis=5&arbeitszeit=tz;snw;mj&sort=veroeffdatum"
+    cron: "35 */6 * * *"
     enabled: true
 
   - name: arbeitsagentur-coburg
