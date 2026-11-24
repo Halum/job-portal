@@ -122,3 +122,47 @@ describe('applyPatch and the zod rules', () => {
     expect(criteriaPatchSchema.safeParse({ locations: ['a'.repeat(101)] }).success).toBe(false);
   });
 });
+
+const URL_A =
+  'https://www.arbeitsagentur.de/jobsuche/suche?wo=Musterstadt&umkreis=15&arbeitszeit=tz&angebotsart=1';
+const URL_B = 'https://www.arbeitsagentur.de/jobsuche/suche?was=koch&wo=Beispielburg&umkreis=5';
+
+describe('bundesagenturSearches', () => {
+  it('is unset by default and a Target list replaces the Global one', () => {
+    expect(emptyCriteria().bundesagenturSearches).toBeNull();
+    const globals = base({ bundesagenturSearches: [URL_A] });
+    expect(resolveCriteria(globals, emptyCriteria()).bundesagenturSearches).toEqual([URL_A]);
+    expect(
+      resolveCriteria(globals, base({ bundesagenturSearches: [URL_B] })).bundesagenturSearches,
+    ).toEqual([URL_B]);
+    expect(
+      resolveCriteria(globals, base({ bundesagenturSearches: [] })).bundesagenturSearches,
+    ).toEqual([]);
+  });
+
+  it('can be set and cleared through a patch', () => {
+    const set = applyPatch(emptyCriteria(), { bundesagenturSearches: [URL_A] });
+    expect(set.bundesagenturSearches).toEqual([URL_A]);
+    expect(applyPatch(set, { bundesagenturSearches: null }).bundesagenturSearches).toBeNull();
+  });
+
+  it.each([
+    'http://www.arbeitsagentur.de/jobsuche/suche?was=koch',
+    'https://example.invalid/jobsuche/suche?was=koch',
+    'https://arbeitsagentur.de/jobsuche/suche?was=koch',
+    'https://www.arbeitsagentur.de.example.invalid/jobsuche/suche?was=koch',
+    'https://www.arbeitsagentur.de/jobsuche/jobdetail/123',
+    'https://user@www.arbeitsagentur.de/jobsuche/suche?was=koch',
+    'https://www.arbeitsagentur.de/jobsuche/suche',
+    'https://www.arbeitsagentur.de/jobsuche/suche?foo=bar',
+    'not a url',
+  ])('refuses %s', (url) => {
+    expect(criteriaPatchSchema.safeParse({ bundesagenturSearches: [url] }).success).toBe(false);
+  });
+
+  it('accepts a saved search URL', () => {
+    expect(criteriaPatchSchema.safeParse({ bundesagenturSearches: [URL_A, URL_B] }).success).toBe(
+      true,
+    );
+  });
+});

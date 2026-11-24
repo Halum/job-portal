@@ -26,6 +26,7 @@ import {
 } from './criteria';
 import { hardFilter, prerank, prerankScore, type MatchableJob } from './filters';
 import { germanPlaces, type PlaceTable } from './places';
+import { parseSearchUrl, queryKey } from './search-url';
 import {
   buildPrompt,
   judgeLanguage,
@@ -56,6 +57,9 @@ export interface SearchQuery {
   was?: string;
   wo?: string;
   umkreis?: number;
+  arbeitszeit?: string;
+  angebotsart?: string;
+  sort?: string;
 }
 
 export interface MatchingDeps {
@@ -656,7 +660,15 @@ export function createMatching(
 
     async searchQueries(userId) {
       const seen = new Map<string, SearchQuery>();
-      for (const { resolved: c } of await activeTargets(userId)) {
+      const targets = await activeTargets(userId);
+      // Saved URL searches first, each with its own filters; criteria validation already accepted them.
+      for (const { resolved: c } of targets) {
+        for (const url of c.bundesagenturSearches ?? []) {
+          const parsed = parseSearchUrl(url);
+          if ('query' in parsed) seen.set(queryKey(parsed.query), parsed.query);
+        }
+      }
+      for (const { resolved: c } of targets) {
         const words = c.keywords ?? [];
         const places = c.locations ?? [];
         if (words.length === 0 && places.length === 0) continue; // nothing to search for
@@ -667,7 +679,7 @@ export function createMatching(
               ...(wo === undefined ? {} : { wo }),
               ...(wo !== undefined && c.radiusKm !== null ? { umkreis: c.radiusKm } : {}),
             };
-            seen.set(JSON.stringify(q), q);
+            seen.set(queryKey(q), q);
           }
         }
       }
