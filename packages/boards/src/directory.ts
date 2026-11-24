@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
-import type { Db } from '@job-portal/db';
+import type { Db, DbTx } from '@job-portal/db';
 import { directory } from './schema';
 
 export interface BoardEntry {
@@ -21,7 +21,7 @@ export interface BoardDirectory {
   listMarked: (ats: string) => Promise<Board[]>;
   /** The boards of one ATS not marked yet, which the mark script checks. */
   listUnmarked: (ats: string) => Promise<Board[]>;
-  /** Adds a verified board marked, or marks a listed one; a listed board keeps its name and host. */
+  /** Adds a verified board marked, or marks a listed one; a listed board keeps its name and takes the given host (Lever EU versus US). */
   addMarked: (entry: BoardEntry) => Promise<Board>;
   /** Sets the mark of the given boards; touches nothing else. */
   mark: (ats: string, tokens: string[]) => Promise<void>;
@@ -36,6 +36,18 @@ const columns = {
   host: directory.host,
   marked: directory.marked,
 };
+
+/** The one upsert behind addMarked, also run inside the Watchlist's transaction. */
+export async function upsertMarked(db: Db | DbTx, entry: BoardEntry): Promise<Board> {
+  const host = entry.host ?? null;
+  const [row] = await db
+    .insert(directory)
+    .values({ ...entry, host, marked: true })
+    .onConflictDoUpdate({ target: [directory.ats, directory.token], set: { marked: true, host } })
+    .returning(columns);
+  if (!row) throw new Error('board insert returned no row');
+  return row;
+}
 
 export function createBoardDirectory(db: Db): BoardDirectory {
   const list = (ats: string, marked: boolean): Promise<Board[]> =>
@@ -60,15 +72,7 @@ export function createBoardDirectory(db: Db): BoardDirectory {
     },
     listMarked: (ats) => list(ats, true),
     listUnmarked: (ats) => list(ats, false),
-    async addMarked(entry) {
-      const [row] = await db
-        .insert(directory)
-        .values({ ...entry, host: entry.host ?? null, marked: true })
-        .onConflictDoUpdate({ target: [directory.ats, directory.token], set: { marked: true } })
-        .returning(columns);
-      if (!row) throw new Error('board insert returned no row');
-      return row;
-    },
+    addMarked: (entry) => upsertMarked(db, entry),
     async mark(ats, tokens) {
       for (let i = 0; i < tokens.length; i += CHUNK) {
         await db

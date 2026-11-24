@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createMemorySlots, createRateLimitedFetch } from './rate-limit';
+import {
+  RateLimitError,
+  connectRateLimiter,
+  createMemorySlots,
+  createRateLimitedFetch,
+} from './rate-limit';
 
 /** A virtual clock: sleeping advances time, so the test never waits. */
 function setup(requestsPerSecond: number): {
@@ -42,7 +47,7 @@ describe('createRateLimitedFetch', () => {
     ]);
   });
 
-  it('queues concurrent callers instead of bursting (real clock, lower bounds only)', async () => {
+  it('queues concurrent callers instead of bursting (real clock, total span only)', async () => {
     const stamps: number[] = [];
     const limited = createRateLimitedFetch(20, () => {
       stamps.push(Date.now());
@@ -50,8 +55,61 @@ describe('createRateLimitedFetch', () => {
     });
     await Promise.all([1, 2, 3].map(() => limited(new URL('https://a.example.invalid/x'))));
     expect(stamps).toHaveLength(3);
-    expect((stamps[1] ?? 0) - (stamps[0] ?? 0)).toBeGreaterThanOrEqual(45); // gap is 50 ms
-    expect((stamps[2] ?? 0) - (stamps[1] ?? 0)).toBeGreaterThanOrEqual(45);
+    // gap is 50 ms, so three slots span at least 100 ms; a per-gap bound would flake under load,
+    // the span cannot (timers fire late, never early, and the slots are booked 100 ms apart)
+    const sorted = [...stamps].sort((a, b) => a - b);
+    expect((sorted[2] ?? 0) - (sorted[0] ?? 0)).toBeGreaterThanOrEqual(95);
+  });
+
+  it('refuses a reservation that would wait past the maximum, and books nothing for it', async () => {
+    let t = 0;
+    const calls: number[] = [];
+    const limited = createRateLimitedFetch(
+      1,
+      () => {
+        calls.push(t);
+        return Promise.resolve(new Response('{}'));
+      },
+      { slots: createMemorySlots(() => t, 2500), sleep: () => Promise.resolve() },
+    );
+    // slots at 0, 1000 and 2000 ms are within 2.5 s; the fourth would wait 3 s
+    const results = await Promise.allSettled(
+      [1, 2, 3, 4, 5].map(() => limited('https://a.example.invalid/x')),
+    );
+    expect(results.map((r) => r.status)).toEqual([
+      'fulfilled',
+      'fulfilled',
+      'fulfilled',
+      'rejected',
+      'rejected',
+    ]);
+    expect((results[3] as PromiseRejectedResult).reason).toBeInstanceOf(RateLimitError);
+    expect(calls).toHaveLength(3);
+    t = 3000; // the refused callers booked nothing, so time moving on frees the host again
+    await limited('https://a.example.invalid/x');
+    expect(calls).toHaveLength(4);
+  });
+
+  it('fails fast with a clear error when Redis is down, and never sends the request', async () => {
+    let sent = false;
+    const errors: unknown[] = [];
+    const limiter = connectRateLimiter({
+      redisUrl: 'redis://127.0.0.1:1',
+      requestsPerSecond: 5,
+      inner: () => {
+        sent = true;
+        return Promise.resolve(new Response('{}'));
+      },
+      onError: (err) => errors.push(err),
+    });
+    const started = Date.now();
+    await expect(limiter.fetch('https://a.example.invalid/x')).rejects.toThrow(
+      /rate limit store unavailable/,
+    );
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(sent).toBe(false);
+    expect(errors.length).toBeGreaterThan(0);
+    limiter.close();
   });
 
   it('accepts a Request and refuses a rate of zero', async () => {

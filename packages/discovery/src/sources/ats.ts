@@ -4,6 +4,11 @@ import { isValidBoardToken } from './board-url';
 export const ATS_IDS = ['greenhouse', 'lever', 'ashby'] as const;
 export type Ats = (typeof ATS_IDS)[number];
 
+/** A board fetch that failed in a way whose message is safe to show a user: HTTP status, garbage body, bad token. */
+export class BoardFetchError extends Error {
+  override name = 'BoardFetchError';
+}
+
 /** One company board on an ATS, as the Board directory lists it. */
 export interface BoardRef {
   token: string;
@@ -35,14 +40,16 @@ async function getJson(fetchImpl: typeof fetch, url: string): Promise<unknown> {
   const res = await fetchImpl(url, {
     headers: { 'user-agent': 'Mozilla/5.0 (job-portal)' },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    // a board that answers with a redirect is not followed: the host is fixed, never one a response picks
+    redirect: 'error',
   });
-  if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
+  if (!res.ok) throw new BoardFetchError(`HTTP ${String(res.status)}`);
   return res.json();
 }
 
 function jobs(body: unknown, key?: string): Obj[] {
   const list = key === undefined ? body : isObj(body) ? body[key] : undefined;
-  if (!Array.isArray(list)) throw new Error('unexpected response shape');
+  if (!Array.isArray(list)) throw new BoardFetchError('unexpected response shape');
   return list.filter(isObj);
 }
 
@@ -154,7 +161,9 @@ export function fetchBoardPostings(
 ): Promise<NormalizedPosting[]> {
   // The one guard every caller routes through: a token is never trusted into a URL path.
   if (!isValidBoardToken(board.token)) {
-    return Promise.reject(new Error(`invalid board token: ${JSON.stringify(board.token)}`));
+    return Promise.reject(
+      new BoardFetchError(`invalid board token: ${JSON.stringify(board.token)}`),
+    );
   }
   return adapters[ats](board, fetchImpl);
 }

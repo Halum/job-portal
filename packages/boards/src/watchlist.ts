@@ -1,7 +1,13 @@
 import { and, asc, eq, or } from 'drizzle-orm';
 import type { Db } from '@job-portal/db';
-import type { Board } from './directory';
+import type { Board, BoardEntry } from './directory';
+import { upsertMarked } from './directory';
 import { directory, watchlist } from './schema';
+
+/** A refusal whose message is safe to show a user (for example a board that is not in the directory). */
+export class BoardsError extends Error {
+  override name = 'BoardsError';
+}
 
 export interface BoardRef {
   ats: string;
@@ -13,6 +19,15 @@ export interface Watchlist {
   list: (userId: string) => Promise<BoardRef[]>;
   /** Watches boards that are in the Board directory; one that is not fails the call and nothing is added. Idempotent. */
   add: (userId: string, boards: BoardRef[]) => Promise<void>;
+  /**
+   * Adds a verified board to the directory (marked) and watches it, in one transaction: both or
+   * neither. wasEmpty is true when the Watchlist was empty before, so from now on only watched
+   * boards (of every ATS) are fetched.
+   */
+  addMarkedBoard: (
+    userId: string,
+    entry: BoardEntry,
+  ) => Promise<{ board: Board; wasEmpty: boolean }>;
   /** Stops watching boards; boards not on the Watchlist are ignored. */
   remove: (userId: string, boards: BoardRef[]) => Promise<void>;
   /**
@@ -52,7 +67,7 @@ export function createWatchlist(db: Db): Watchlist {
         (b) => !known.some((k) => k.ats === b.ats && k.token === b.token),
       );
       if (missing.length > 0) {
-        throw new Error(
+        throw new BoardsError(
           `not in the Board directory: ${missing.map((b) => `${b.ats}/${b.token}`).join(', ')}`,
         );
       }
@@ -61,6 +76,21 @@ export function createWatchlist(db: Db): Watchlist {
         .values(boards.map((b) => ({ userId, ats: b.ats, token: b.token })))
         .onConflictDoNothing();
     },
+
+    addMarkedBoard: (userId, entry) =>
+      db.transaction(async (tx) => {
+        const [any] = await tx
+          .select({ ats: watchlist.ats })
+          .from(watchlist)
+          .where(eq(watchlist.userId, userId))
+          .limit(1);
+        const board = await upsertMarked(tx, entry);
+        await tx
+          .insert(watchlist)
+          .values({ userId, ats: entry.ats, token: entry.token })
+          .onConflictDoNothing();
+        return { board, wasEmpty: any === undefined };
+      }),
 
     async remove(userId, boards) {
       if (boards.length === 0) return;

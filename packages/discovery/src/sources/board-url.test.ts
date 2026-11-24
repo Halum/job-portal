@@ -8,6 +8,7 @@ describe('resolveBoardUrl', () => {
     ['https://boards.greenhouse.io/acme/jobs/123?gh_src=x', { ats: 'greenhouse', token: 'acme' }],
     ['https://job-boards.greenhouse.io/acme', { ats: 'greenhouse', token: 'acme' }],
     ['https://job-boards.eu.greenhouse.io/acme', { ats: 'greenhouse', token: 'acme' }],
+    ['https://boards.eu.greenhouse.io/acme', { ats: 'greenhouse', token: 'acme' }],
     ['https://boards-api.greenhouse.io/v1/boards/acme/jobs', { ats: 'greenhouse', token: 'acme' }],
     ['https://boards.greenhouse.io/embed/job_board?for=acme', { ats: 'greenhouse', token: 'acme' }],
     ['https://jobs.lever.co/acme', { ats: 'lever', token: 'acme' }],

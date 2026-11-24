@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import {
+  BoardsError,
   boardsMigrations,
   createBoardDirectory,
   createWatchlist,
@@ -89,7 +90,10 @@ describe('watchlist against real Postgres', () => {
         { ats: 'greenhouse', token: 'alpha' },
         { ats: 'greenhouse', token: 'nope' },
       ]),
-    ).rejects.toThrow(/not in the Board directory: greenhouse\/nope/);
+    ).rejects.toThrow(BoardsError);
+    await expect(watchlist.add(ME, [{ ats: 'greenhouse', token: 'nope' }])).rejects.toThrow(
+      /not in the Board directory: greenhouse\/nope/,
+    );
     expect(await watchlist.list(ME)).toEqual([]);
   });
 
@@ -107,5 +111,45 @@ describe('watchlist against real Postgres', () => {
       marked: true,
     });
     expect((await directory.listMarked('ashby')).map((b) => b.token)).toEqual(['delta', 'newco']);
+  });
+
+  it('addMarked updates the host of a listed board (Lever EU versus US) but not its name', async () => {
+    await directory.importBoards([{ ats: 'lever', token: 'moved', name: 'Moved' }]);
+    expect(
+      await directory.addMarked({ ats: 'lever', token: 'moved', name: 'Other', host: 'eu' }),
+    ).toMatchObject({ name: 'Moved', host: 'eu', marked: true });
+    expect(
+      await directory.addMarked({ ats: 'lever', token: 'moved', name: 'Other' }),
+    ).toMatchObject({ name: 'Moved', host: null });
+  });
+
+  describe('addMarkedBoard: the directory row and the watch in one transaction', () => {
+    const NEW = '00000000-0000-4000-8000-000000000003';
+
+    it('adds the board marked, watches it, and says the Watchlist was empty only the first time', async () => {
+      const first = await watchlist.addMarkedBoard(NEW, {
+        ats: 'ashby',
+        token: 'txfirst',
+        name: 'txfirst',
+      });
+      expect(first).toMatchObject({ wasEmpty: true, board: { token: 'txfirst', marked: true } });
+      const second = await watchlist.addMarkedBoard(NEW, {
+        ats: 'ashby',
+        token: 'txsecond',
+        name: 'txsecond',
+      });
+      expect(second.wasEmpty).toBe(false);
+      expect(await watchlist.list(NEW)).toEqual([
+        { ats: 'ashby', token: 'txfirst' },
+        { ats: 'ashby', token: 'txsecond' },
+      ]);
+    });
+
+    it('rolls the directory row back when the watch cannot be written', async () => {
+      await expect(
+        watchlist.addMarkedBoard('not-a-uuid', { ats: 'ashby', token: 'txghost', name: 'txghost' }),
+      ).rejects.toThrow();
+      expect((await directory.listMarked('ashby')).map((b) => b.token)).not.toContain('txghost');
+    });
   });
 });

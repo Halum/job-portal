@@ -1,32 +1,53 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { User } from '@job-portal/accounts';
-import type { BoardDirectory, Watchlist } from '@job-portal/boards';
-import { ATS_IDS, fetchBoardPostings, resolveBoardUrl } from '@job-portal/discovery';
+import { BoardsError, type Watchlist } from '@job-portal/boards';
+import {
+  ATS_IDS,
+  BoardFetchError,
+  DiscoveryError,
+  RateLimitError,
+  fetchBoardPostings,
+  resolveBoardUrl,
+} from '@job-portal/discovery';
+import type { Logger } from '@job-portal/shared';
 
 export interface BoardToolDeps {
-  directory: BoardDirectory;
   watchlist: Watchlist;
-  /** Used for the one verification fetch of add_board; pass the rate-limited fetch in production. */
-  fetch?: typeof fetch;
+  /** The one verification fetch of add_board: pass the rate-limited fetch (there is no unthrottled default). */
+  fetch: typeof fetch;
+  /** Counts an add_board attempt for the user; false once they are over their limit. */
+  allowAddBoard: (userId: string) => Promise<boolean>;
 }
 
-const boardRef = z.object({ ats: z.enum(ATS_IDS), token: z.string().min(1) });
+const LIMITS = { token: 100, boards: 100, url: 2048, name: 200 };
+const boardRef = z.object({ ats: z.enum(ATS_IDS), token: z.string().min(1).max(LIMITS.token) });
+const boardList = z.array(boardRef).max(LIMITS.boards);
 const boardsOut = { boards: z.array(boardRef) };
 
 const ok = (out: Record<string, unknown>) => ({
   content: [{ type: 'text' as const, text: JSON.stringify(out) }],
   structuredContent: out,
 });
-const fail = (err: unknown) => ({
-  isError: true,
-  content: [{ type: 'text' as const, text: err instanceof Error ? err.message : String(err) }],
+const refusal = (message: string) => ({
+  isError: true as const,
+  content: [{ type: 'text' as const, text: message }],
 });
+
+// Errors whose message is written by us for the user; anything else (Drizzle, ioredis, network) is
+// logged and shown as a fixed text.
+const SAFE = [DiscoveryError, BoardsError, BoardFetchError, RateLimitError];
+const fail = (err: unknown, fallback: string, logger: Logger) => {
+  if (err instanceof Error && SAFE.some((c) => err instanceof c)) return refusal(err.message);
+  logger.error({ err }, fallback);
+  return refusal(fallback);
+};
 
 export function registerBoardTools(
   mcp: McpServer,
   user: User,
-  { directory, watchlist, fetch: fetchImpl = fetch }: BoardToolDeps,
+  { watchlist, fetch: fetchImpl, allowAddBoard }: BoardToolDeps,
+  logger: Logger,
 ): void {
   mcp.registerTool(
     'get_watchlist',
@@ -42,8 +63,8 @@ export function registerBoardTools(
     'update_watchlist',
     {
       description:
-        'Add and remove Watchlist boards (boards must be in the Board directory; use add_board for a new company). Returns the new Watchlist. Removing every board makes the Watchlist empty again, which fetches all marked boards.',
-      inputSchema: { add: z.array(boardRef).optional(), remove: z.array(boardRef).optional() },
+        'Add and remove Watchlist boards (at most 100 of each per call; boards must be in the Board directory, use add_board for a new company). Returns the new Watchlist. Removing every board makes the Watchlist empty again, which fetches all marked boards.',
+      inputSchema: { add: boardList.optional(), remove: boardList.optional() },
       outputSchema: boardsOut,
     },
     async ({ add, remove }) => {
@@ -53,7 +74,7 @@ export function registerBoardTools(
         await watchlist.remove(user.id, remove ?? []);
         return ok({ boards: await watchlist.list(user.id) });
       } catch (err) {
-        return fail(err);
+        return fail(err, 'update_watchlist failed', logger);
       }
     },
   );
@@ -62,37 +83,64 @@ export function registerBoardTools(
     'add_board',
     {
       description:
-        'Add a company by its Greenhouse, Lever or Ashby careers page URL: the board id is extracted, verified with one fetch, added to the Board directory (marked) and put on your Watchlist. Note: a Watchlist that was empty becomes non-empty, so only watched boards are fetched from then on. An unknown URL or a board that fails verification returns an error and changes nothing.',
-      inputSchema: { url: z.string().min(1) },
+        'Add a company by its Greenhouse, Lever or Ashby careers page URL: the board id is extracted, verified with one fetch, added to the shared Board directory (marked) and put on your Watchlist. Limited per user per hour. Note: a Watchlist that was empty becomes non-empty, so only watched boards (of every ATS) are fetched from then on; the result says so. An unknown URL or a board that fails verification returns an error and changes nothing.',
+      inputSchema: { url: z.string().min(1).max(LIMITS.url) },
       outputSchema: {
         ats: z.enum(ATS_IDS),
         token: z.string(),
         name: z.string(),
         postings: z.number(),
+        narrowedWatchlist: z.boolean(),
+        note: z.string().optional(),
       },
     },
     async ({ url }) => {
       const board = resolveBoardUrl(url);
       if (!board) {
-        return fail(
+        return refusal(
           'Not a Greenhouse, Lever or Ashby careers URL (for example https://boards.greenhouse.io/<board>, https://jobs.lever.co/<board> or https://jobs.ashbyhq.com/<board>)',
         );
       }
       try {
-        const postings = await fetchBoardPostings(
-          board.ats,
-          { token: board.token, name: board.token, host: board.host },
-          fetchImpl,
-        );
+        // counted before the fetch, so a loop of bad boards is limited too
+        if (!(await allowAddBoard(user.id))) {
+          return refusal('add_board limit reached for now, try again later');
+        }
+        let postings;
+        try {
+          postings = await fetchBoardPostings(
+            board.ats,
+            { token: board.token, name: board.token, host: board.host },
+            fetchImpl,
+          );
+        } catch (err) {
+          if (err instanceof BoardFetchError) {
+            return refusal(`${board.ats} board ${board.token}: ${err.message}`);
+          }
+          if (err instanceof RateLimitError) throw err;
+          logger.warn({ err }, 'add_board verification fetch failed');
+          return refusal(`${board.ats} board ${board.token} could not be fetched`);
+        }
         // ponytail: the ATS gives no company name for Lever and Ashby, so the board id stands in for it
-        const name = postings[0]?.company ?? board.token;
-        await directory.addMarked({ ats: board.ats, token: board.token, name, host: board.host });
-        await watchlist.add(user.id, [{ ats: board.ats, token: board.token }]);
-        return ok({ ats: board.ats, token: board.token, name, postings: postings.length });
+        const name = (postings[0]?.company ?? board.token).slice(0, LIMITS.name);
+        const { wasEmpty } = await watchlist.addMarkedBoard(user.id, {
+          ats: board.ats,
+          token: board.token,
+          name,
+          host: board.host,
+        });
+        return ok({
+          ats: board.ats,
+          token: board.token,
+          name,
+          postings: postings.length,
+          narrowedWatchlist: wasEmpty,
+          ...(wasEmpty && {
+            note: 'The Watchlist was empty, so only watched boards (of every ATS) are fetched from now on. Remove this board from the Watchlist to fetch all marked boards again.',
+          }),
+        });
       } catch (err) {
-        return fail(
-          `${board.ats} board ${board.token}: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        return fail(err, 'add_board failed', logger);
       }
     },
   );

@@ -8,6 +8,7 @@ import {
   type Discovery,
 } from '@job-portal/discovery';
 import { RUN_STATUSES, type Pipeline } from '@job-portal/pipeline';
+import type { Logger } from '@job-portal/shared';
 import { registerBoardTools, type BoardToolDeps } from './board-tools';
 import {
   ACTORS,
@@ -23,6 +24,7 @@ export interface ToolDeps {
   pipeline: Pipeline;
   boards: BoardToolDeps;
   tracker: Tracker;
+  logger: Logger;
 }
 
 const isoDate = z.string().describe('ISO 8601 timestamp, UTC');
@@ -152,9 +154,9 @@ async function refusable<T>(
 export function registerTools(
   mcp: McpServer,
   user: User,
-  { discovery, pipeline, tracker, boards }: ToolDeps,
+  { discovery, pipeline, tracker, boards, logger }: ToolDeps,
 ): void {
-  registerBoardTools(mcp, user, boards);
+  registerBoardTools(mcp, user, boards, logger);
 
   mcp.registerTool(
     'whoami',

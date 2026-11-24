@@ -1,4 +1,3 @@
-import { Redis } from 'ioredis';
 import { createAccounts } from '@job-portal/accounts';
 import { createWatchlist } from '@job-portal/boards';
 import { loadConfig } from '@job-portal/config';
@@ -11,8 +10,7 @@ import {
   createBambaseSource,
   createBundesagenturSource,
   createDiscovery,
-  createRateLimitedFetch,
-  createRedisSlots,
+  connectRateLimiter,
   type Source,
 } from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
@@ -41,9 +39,12 @@ if (bambase) {
 // Company boards: only marked boards of the Board directory (narrowed by the user's Watchlist) are fetched,
 // at a bounded rate per ATS host that every worker and the API share through Redis.
 const watchlist = createWatchlist(db);
-const limiterRedis = new Redis(config.redisUrl);
-const limitedFetch = createRateLimitedFetch(config.boardRequestsPerSecond, fetch, {
-  slots: createRedisSlots(limiterRedis),
+const limiter = connectRateLimiter({
+  redisUrl: config.redisUrl,
+  requestsPerSecond: config.boardRequestsPerSecond,
+  onError: (err) => {
+    logger.error({ err }, 'rate limit redis error');
+  },
 });
 for (const ats of ATS_IDS) {
   const source = config.sources[ats];
@@ -51,7 +52,7 @@ for (const ats of ATS_IDS) {
   sources.push(
     createAtsSource(ats, {
       listBoards: () => watchlist.listBoards(user.id, ats),
-      fetch: limitedFetch,
+      fetch: limiter.fetch,
     }),
   );
   scheduled.push({ sourceId: ats, intervalMinutes: source.intervalMinutes });
@@ -69,7 +70,7 @@ const worker = await startWorker({
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
     void worker.close().then(() => {
-      limiterRedis.disconnect();
+      limiter.close();
       process.exit(0);
     });
   });

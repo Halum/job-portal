@@ -16,6 +16,7 @@ export function isValidBoardToken(token: string): boolean {
 
 const GREENHOUSE_HOSTS = new Set([
   'boards.greenhouse.io',
+  'boards.eu.greenhouse.io',
   'job-boards.greenhouse.io',
   'job-boards.eu.greenhouse.io',
 ]);
