@@ -7,6 +7,8 @@ export { DISCOVERY_STATES } from './schema';
 export * from './source';
 export * from './sources/bambase';
 export * from './sources/bundesagentur';
+export * from './sources/ats';
+export * from './rate-limit';
 
 export const discoveryMigrations: ModuleMigrations = {
   name: 'discovery',
