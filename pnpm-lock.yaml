@@ -73,12 +73,18 @@ importers:
       '@job-portal/discovery':
         specifier: workspace:*
         version: link:../../packages/discovery
+      '@job-portal/mail':
+        specifier: workspace:*
+        version: link:../../packages/mail
       '@job-portal/matching':
         specifier: workspace:*
         version: link:../../packages/matching
       '@job-portal/migrations':
         specifier: workspace:*
         version: link:../../packages/migrations
+      '@job-portal/notifications':
+        specifier: workspace:*
+        version: link:../../packages/notifications
       '@job-portal/pipeline':
         specifier: workspace:*
         version: link:../../packages/pipeline
@@ -121,6 +127,9 @@ importers:
       '@job-portal/discovery':
         specifier: workspace:*
         version: link:../../packages/discovery
+      '@job-portal/mail':
+        specifier: workspace:*
+        version: link:../../packages/mail
       '@job-portal/matching':
         specifier: workspace:*
         version: link:../../packages/matching

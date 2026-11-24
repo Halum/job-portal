@@ -11,9 +11,11 @@ import {
 import type { AiLog } from '@job-portal/ai';
 import { criteriaPatchSchema, criteriaSchema, type Matching } from '@job-portal/matching';
 import { RUN_STATUSES, type Pipeline } from '@job-portal/pipeline';
+import type { Mail, Notify } from '@job-portal/mail';
 import type { Review } from '@job-portal/review';
 import type { Logger } from '@job-portal/shared';
 import { registerBoardTools, type BoardToolDeps } from './board-tools';
+import { registerMailTools } from './mail-tools';
 import { registerReviewTools } from './review-tools';
 import {
   ACTORS,
@@ -34,6 +36,9 @@ export interface ToolDeps {
   review: Review;
   /** Applies decided ai_merge items; without it they cannot be decided. */
   aiMerge?: Pick<AiMerge, 'apply'>;
+  /** The mail behind list_unmatched_mails and mail_match decisions; without it neither works. */
+  mail?: Pick<Mail, 'listUnmatched' | 'getMatch' | 'applyMatch'>;
+  notify?: Pick<Notify, 'sendLines'>;
   tracker: Tracker;
   logger: Logger;
 }
@@ -222,10 +227,23 @@ async function refusable<T>(
 export function registerTools(
   mcp: McpServer,
   user: User,
-  { discovery, matching, pipeline, tracker, aiLog, boards, review, aiMerge, logger }: ToolDeps,
+  {
+    discovery,
+    matching,
+    pipeline,
+    tracker,
+    aiLog,
+    boards,
+    review,
+    aiMerge,
+    mail,
+    notify,
+    logger,
+  }: ToolDeps,
 ): void {
   registerBoardTools(mcp, user, boards, logger);
-  registerReviewTools(mcp, user, { review, discovery, matching, aiMerge, logger });
+  registerReviewTools(mcp, user, { review, discovery, matching, aiMerge, mail, notify, logger });
+  if (mail) registerMailTools(mcp, user, mail);
 
   mcp.registerTool(
     'whoami',

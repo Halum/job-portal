@@ -3,6 +3,8 @@ import { createAiLog } from '@job-portal/ai';
 import { createWatchlist } from '@job-portal/boards';
 import { loadConfig } from '@job-portal/config';
 import { createDb, runMigrationsWithLock } from '@job-portal/db';
+import { createMail } from '@job-portal/mail';
+import { createNotifications } from '@job-portal/notifications';
 import {
   connectRateLimiter,
   createAiMerge,
@@ -45,6 +47,27 @@ const aiMerge = createAiMerge(db, {
     return new Set(ids.filter((id) => states.get(id)?.applicationStatus != null));
   },
 });
+// Confirming a mail_match item applies the mail and posts one Telegram line. Only sendLines is used here
+// (the digest reads belong to the worker), so the tag and Job lookups return nothing.
+const notify = config.notifications
+  ? createNotifications(db, {
+      newTags: () => Promise.resolve([]),
+      jobInfo: () => Promise.resolve(null),
+      pendingReviews: (userId) => review.countPending(userId),
+      webhook: { url: config.notifications.webhookUrl, topicId: config.notifications.topicId },
+      maxAttempts: config.notifications.maxAttempts,
+      backoffMs: config.notifications.backoffMs,
+      log: logger,
+    })
+  : undefined;
+// The API never polls Gmail (no client or runner): it lists unmatched mail and applies decided mail_match items.
+const mail = createMail(db, {
+  tracker,
+  discovery,
+  review,
+  maxCallsPerPass: config.aiMailMaxCallsPerRun,
+  log: logger,
+});
 const pipeline = createPipeline(db, discovery);
 // add_board's verification fetch shares the per-host rate limit with the workers through Redis.
 const limiter = connectRateLimiter({
@@ -68,6 +91,8 @@ const server = createApiServer({
   tracker,
   review,
   aiMerge,
+  mail,
+  ...(notify ? { notify } : {}),
   aiLog: createAiLog(db),
   boards: { watchlist: createWatchlist(db), fetch: limiter.fetch, allowAddBoard },
   logger,

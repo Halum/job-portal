@@ -26,6 +26,8 @@ describe('loadConfig', () => {
       aiMergeMaxCallsPerRun: 20,
       alertThreshold: 70,
       notifications: null,
+      gmail: null,
+      aiMailMaxCallsPerRun: 20,
     });
   });
 
@@ -287,6 +289,69 @@ describe('loadConfig', () => {
           'AI_MERGE_MAX_CALLS_PER_RUN',
         );
       }
+    });
+  });
+
+  describe('Gmail', () => {
+    const creds = {
+      GMAIL_CLIENT_ID: 'client-id-placeholder',
+      GMAIL_CLIENT_SECRET: 'client-secret-placeholder',
+      GMAIL_REFRESH_TOKEN: 'refresh-token-placeholder',
+    };
+
+    it('is off when unset or empty, and on with all three secrets, a 15 minute default and no start date', () => {
+      expect(loadConfig(valid).gmail).toBeNull();
+      expect(
+        loadConfig({
+          ...valid,
+          GMAIL_CLIENT_ID: '',
+          GMAIL_CLIENT_SECRET: '',
+          GMAIL_REFRESH_TOKEN: '',
+        }).gmail,
+      ).toBeNull();
+      expect(loadConfig({ ...valid, ...creds }).gmail).toEqual({
+        clientId: creds.GMAIL_CLIENT_ID,
+        clientSecret: creds.GMAIL_CLIENT_SECRET,
+        refreshToken: creds.GMAIL_REFRESH_TOKEN,
+        intervalMinutes: 15,
+        startDate: null,
+      });
+    });
+
+    it('reads the interval and a start date, and the mail AI cap', () => {
+      const gmail = loadConfig({
+        ...valid,
+        ...creds,
+        GMAIL_INTERVAL_MINUTES: '5',
+        GMAIL_START_DATE: '2026-11-01',
+        AI_MAIL_MAX_CALLS_PER_RUN: '3',
+      });
+      expect(gmail.gmail).toMatchObject({
+        intervalMinutes: 5,
+        startDate: new Date('2026-11-01T00:00:00Z'),
+      });
+      expect(gmail.aiMailMaxCallsPerRun).toBe(3);
+      expect(() => loadConfig({ ...valid, ...creds, GMAIL_INTERVAL_MINUTES: '0' })).toThrow(
+        'GMAIL_INTERVAL_MINUTES',
+      );
+      expect(() => loadConfig({ ...valid, ...creds, GMAIL_START_DATE: 'soon' })).toThrow(
+        'GMAIL_START_DATE',
+      );
+      expect(() => loadConfig({ ...valid, AI_MAIL_MAX_CALLS_PER_RUN: '0' })).toThrow(
+        'AI_MAIL_MAX_CALLS_PER_RUN',
+      );
+    });
+
+    it('needs all three secrets together, and the error never echoes one', () => {
+      let message = '';
+      try {
+        loadConfig({ ...valid, GMAIL_CLIENT_ID: creds.GMAIL_CLIENT_ID });
+      } catch (err) {
+        message = err instanceof Error ? err.message : '';
+      }
+      expect(message).toContain('GMAIL_CLIENT_SECRET');
+      expect(message).toContain('GMAIL_REFRESH_TOKEN');
+      expect(message).not.toContain(creds.GMAIL_CLIENT_ID);
     });
   });
 

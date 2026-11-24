@@ -7,6 +7,8 @@ import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redi
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createAccounts } from '@job-portal/accounts';
+import { createGmailClient, createMail, type Mail } from '@job-portal/mail';
+import { createFakeGmail, type FakeGmail } from '@job-portal/mail/testing';
 import { createAi, createAiLog, createOpenRouterRunner } from '@job-portal/ai';
 import { createWatchlist } from '@job-portal/boards';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
@@ -75,6 +77,30 @@ describe('Bundesagentur source to MCP list_jobs', () => {
   let client: Client;
   let webhook: Server;
   const digests: { topicId: string; kind: string; text: string }[] = [];
+  let mail: Mail;
+  let gmail: FakeGmail;
+  let userId = '';
+  /** The Job id the scripted mail classifier answers with; set once the run has found it. */
+  let mailJobId = '';
+  const fakeMailRouter = (() =>
+    Promise.resolve(
+      Response.json({
+        model: 'vendor/model',
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                kind: 'interview',
+                jobId: mailJobId,
+                confidence: 'high',
+                summary: 'Invitation to a talk.',
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 40, completion_tokens: 8, cost: 0.001 },
+      }),
+    )) as unknown as typeof fetch;
 
   beforeAll(async () => {
     [pg, redis] = await Promise.all([
@@ -85,6 +111,7 @@ describe('Bundesagentur source to MCP list_jobs', () => {
     handle = createDb(pg.getConnectionUri());
     const accounts = createAccounts(handle.db, TOKEN);
     const user = await accounts.seedUser('user@example.invalid');
+    userId = user.id;
     const aiLog = createAiLog(handle.db);
     const matching = createMatching(handle.db, {
       loadJobs: (u, ids) => discovery.listMatchable(u, ids),
@@ -141,6 +168,30 @@ describe('Bundesagentur source to MCP list_jobs', () => {
       ...(notifications ? { notifications } : {}),
     });
 
+    gmail = createFakeGmail([]);
+    mail = createMail(handle.db, {
+      tracker,
+      discovery,
+      review: createReview(handle.db),
+      ai: createAi(
+        aiLog,
+        createOpenRouterRunner({
+          apiKey: 'placeholder-key',
+          model: 'vendor/model',
+          fetch: fakeMailRouter,
+        }),
+      ),
+      gmail: createGmailClient({
+        clientId: 'client-id-placeholder',
+        clientSecret: 'client-secret-placeholder',
+        refreshToken: 'refresh-token-placeholder',
+        fetch: gmail.fetch,
+      }),
+      ...(notifications ? { notify: notifications } : {}),
+      maxCallsPerPass: 5,
+      log: logger,
+    });
+
     worker = await startWorker({
       redisUrl: redis.getConnectionUrl(),
       pipeline,
@@ -150,6 +201,7 @@ describe('Bundesagentur source to MCP list_jobs', () => {
     });
     server = createApiServer({
       review: createReview(handle.db),
+      mail,
       accounts,
       discovery,
       matching,
@@ -284,5 +336,52 @@ describe('Bundesagentur source to MCP list_jobs', () => {
       'Review waiting: 0',
     ])
       expect(digests[0]?.text).toContain(part);
+  });
+
+  it('reads a Gmail reply for the applied Job: the status changes through the Timeline, one line goes out, and an unrelated mail is listed', async () => {
+    const list = (await client.callTool({ name: 'list_jobs', arguments: {} }))
+      .structuredContent as {
+      jobs: { id: string; title: string }[];
+    };
+    mailJobId = list.jobs.find((j) => j.title === 'Koch (m/w/d)')?.id ?? '';
+    await client.callTool({
+      name: 'set_status',
+      arguments: { jobId: mailJobId, applicationStatus: 'applied' },
+    });
+    gmail.mails.push(
+      {
+        id: 'reply-1',
+        from: 'Hiring <hr@example.invalid>',
+        subject: 'Invitation',
+        body: 'Dear applicant, Beispiel Firma B would like to invite you for a talk.',
+        receivedAt: new Date(),
+      },
+      {
+        id: 'stray-1',
+        from: 'Someone <x@nowhere.example>',
+        subject: 'Your application',
+        body: 'Thanks for applying.',
+        receivedAt: new Date(),
+      },
+    );
+    expect(await mail.poll(userId)).toMatchObject({ status: 'done', applied: 1, unmatched: 1 });
+
+    const detail = await client.callTool({ name: 'get_job', arguments: { jobId: mailJobId } });
+    expect(detail.structuredContent).toMatchObject({
+      job: {
+        tracking: { applicationStatus: 'interview' },
+        timeline: [
+          expect.objectContaining({ to: 'applied', actor: 'user' }),
+          expect.objectContaining({ to: 'interview', actor: 'gmail', evidence: 'gmail:reply-1' }),
+        ],
+      },
+    });
+    const lines = digests.filter((d) => d.kind === 'line');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.text).toContain('Interview: Koch (m/w/d) at Beispiel Firma B');
+    const unmatched = await client.callTool({ name: 'list_unmatched_mails', arguments: {} });
+    expect(unmatched.structuredContent).toMatchObject({
+      items: [expect.objectContaining({ messageId: 'stray-1' })],
+    });
   });
 });

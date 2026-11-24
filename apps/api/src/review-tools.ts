@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { User } from '@job-portal/accounts';
 import type { AiMerge, Discovery, PostingView } from '@job-portal/discovery';
+import type { Mail, Notify } from '@job-portal/mail';
 import type { Matching } from '@job-portal/matching';
 import {
   REVIEW_KINDS,
@@ -22,6 +23,10 @@ export interface ReviewToolDeps {
   matching: Pick<Matching, 'listScores' | 'applyFitRejection'>;
   /** Applies ai_merge items; without it they are refused as unsupported. */
   aiMerge?: Pick<AiMerge, 'apply'>;
+  /** Applies decided mail_match items and shows the mail behind them; without it they cannot be decided. */
+  mail?: Pick<Mail, 'getMatch' | 'applyMatch'>;
+  /** Sends the Telegram line of a Gmail status change a decision made. */
+  notify?: Pick<Notify, 'sendLines'>;
   logger: Logger;
 }
 
@@ -47,6 +52,21 @@ const itemOut = z.object({
   score: z.number().nullable().describe('AI fit score of an ai_fit_rejection; null otherwise.'),
   reasons: z.array(z.string()),
   redFlags: z.array(z.string()),
+  mail: z
+    .object({
+      from: z.string(),
+      subject: z.string(),
+      summary: z.string(),
+      kind: z
+        .string()
+        .describe('What the AI read the mail as: rejection, screening, interview or offer.'),
+      suggestedJobId: z
+        .string()
+        .describe('The Job the AI picked; confirming applies the mail to it.'),
+      candidateJobIds: z.array(z.string()),
+    })
+    .nullable()
+    .describe('The mail behind a mail_match item; null otherwise.'),
 });
 
 const ok = (out: Record<string, unknown>) => ({
@@ -61,7 +81,7 @@ const refusal = (message: string) => ({
 export function registerReviewTools(
   mcp: McpServer,
   user: User,
-  { review, discovery, matching, aiMerge, logger }: ReviewToolDeps,
+  { review, discovery, matching, aiMerge, mail, notify, logger }: ReviewToolDeps,
 ): void {
   /** Posting links, Target and score of an item, read from the modules that own them. */
   const describe = async (item: ReviewItem): Promise<z.infer<typeof itemOut>> => {
@@ -78,8 +98,8 @@ export function registerReviewTools(
       score: null,
       reasons: [],
       redFlags: [],
+      mail: null,
     };
-    // ponytail: mail_match adds its details with its ticket.
     const link = ({ id, sourceId, title, company, location, url }: PostingView) => ({
       id,
       sourceId,
@@ -96,7 +116,28 @@ export function registerReviewTools(
       );
       return { ...base, postings: both.flatMap((j) => (j?.postings ?? []).map(link)) };
     }
-    if (item.kind !== 'ai_fit_rejection') return base;
+    if (item.kind === 'mail_match') {
+      const match = await mail?.getMatch(user.id, item.subject.messageId ?? '');
+      if (!match) return base;
+      // The suggested Job first, then the other candidates.
+      const ids = [
+        match.suggestedJobId,
+        ...match.candidateJobIds.filter((id) => id !== match.suggestedJobId),
+      ];
+      const found = await Promise.all(ids.map((id) => discovery.getJob(user.id, id)));
+      return {
+        ...base,
+        postings: found.flatMap((j) => (j?.postings ?? []).map(link)),
+        mail: {
+          from: match.from,
+          subject: match.subject,
+          summary: match.summary,
+          kind: match.kind,
+          suggestedJobId: match.suggestedJobId,
+          candidateJobIds: match.candidateJobIds,
+        },
+      };
+    }
     const subject = fitRejectionSubject.safeParse(item.subject);
     if (!subject.success) return base;
     const { jobId, targetId } = subject.data;
@@ -117,13 +158,22 @@ export function registerReviewTools(
   };
 
   // The module that created an item applies its decision. A kind without an applier is refused.
-  const appliers: Partial<Record<ReviewKind, ReviewApplier>> = {
+  // A mail_match decision may produce a Telegram line, collected here and sent after the commit.
+  const appliersFor = (lines: string[]): Partial<Record<ReviewKind, ReviewApplier>> => ({
     ai_fit_rejection: (item, tx, decision) =>
       matching.applyFitRejection(tx, user.id, item.subject, decision),
     ...(aiMerge
       ? { ai_merge: (item, tx, decision) => aiMerge.apply(tx, user.id, item.subject, decision) }
       : {}),
-  };
+    ...(mail
+      ? {
+          mail_match: async (item, tx, decision) => {
+            const line = await mail.applyMatch(tx, user.id, item.subject, decision);
+            if (line !== null) lines.push(line);
+          },
+        }
+      : {}),
+  });
 
   mcp.registerTool(
     'list_reviews',
@@ -157,6 +207,8 @@ export function registerReviewTools(
     },
     async ({ id, decision }) => {
       try {
+        const lines: string[] = [];
+        const appliers = appliersFor(lines);
         const done = await review.decide(user.id, id, decision, (item, tx, d) => {
           const apply = appliers[item.kind];
           if (!apply) {
@@ -167,6 +219,11 @@ export function registerReviewTools(
           }
           return apply(item, tx, d);
         });
+        if (lines.length > 0) {
+          await notify?.sendLines(user.id, lines).catch((err: unknown) => {
+            logger.warn({ err }, 'could not send the Gmail status line');
+          });
+        }
         return ok({ item: await describe(done) });
       } catch (err) {
         if (err instanceof ReviewError) return refusal(err.message);

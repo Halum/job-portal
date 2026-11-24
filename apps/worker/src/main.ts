@@ -9,6 +9,7 @@ import {
 import { createWatchlist } from '@job-portal/boards';
 import { loadConfig } from '@job-portal/config';
 import { createDb, runMigrationsWithLock } from '@job-portal/db';
+import { createGmailClient, createMail } from '@job-portal/mail';
 import { connectRateLimiter, createAiMerge, createDiscovery } from '@job-portal/discovery';
 import { createMatching } from '@job-portal/matching';
 import { allMigrations } from '@job-portal/migrations';
@@ -88,6 +89,38 @@ const aiMerge = createAiMerge(db, {
   minJaccard: config.aiMergeJaccard,
   maxCallsPerPass: config.aiMergeMaxCallsPerRun,
 });
+// Gmail replies: polled on its own schedule beside the sources. Without Gmail credentials and an AI runner
+// the poll is skipped with one log line; a token failure opens the gmail_token alert, never crashes the worker.
+const mail = createMail(db, {
+  tracker,
+  discovery,
+  review,
+  ...(ai ? { ai } : {}),
+  ...(config.gmail && ai
+    ? {
+        gmail: createGmailClient({
+          clientId: config.gmail.clientId,
+          clientSecret: config.gmail.clientSecret,
+          refreshToken: config.gmail.refreshToken,
+        }),
+      }
+    : {}),
+  ...(notifications ? { notify: notifications } : {}),
+  ...(config.gmail?.startDate ? { startDate: config.gmail.startDate } : {}),
+  maxCallsPerPass: config.aiMailMaxCallsPerRun,
+  log: logger,
+});
+const mailSchedule =
+  config.gmail && ai
+    ? { intervalMinutes: config.gmail.intervalMinutes, poll: () => mail.poll(user.id) }
+    : null;
+if (mailSchedule === null) {
+  logger.info(
+    config.gmail
+      ? 'Gmail is configured but AI_RUNNER is not: the mail poll is skipped'
+      : 'no Gmail credentials: the mail poll is skipped',
+  );
+}
 const pipeline = createPipeline(db, discovery, {
   matching,
   ...(ai ? { scoring: matching, aiMerge } : {}),
@@ -100,6 +133,7 @@ const worker = await startWorker({
   pipeline,
   userId: user.id,
   sources: scheduled,
+  mail: mailSchedule,
   logger,
 });
 

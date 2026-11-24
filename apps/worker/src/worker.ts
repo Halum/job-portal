@@ -13,16 +13,26 @@ export interface ScheduledSource {
   intervalMinutes: number;
 }
 
+export interface MailSchedule {
+  intervalMinutes: number;
+  /** One poll of the Gmail inbox for the user; never throws for a Gmail, AI or token failure. */
+  poll: () => Promise<unknown>;
+}
+
 export interface WorkerOptions {
   redisUrl: string;
   pipeline: Pipeline;
   userId: string;
   sources: ScheduledSource[];
+  /** The Gmail poll; null or unset means it is not scheduled. */
+  mail?: MailSchedule | null;
   logger: Logger;
   connectTimeoutMs?: number;
 }
 
 const QUEUE = 'pipeline';
+/** The scheduler id and job name of the mail poll; a Source id is never this. */
+const MAIL_JOB = 'mail';
 
 /**
  * Marks stale runs failed, then schedules one BullMQ Job Scheduler per source (scheduler id =
@@ -34,6 +44,7 @@ export async function startWorker({
   pipeline,
   userId,
   sources,
+  mail = null,
   logger,
   connectTimeoutMs = 10_000,
 }: WorkerOptions): Promise<WorkerHandle> {
@@ -55,6 +66,7 @@ export async function startWorker({
     if (stale > 0) logger.warn({ stale }, 'marked runs left running as failed');
 
     const wanted = new Set(sources.map((s) => s.sourceId));
+    if (mail) wanted.add(MAIL_JOB);
     for (const scheduler of await queue.getJobSchedulers()) {
       if (!wanted.has(scheduler.key)) await queue.removeJobScheduler(scheduler.key);
     }
@@ -66,9 +78,21 @@ export async function startWorker({
       );
     }
 
+    if (mail) {
+      await queue.upsertJobScheduler(
+        MAIL_JOB,
+        { every: mail.intervalMinutes * 60_000 },
+        { name: MAIL_JOB },
+      );
+    }
+
     worker = new Worker(
       QUEUE,
       async (job) => {
+        if (job.name === MAIL_JOB) {
+          await mail?.poll();
+          return;
+        }
         const run = await pipeline.execute(userId, job.name);
         if (run === null) logger.warn({ source: job.name }, 'run skipped: one is already active');
         else

@@ -65,6 +65,26 @@ const envSchema = z
     AI_MERGE_JACCARD: z.coerce.number().min(0).max(1).default(0.6),
     // Most AI merge checks one run makes. A throughput limit, not a spend cap: pairs left over wait for the next run.
     AI_MERGE_MAX_CALLS_PER_RUN: z.coerce.number().int().min(1).default(20),
+    // Gmail reply reading: one inbox, read-only, with its own OAuth refresh token. All three secrets come from
+    // env only, together or not at all; unset means the mail poll is skipped.
+    GMAIL_CLIENT_ID: optionalText,
+    GMAIL_CLIENT_SECRET: optionalText,
+    GMAIL_REFRESH_TOKEN: optionalText,
+    GMAIL_INTERVAL_MINUTES: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(1).default(15),
+    ),
+    // Mail received before this date is never read; unset means the first poll's time.
+    GMAIL_START_DATE: z.preprocess(
+      emptyToUndefined,
+      z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/, 'must be a date as YYYY-MM-DD')
+        .refine((v) => !Number.isNaN(Date.parse(v)), 'must be a real date')
+        .optional(),
+    ),
+    // Most mail AI calls one poll makes. A throughput limit, not a spend cap: the rest waits for the next poll.
+    AI_MAIL_MAX_CALLS_PER_RUN: z.coerce.number().int().min(1).default(20),
     ALERT_THRESHOLD: z.coerce.number().int().min(0).max(100).default(70),
     // Digest and failure alerts go through the n8n webhook into a Telegram topic. Both are secrets or
     // private ids, from env only, with no default: unset means nothing is sent.
@@ -86,6 +106,17 @@ const envSchema = z
     if (e.AI_RUNNER === 'openrouter')
       (['OPENROUTER_API_KEY', 'OPENROUTER_MODEL'] as const).forEach(need);
     if (e.AI_RUNNER === 'claude') need('CLAUDE_MODEL');
+    // The three Gmail secrets only make sense together.
+    const gmailSecrets = ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN'] as const;
+    if (gmailSecrets.some((k) => e[k] !== undefined)) {
+      for (const k of gmailSecrets)
+        if (e[k] === undefined)
+          ctx.addIssue({
+            code: 'custom',
+            path: [k],
+            message: 'required when another GMAIL_ secret is set',
+          });
+    }
     // The webhook URL and the topic id only make sense together.
     for (const [set, missing] of [
       ['NOTIFY_WEBHOOK_URL', 'NOTIFY_TOPIC_ID'],
@@ -135,10 +166,23 @@ export interface Config {
   aiMergeJaccard: number;
   /** Most AI merge checks one run makes, an integer of at least 1. */
   aiMergeMaxCallsPerRun: number;
+  /** null means Gmail is not configured and the mail poll is skipped. */
+  gmail: GmailConfig | null;
+  /** Most mail AI calls one poll makes, an integer of at least 1. */
+  aiMailMaxCallsPerRun: number;
   /** Default alert threshold, 0 to 100. */
   alertThreshold: number;
   /** null means no webhook is configured and nothing is sent. */
   notifications: NotificationsConfig | null;
+}
+
+export interface GmailConfig {
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+  intervalMinutes: number;
+  /** Mail received before this instant is never read; null means the first poll's time. */
+  startDate: Date | null;
 }
 
 export interface NotificationsConfig {
@@ -200,6 +244,21 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     aiMergeJaccard: e.AI_MERGE_JACCARD,
     aiMergeMaxCallsPerRun: e.AI_MERGE_MAX_CALLS_PER_RUN,
     alertThreshold: e.ALERT_THRESHOLD,
+    // superRefine has already made sure the three secrets come together.
+    gmail:
+      e.GMAIL_CLIENT_ID === undefined ||
+      e.GMAIL_CLIENT_SECRET === undefined ||
+      e.GMAIL_REFRESH_TOKEN === undefined
+        ? null
+        : {
+            clientId: e.GMAIL_CLIENT_ID,
+            clientSecret: e.GMAIL_CLIENT_SECRET,
+            refreshToken: e.GMAIL_REFRESH_TOKEN,
+            intervalMinutes: e.GMAIL_INTERVAL_MINUTES,
+            startDate:
+              e.GMAIL_START_DATE === undefined ? null : new Date(`${e.GMAIL_START_DATE}T00:00:00Z`),
+          },
+    aiMailMaxCallsPerRun: e.AI_MAIL_MAX_CALLS_PER_RUN,
     // superRefine has already made sure the two settings come together.
     notifications:
       e.NOTIFY_WEBHOOK_URL === undefined || e.NOTIFY_TOPIC_ID === undefined
