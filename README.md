@@ -15,6 +15,8 @@ pnpm dev:worker               # connects to Redis and logs ready
 docker compose down           # wipes everything
 ```
 
+The API listens on `127.0.0.1` by default; set `HOST` (for example to the tailnet IP, or `0.0.0.0`) to reach the MCP endpoint over the tailnet.
+
 Call the endpoint with `Authorization: Bearer <MCP_BEARER_TOKEN>`; the `whoami` tool returns the seeded user.
 
 ## Check
