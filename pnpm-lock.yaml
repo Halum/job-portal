@@ -58,6 +58,9 @@ importers:
       '@job-portal/accounts':
         specifier: workspace:*
         version: link:../../packages/accounts
+      '@job-portal/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
       '@job-portal/boards':
         specifier: workspace:*
         version: link:../../packages/boards
@@ -100,6 +103,9 @@ importers:
       '@job-portal/accounts':
         specifier: workspace:*
         version: link:../../packages/accounts
+      '@job-portal/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
       '@job-portal/boards':
         specifier: workspace:*
         version: link:../../packages/boards
@@ -157,6 +163,22 @@ importers:
         specifier: 0.31.11
         version: 0.31.11
 
+  packages/ai:
+    dependencies:
+      '@job-portal/db':
+        specifier: workspace:*
+        version: link:../db
+      drizzle-orm:
+        specifier: 0.45.4
+        version: 0.45.4(postgres@4.1.1)
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      drizzle-kit:
+        specifier: 0.31.11
+        version: 0.31.11
+
   packages/boards:
     dependencies:
       '@job-portal/db':
@@ -172,6 +194,9 @@ importers:
 
   packages/config:
     dependencies:
+      '@job-portal/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@job-portal/shared':
         specifier: workspace:*
         version: link:../shared
@@ -218,6 +243,9 @@ importers:
 
   packages/matching:
     dependencies:
+      '@job-portal/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@job-portal/db':
         specifier: workspace:*
         version: link:../db
@@ -237,6 +265,9 @@ importers:
       '@job-portal/accounts':
         specifier: workspace:*
         version: link:../accounts
+      '@job-portal/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@job-portal/boards':
         specifier: workspace:*
         version: link:../boards

@@ -4,7 +4,9 @@ import tseslint from 'typescript-eslint';
 import eslintConfigPrettier from 'eslint-config-prettier';
 
 export default tseslint.config(
-  { ignores: ['**/node_modules/**', '**/coverage/**', '**/drizzle/**', '**/dist/**'] },
+  {
+    ignores: ['**/node_modules/**', '**/coverage/**', '**/drizzle/**', '**/dist/**'],
+  },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   {
@@ -19,6 +21,6 @@ export default tseslint.config(
       ],
     },
   },
-  { files: ['**/*.js'], ...tseslint.configs.disableTypeChecked },
+  { files: ['**/*.js', '**/*.mjs'], ...tseslint.configs.disableTypeChecked },
   eslintConfigPrettier,
 );

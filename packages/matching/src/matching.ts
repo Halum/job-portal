@@ -1,4 +1,5 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, lt, notExists, notInArray, sql } from 'drizzle-orm';
+import { AiError, isRunnerWide, type Ai } from '@job-portal/ai';
 import type { Db } from '@job-portal/db';
 import {
   applyPatch,
@@ -11,7 +12,14 @@ import {
 } from './criteria';
 import { hardFilter, prerank, prerankScore, type MatchableJob } from './filters';
 import { germanPlaces, type PlaceTable } from './places';
-import { candidates, globalDefaults, targets } from './schema';
+import {
+  buildPrompt,
+  judgeLanguage,
+  LANGUAGE_CAP,
+  parseAssessment,
+  type LanguageRequirement,
+} from './scoring';
+import { candidates, globalDefaults, scores, targets } from './schema';
 
 export interface TargetView {
   id: string;
@@ -47,7 +55,55 @@ export interface MatchingDeps {
   hasApplication?: (userId: string, ids: string[]) => Promise<Set<string>>;
   /** Used when neither the Target nor the Global defaults set prerankTopN. */
   defaultPrerankTopN?: number;
+  /** Scores the prerank survivors; without it `score` does nothing. */
+  ai?: Pick<Ai, 'run'>;
+  /** Used when neither the Target nor the Global defaults set alertThreshold. */
+  defaultAlertThreshold?: number;
+  /**
+   * Most AI calls one scoring pass makes (a throughput limit, not a spend cap): the pairs left over wait
+   * for the next pass, oldest first, so nothing is dropped. Default 50.
+   */
+  maxCallsPerPass?: number;
   places?: PlaceTable;
+}
+
+/** What one scoring pass did. */
+export interface ScoreResult {
+  /** Pairs that got a score. */
+  scored: number;
+  /** Of those, the ones at or above the alert threshold (the Job is tagged with the Target). */
+  tagged: number;
+  /** AI calls made, failed ones included. */
+  calls: number;
+  /** Sum of the costs the runner reported; null when no call reported one (unknown, not 0). */
+  costUsd: number | null;
+  /** One line per failed call, with its error class. */
+  errors: string[];
+}
+
+/** A pass that did nothing. */
+export const emptyScoreResult = (): ScoreResult => ({
+  scored: 0,
+  tagged: 0,
+  calls: 0,
+  costUsd: null,
+  errors: [],
+});
+
+/** One Job's standing with one Target it is a candidate for. */
+export interface JobScore {
+  targetId: string;
+  targetName: string;
+  prerankScore: number;
+  /** The place could not be resolved, so the radius was not checked. */
+  unknownLocation: boolean;
+  /** null while unscored. */
+  score: number | null;
+  reasons: string[];
+  redFlags: string[];
+  languages: LanguageRequirement[];
+  languageMet: boolean | null;
+  tagged: boolean;
 }
 
 export interface Matching {
@@ -62,12 +118,30 @@ export interface Matching {
   getGlobalDefaults: (userId: string) => Promise<Criteria>;
   updateGlobalDefaults: (userId: string, patch: CriteriaPatch) => Promise<Criteria>;
   /** Ids of the Jobs that passed the filters and prerank of a Target, for list_jobs. */
-  listJobIds: (userId: string, filter: { targetId: string }) => Promise<string[]>;
+  listJobIds: (
+    userId: string,
+    filter: { targetId: string; minScore?: number; tagged?: boolean },
+  ) => Promise<string[]>;
+  /**
+   * Scores every unscored candidate of an active Target, oldest first, whichever run made it, so a
+   * failed pair is retried by the next pass. A pair another worker holds is skipped, so two workers
+   * never score the same pair twice. Stops after three failures in a row.
+   */
+  score: (userId: string) => Promise<ScoreResult>;
+  /**
+   * The Job's score and tag for each Target it is a candidate for. The tag is derived on every read: a
+   * score at or above the threshold the Target resolves to now, so editing a threshold retags without a new call.
+   */
+  listScores: (userId: string, jobId: string) => Promise<JobScore[]>;
   /** Search parameters for the active Targets: one per keyword and location, none for a Target that sets neither. */
   searchQueries: (userId: string) => Promise<SearchQuery[]>;
 }
 
 const DEFAULT_TOP_N = 20;
+const DEFAULT_ALERT_THRESHOLD = 70;
+const DEFAULT_MAX_CALLS_PER_PASS = 50;
+/** A dead runner fails every call; this many runner-wide failures in a row end the pass. */
+const MAX_CONSECUTIVE_FAILURES = 3;
 /** Most search requests one fetch makes (keywords x places over all active Targets). */
 export const MAX_QUERIES = 50;
 
@@ -76,7 +150,15 @@ const read = (stored: unknown): Criteria =>
 
 export function createMatching(
   db: Db,
-  { loadJobs, hasApplication, defaultPrerankTopN = DEFAULT_TOP_N, places }: MatchingDeps,
+  {
+    loadJobs,
+    hasApplication,
+    defaultPrerankTopN = DEFAULT_TOP_N,
+    ai,
+    defaultAlertThreshold = DEFAULT_ALERT_THRESHOLD,
+    maxCallsPerPass = DEFAULT_MAX_CALLS_PER_PASS,
+    places,
+  }: MatchingDeps,
 ): Matching {
   const table = places ?? germanPlaces();
 
@@ -84,6 +166,10 @@ export function createMatching(
     const [row] = await db.select().from(globalDefaults).where(eq(globalDefaults.userId, userId));
     return row ? read(row.criteria) : emptyCriteria();
   };
+
+  /** The alert threshold a Target uses: its own, then the Global default, then the configured one. 0 is real. */
+  const thresholdOf = (globals: Criteria, target: Criteria): number =>
+    resolveCriteria(globals, target).alertThreshold ?? defaultAlertThreshold;
 
   const view = (globals: Criteria, t: typeof targets.$inferSelect): TargetView => {
     const criteria = read(t.criteria);
@@ -266,12 +352,169 @@ export function createMatching(
       });
     },
 
-    async listJobIds(userId, { targetId }) {
-      const rows = await db
-        .select({ jobId: candidates.jobId })
-        .from(candidates)
-        .where(and(eq(candidates.userId, userId), eq(candidates.targetId, targetId)));
+    async listJobIds(userId, { targetId, minScore, tagged }) {
+      const where = and(eq(candidates.userId, userId), eq(candidates.targetId, targetId));
+      // minScore 0 is a real filter (it needs a score), so it is tested against undefined, not falsy.
+      const conditions = [];
+      if (minScore !== undefined) conditions.push(gte(scores.score, minScore));
+      if (tagged !== undefined) {
+        const [t] = await db
+          .select()
+          .from(targets)
+          .where(and(eq(targets.id, targetId), eq(targets.userId, userId)));
+        if (!t) return [];
+        const threshold = thresholdOf(await getGlobals(userId), read(t.criteria));
+        conditions.push(tagged ? gte(scores.score, threshold) : lt(scores.score, threshold));
+      }
+      const rows =
+        conditions.length === 0
+          ? await db.select({ jobId: candidates.jobId }).from(candidates).where(where)
+          : await db
+              .select({ jobId: candidates.jobId })
+              .from(candidates)
+              .innerJoin(
+                scores,
+                and(eq(scores.targetId, candidates.targetId), eq(scores.jobId, candidates.jobId)),
+              )
+              .where(and(where, ...conditions));
       return rows.map((r) => r.jobId);
+    },
+
+    async listScores(userId, jobId) {
+      const rows = await db
+        .select({ c: candidates, t: targets, s: scores })
+        .from(candidates)
+        .innerJoin(targets, eq(targets.id, candidates.targetId))
+        .leftJoin(
+          scores,
+          and(eq(scores.targetId, candidates.targetId), eq(scores.jobId, candidates.jobId)),
+        )
+        .where(and(eq(candidates.userId, userId), eq(candidates.jobId, jobId)))
+        .orderBy(asc(targets.name));
+      const globals = await getGlobals(userId);
+      return rows.map(({ c, t, s }) => ({
+        targetId: c.targetId,
+        targetName: t.name,
+        prerankScore: c.prerankScore,
+        unknownLocation: c.unknownLocation,
+        score: s?.score ?? null,
+        reasons: s?.reasons ?? [],
+        redFlags: s?.redFlags ?? [],
+        languages: s?.languages ?? [],
+        languageMet: s?.languageMet ?? null,
+        tagged: s !== null && s.score >= thresholdOf(globals, read(t.criteria)),
+      }));
+    },
+
+    async score(userId) {
+      const result = emptyScoreResult();
+      if (!ai) return result;
+      const globals = await getGlobals(userId);
+      /** Candidates this pass has already looked at, so a failed or skipped one is not picked again. */
+      const seen: string[] = [];
+      /** Failures in a row that say the runner is down (key, cap, login, network); a bad answer for one posting does not count. */
+      let runnerFailuresInARow = 0;
+      while (runnerFailuresInARow < MAX_CONSECUTIVE_FAILURES && result.calls < maxCallsPerPass) {
+        // The row lock is held through the AI call: it keeps a second worker off this pair and is
+        // released by the database if this worker dies. ponytail: one connection per call in flight;
+        // a lease column (claimed_at) would free the connection during the call if the pool ever runs short.
+        const step = await db.transaction(
+          async (tx): Promise<'none' | 'skipped' | 'scored' | 'pair_failed' | 'runner_failed'> => {
+            const [picked] = await tx
+              .select()
+              .from(candidates)
+              .where(
+                and(
+                  eq(candidates.userId, userId),
+                  inArray(
+                    candidates.targetId,
+                    tx.select({ id: targets.id }).from(targets).where(eq(targets.paused, false)),
+                  ),
+                  seen.length > 0 ? notInArray(candidates.id, seen) : undefined,
+                  notExists(
+                    tx
+                      .select({ one: sql`1` })
+                      .from(scores)
+                      .where(
+                        and(
+                          eq(scores.targetId, candidates.targetId),
+                          eq(scores.jobId, candidates.jobId),
+                        ),
+                      ),
+                  ),
+                ),
+              )
+              // Pairs that failed on their own go behind the ones that have not, then oldest first, so a
+              // posting the model cannot answer never starves the newer ones.
+              .orderBy(asc(candidates.attempts), asc(candidates.createdAt), asc(candidates.id))
+              .limit(1)
+              .for('update', { skipLocked: true });
+            if (!picked) return 'none';
+            seen.push(picked.id);
+            const [target] = await tx.select().from(targets).where(eq(targets.id, picked.targetId));
+            if (!target) return 'skipped';
+            // The lock does not see a score another worker committed after our query began: look again.
+            const [already] = await tx
+              .select({ id: scores.id })
+              .from(scores)
+              .where(and(eq(scores.targetId, picked.targetId), eq(scores.jobId, picked.jobId)));
+            if (already) return 'skipped';
+            const [job] = await matchable(userId, [picked.jobId]);
+            if (!job) return 'skipped';
+            const targetCriteria = read(target.criteria);
+            const criteria = resolveCriteria(globals, targetCriteria);
+            result.calls += 1;
+            let assessed;
+            try {
+              assessed = await ai.run(
+                userId,
+                'fit_score',
+                buildPrompt(criteria, job),
+                parseAssessment,
+              );
+            } catch (err) {
+              const cls = err instanceof AiError ? err.errorClass : 'request';
+              result.errors.push(`fit score failed (${cls}) for a Job and Target`);
+              if (isRunnerWide(cls)) return 'runner_failed';
+              await tx
+                .update(candidates)
+                .set({ attempts: sql`${candidates.attempts} + 1` })
+                .where(eq(candidates.id, picked.id));
+              return 'pair_failed';
+            }
+            // null stays null (unknown) until some call reports a cost; 0 is a real cost.
+            if (assessed.costUsd !== null)
+              result.costUsd = (result.costUsd ?? 0) + assessed.costUsd;
+            const { score: raw, reasons, redFlags, languages } = assessed.value;
+            const { met, unmet } = judgeLanguage(criteria.languageAbility, languages);
+            const score = met === false ? Math.min(raw, LANGUAGE_CAP) : raw;
+            const flags =
+              met === false
+                ? [...redFlags, `language requirement not met: ${unmet.join(', ')}`]
+                : redFlags;
+            await tx
+              .insert(scores)
+              .values({
+                userId,
+                targetId: picked.targetId,
+                jobId: picked.jobId,
+                score,
+                reasons,
+                redFlags: flags,
+                languages,
+                languageMet: met,
+              })
+              .onConflictDoNothing();
+            result.scored += 1;
+            // Only the score is stored: the tag is derived when read (see listScores). This count is the run's.
+            if (score >= thresholdOf(globals, targetCriteria)) result.tagged += 1;
+            return 'scored';
+          },
+        );
+        if (step === 'none') break;
+        runnerFailuresInARow = step === 'runner_failed' ? runnerFailuresInARow + 1 : 0;
+      }
+      return result;
     },
 
     async searchQueries(userId) {

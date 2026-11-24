@@ -1,7 +1,7 @@
 import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '@job-portal/db';
 import type { Discovery } from '@job-portal/discovery';
-import type { Matching } from '@job-portal/matching';
+import { emptyScoreResult, type Matching } from '@job-portal/matching';
 import { runs, type RunStatus } from './schema';
 
 export interface Run {
@@ -11,6 +11,11 @@ export interface Run {
   fetched: number;
   newPostings: number;
   prerankPassed: number;
+  scored: number;
+  tagged: number;
+  aiCalls: number;
+  /** null when no call reported a cost. */
+  aiCostUsd: number | null;
   errors: string[];
   startedAt: Date;
   finishedAt: Date | null;
@@ -38,6 +43,10 @@ const columns = {
   fetched: runs.fetched,
   newPostings: runs.newPostings,
   prerankPassed: runs.prerankPassed,
+  scored: runs.scored,
+  tagged: runs.tagged,
+  aiCalls: runs.aiCalls,
+  aiCostUsd: runs.aiCostUsd,
   errors: runs.errors,
   startedAt: runs.startedAt,
   finishedAt: runs.finishedAt,
@@ -51,6 +60,11 @@ export interface PipelineOptions {
   staleAfterMs?: number;
   /** Runs after each poll over the Jobs it created; a failure there is an error line, not a failed run. */
   matching?: Pick<Matching, 'run'>;
+  /**
+   * Runs after Matching, over every unscored candidate of the user, not only this run's Jobs, so a pair
+   * whose AI call failed is retried by the next run of any source. A failed call is an error line.
+   */
+  scoring?: Pick<Matching, 'score'>;
 }
 
 const DEFAULT_STALE_AFTER_MS = 60 * 60 * 1000;
@@ -63,7 +77,7 @@ const DEFAULT_STALE_AFTER_MS = 60 * 60 * 1000;
 export function createPipeline(
   db: Db,
   discovery: Pick<Discovery, 'poll'>,
-  { staleAfterMs = DEFAULT_STALE_AFTER_MS, matching }: PipelineOptions = {},
+  { staleAfterMs = DEFAULT_STALE_AFTER_MS, matching, scoring }: PipelineOptions = {},
 ): Pipeline {
   /** Fails runs still "running" past the time bound that also match `scope`; returns how many. */
   const failLost = async (...scope: (SQL | undefined)[]): Promise<number> => {
@@ -97,7 +111,18 @@ export function createPipeline(
       if (!started) return null;
 
       const finish = async (
-        values: Pick<Run, 'status' | 'fetched' | 'newPostings' | 'prerankPassed' | 'errors'>,
+        values: Pick<
+          Run,
+          | 'status'
+          | 'fetched'
+          | 'newPostings'
+          | 'prerankPassed'
+          | 'scored'
+          | 'tagged'
+          | 'aiCalls'
+          | 'aiCostUsd'
+          | 'errors'
+        >,
       ): Promise<Run> => {
         // Only a run still "running" may finish: one failed as lost keeps its failed row.
         const [run] = await db
@@ -121,11 +146,24 @@ export function createPipeline(
             errors.push(`matching failed: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
+        let ai = emptyScoreResult();
+        if (scoring) {
+          try {
+            ai = await scoring.score(userId);
+            errors.push(...ai.errors);
+          } catch (err) {
+            errors.push(`scoring failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
         return await finish({
           status: errors.length > 0 ? 'completed_with_errors' : 'completed',
           fetched,
           newPostings,
           prerankPassed,
+          scored: ai.scored,
+          tagged: ai.tagged,
+          aiCalls: ai.calls,
+          aiCostUsd: ai.costUsd,
           errors,
         });
       } catch (err) {
@@ -134,6 +172,10 @@ export function createPipeline(
           fetched: 0,
           newPostings: 0,
           prerankPassed: 0,
+          scored: 0,
+          tagged: 0,
+          aiCalls: 0,
+          aiCostUsd: null,
           errors: [err instanceof Error ? err.message : String(err)],
         });
       }

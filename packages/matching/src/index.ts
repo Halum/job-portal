@@ -5,6 +5,16 @@ import type { ModuleMigrations } from '@job-portal/db';
 export * from './criteria';
 export * from './filters';
 export * from './matching';
+export {
+  CEFR,
+  LANGUAGE_CAP,
+  assessmentSchema,
+  buildPrompt,
+  judgeLanguage,
+  parseAssessment,
+  type Assessment,
+  type LanguageRequirement,
+} from './scoring';
 export { createPlaceTable, germanPlaces, distanceKm, type Place, type PlaceTable } from './places';
 
 export const matchingMigrations: ModuleMigrations = {
