@@ -5,7 +5,12 @@ import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redi
 import { Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
-import { createBundesagenturSource, createDiscovery, type Discovery } from '@job-portal/discovery';
+import {
+  createBambaseSource,
+  createBundesagenturSource,
+  createDiscovery,
+  type Discovery,
+} from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
 import { createPipeline, type Pipeline } from '@job-portal/pipeline';
 import { createLogger } from '@job-portal/shared';
@@ -19,8 +24,17 @@ const fixture = readFileSync(
   ),
   'utf8',
 );
-const fakeFetch = (() =>
-  Promise.resolve(new Response(fixture, { status: 200 }))) as unknown as typeof fetch;
+const bambaseFixture = readFileSync(
+  new URL('../../../packages/discovery/src/sources/fixtures/bambase-jobs.html', import.meta.url),
+  'utf8',
+);
+// Recorded responses by host: no test reaches the network.
+const fakeFetch: typeof fetch = (input) => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  return Promise.resolve(
+    new Response(url.startsWith('https://bambase.de') ? bambaseFixture : fixture, { status: 200 }),
+  );
+};
 
 async function eventually<T>(read: () => Promise<T | undefined>, ms = 15_000): Promise<T> {
   const deadline = Date.now() + ms;
@@ -41,6 +55,7 @@ describe('worker against real Postgres and Redis', () => {
   let worker: WorkerHandle | undefined;
   const logger = createLogger({ level: 'silent' });
   const bundesagentur = { sourceId: 'bundesagentur', intervalMinutes: 1 };
+  const bambase = { sourceId: 'bambase', intervalMinutes: 5 };
 
   beforeAll(async () => {
     [pg, redis] = await Promise.all([
@@ -51,6 +66,7 @@ describe('worker against real Postgres and Redis', () => {
     handle = createDb(pg.getConnectionUri());
     discovery = createDiscovery(handle.db, [
       createBundesagenturSource({ query: 'wo=Musterstadt', fetch: fakeFetch }),
+      createBambaseSource({ fetch: fakeFetch }),
     ]);
     pipeline = createPipeline(handle.db, discovery);
   });
@@ -84,11 +100,30 @@ describe('worker against real Postgres and Redis', () => {
     expect((await discovery.listJobs(USER, {})).jobs).toHaveLength(5);
   });
 
+  it('runs bambase on its own schedule and lists it in the run history', async () => {
+    worker = await start([bambase]);
+
+    const run = await eventually(async () =>
+      (await pipeline.listRuns(USER, 50)).find(
+        (r) => r.sourceId === 'bambase' && r.status !== 'running',
+      ),
+    );
+    expect(run).toMatchObject({ status: 'completed', fetched: 12, newPostings: 12, errors: [] });
+    const queue = new Queue('pipeline', { connection: new Redis(redis.getConnectionUrl()) });
+    expect((await queue.getJobSchedulers()).map((s) => [s.key, s.every])).toEqual([
+      ['bambase', 300_000],
+    ]);
+    await queue.close();
+  });
+
   it('registers one scheduler per source, keyed by the source id', async () => {
-    worker = await start();
+    worker = await start([bundesagentur, bambase]);
     const queue = new Queue('pipeline', { connection: new Redis(redis.getConnectionUrl()) });
     const schedulers = await queue.getJobSchedulers();
-    expect(schedulers.map((s) => [s.key, s.every])).toEqual([['bundesagentur', 60_000]]);
+    expect(schedulers.map((s) => [s.key, s.every]).sort()).toEqual([
+      ['bambase', 300_000],
+      ['bundesagentur', 60_000],
+    ]);
     await queue.close();
   });
 

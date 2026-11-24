@@ -12,6 +12,7 @@
   "dependencies": {
     "@job-portal/db": "workspace:*",
     "@job-portal/shared": "workspace:*",
+    "cheerio": "^1.0.0",
     "drizzle-orm": "0.45.4",
     "zod": "4.6.7"
   },

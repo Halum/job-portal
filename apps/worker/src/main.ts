@@ -2,7 +2,9 @@ import { createAccounts } from '@job-portal/accounts';
 import { loadConfig } from '@job-portal/config';
 import { createDb, runMigrationsWithLock } from '@job-portal/db';
 import {
+  BAMBASE,
   BUNDESAGENTUR,
+  createBambaseSource,
   createBundesagenturSource,
   createDiscovery,
   type Source,
@@ -21,10 +23,14 @@ const user = await createAccounts(db, config.mcpBearerToken).seedUser(config.see
 
 const sources: Source[] = [];
 const scheduled: ScheduledSource[] = [];
-const { bundesagentur } = config.sources;
+const { bundesagentur, bambase } = config.sources;
 if (bundesagentur) {
   sources.push(createBundesagenturSource({ query: bundesagentur.query }));
   scheduled.push({ sourceId: BUNDESAGENTUR, intervalMinutes: bundesagentur.intervalMinutes });
+}
+if (bambase) {
+  sources.push(createBambaseSource());
+  scheduled.push({ sourceId: BAMBASE, intervalMinutes: bambase.intervalMinutes });
 }
 const pipeline = createPipeline(db, createDiscovery(db, sources));
 
