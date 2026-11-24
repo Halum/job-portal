@@ -27,6 +27,9 @@ export default defineConfig({
         'packages/*/src/schema.ts',
         // A fake Gmail server for tests of this and other packages.
         'packages/mail/src/testing.ts',
+        // Test-only helpers of the Documents render tests (synthetic fixtures, PDF text extraction).
+        'packages/documents/src/render/fixtures.ts',
+        'packages/documents/src/render/pdf-text.ts',
       ],
       thresholds: { statements: 80, lines: 80, functions: 80, branches: 70 },
     },

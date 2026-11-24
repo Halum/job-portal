@@ -1,8 +1,25 @@
 import { z } from 'zod';
+import { parseSearchUrl } from './search-url';
 
 export const MAX_WORDS = 50;
 export const MAX_WORD_LENGTH = 100;
 const words = z.array(z.string().trim().min(1).max(MAX_WORD_LENGTH)).max(MAX_WORDS).nullable();
+
+export const MAX_SEARCH_URLS = 20;
+export const MAX_SEARCH_URL_LENGTH = 2000;
+const searchUrls = z
+  .array(
+    z
+      .string()
+      .trim()
+      .max(MAX_SEARCH_URL_LENGTH)
+      .superRefine((value, ctx) => {
+        const parsed = parseSearchUrl(value);
+        if ('error' in parsed) ctx.addIssue({ code: 'custom', message: parsed.error });
+      }),
+  )
+  .max(MAX_SEARCH_URLS)
+  .nullable();
 
 /**
  * The search criteria of Global defaults and of every Target. Every field is nullable: null means
@@ -14,6 +31,8 @@ export const criteriaSchema = z.object({
   blockedCompanies: words,
   /** Places (city names or postcodes) jobs should be near. */
   locations: words,
+  /** Saved Bundesagentur search URLs, fetched as they are (only the allowed parameters are kept). */
+  bundesagenturSearches: searchUrls,
   /** Kilometres around each location; 0 means the same city only. */
   radiusKm: z.number().int().min(0).max(500).nullable(),
   /** False drops remote postings, true lets them past the location check, null does not care. */
@@ -45,6 +64,7 @@ export const emptyCriteria = (): Criteria => ({
   blockedCompanies: null,
   locations: null,
   radiusKm: null,
+  bundesagenturSearches: null,
   remoteAllowed: null,
   salaryFloor: null,
   alertThreshold: null,
@@ -91,6 +111,7 @@ export function resolveCriteria(globals: Criteria, target: Criteria): ResolvedCr
     keywords: pick('keywords'),
     locations: pick('locations'),
     radiusKm: pick('radiusKm'),
+    bundesagenturSearches: pick('bundesagenturSearches'),
     remoteAllowed: pick('remoteAllowed'),
     salaryFloor: pick('salaryFloor'),
     alertThreshold: pick('alertThreshold'),

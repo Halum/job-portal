@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import type { ModuleMigrations } from '@job-portal/db';
 
 export * from './documents';
+export * from './render';
 
 export const documentsMigrations: ModuleMigrations = {
   name: 'documents',

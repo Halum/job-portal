@@ -210,6 +210,62 @@ describe('matching against real Postgres', () => {
       expect(await matching.searchQueries(user)).toEqual([{ was: 'alpha' }, { was: 'beta' }]);
     });
 
+    it('puts saved URL searches first with their own filters, dedupes, and lets a URL-only Target search', async () => {
+      const user = '00000000-0000-4000-8000-0000000000f1';
+      const A =
+        'https://www.arbeitsagentur.de/jobsuche/suche?wo=Musterstadt&umkreis=15&arbeitszeit=tz&angebotsart=1&junk=1';
+      await matching.updateGlobalDefaults(user, { bundesagenturSearches: [A] });
+      await matching.upsertTarget(user, { name: 'only urls', criteria: {} });
+      await matching.upsertTarget(user, {
+        name: 'zz words',
+        criteria: {
+          keywords: ['alpha'],
+          bundesagenturSearches: [
+            A,
+            'https://www.arbeitsagentur.de/jobsuche/suche?was=beta&wo=Beispielburg&umkreis=5',
+          ],
+        },
+      });
+      expect(await matching.searchQueries(user)).toEqual([
+        { wo: 'Musterstadt', umkreis: 15, arbeitszeit: 'tz', angebotsart: '1' },
+        { was: 'beta', wo: 'Beispielburg', umkreis: 5 },
+        { was: 'alpha' },
+      ]);
+    });
+
+    it('never mixes the saved URLs of two users', async () => {
+      const u1 = '00000000-0000-4000-8000-0000000000f2';
+      const u2 = '00000000-0000-4000-8000-0000000000f3';
+      await matching.upsertTarget(u1, {
+        name: 't',
+        criteria: {
+          bundesagenturSearches: ['https://www.arbeitsagentur.de/jobsuche/suche?wo=Musterstadt'],
+        },
+      });
+      await matching.upsertTarget(u2, {
+        name: 't',
+        criteria: {
+          bundesagenturSearches: ['https://www.arbeitsagentur.de/jobsuche/suche?wo=Beispielburg'],
+        },
+      });
+      expect(await matching.searchQueries(u1)).toEqual([{ wo: 'Musterstadt' }]);
+      expect(await matching.searchQueries(u2)).toEqual([{ wo: 'Beispielburg' }]);
+    });
+
+    it('counts saved URL searches toward the cap, URLs first', async () => {
+      const u = '00000000-0000-4000-8000-0000000000f4';
+      await matching.upsertTarget(u, {
+        name: 'cap',
+        criteria: {
+          bundesagenturSearches: ['https://www.arbeitsagentur.de/jobsuche/suche?wo=Musterstadt'],
+          keywords: Array.from({ length: 50 }, (_, i) => `w${String(i)}`),
+        },
+      });
+      const q = await matching.searchQueries(u);
+      expect(q).toHaveLength(MAX_QUERIES);
+      expect(q[0]).toEqual({ wo: 'Musterstadt' });
+    });
+
     it('is empty for a user with no Targets', async () => {
       expect(await matching.searchQueries('00000000-0000-4000-8000-0000000000bb')).toEqual([]);
     });
