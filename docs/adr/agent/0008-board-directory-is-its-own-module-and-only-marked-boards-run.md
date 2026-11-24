@@ -1,0 +1,9 @@
+# The Board directory is its own module, and only marked boards are fetched
+
+The directory is shared reference data (no user id), so it gets its own package and Postgres schema, `boards`, instead of a table in `discovery`. Reasons: it is read by every ATS source but queried by no other table, and a separate migration folder lets it land beside the Jobs and Postings work without clashing on Drizzle's numbered files and journal. Discovery stays unaware of it: an ATS source takes a `listBoards` function, and the worker wires `directory.listMarked(ats)` into it. The one-off scripts (`boards:import`, `boards:mark` in the worker app) live in the worker because the migrations package depends on boards, and a script in boards would make a cycle.
+
+The mark is a boolean on the directory row and the only thing the mark script writes. A marked board stays marked (it "has posted" in Germany or remote EU), so a re-run checks only unmarked boards; a board that cannot be fetched keeps its mark and is listed in the script's result. The Germany or remote EU test is a text heuristic over location strings with a short German city list; the city table the spec bundles for radius filters can replace it later.
+
+The company lists are JobSync's MIT data files, copied unchanged with their commit and licence text in `packages/boards/data/NOTICE.md`. Rate limiting is a fetch wrapper that spaces requests per host (one slot per `1000 / BOARD_REQUESTS_PER_SECOND` ms), shared by all three ATS sources and the mark script, so Lever's EU host is paced on its own. It is per process: the database's one active run per source keeps two workers off the same source, and the ATS sources use different hosts.
+
+The ATS fixtures are hand-built scrubbed copies of the documented response shapes (checked against the live endpoints on 2026-11-24), with placeholder companies, ids and links, because this repo is public.
