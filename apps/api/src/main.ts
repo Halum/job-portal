@@ -11,6 +11,7 @@ import {
   createDiscovery,
   createRedisLimit,
 } from '@job-portal/discovery';
+import { createDocuments } from '@job-portal/documents';
 import { allMigrations } from '@job-portal/migrations';
 import { createMatching } from '@job-portal/matching';
 import { createPipeline } from '@job-portal/pipeline';
@@ -85,6 +86,7 @@ const allowAddBoard = createRedisLimit(limiter.redis, {
 });
 const server = createApiServer({
   accounts,
+  documents: createDocuments(db),
   discovery,
   matching,
   pipeline,

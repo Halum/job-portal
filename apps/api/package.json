@@ -13,6 +13,7 @@
     "@job-portal/config": "workspace:*",
     "@job-portal/db": "workspace:*",
     "@job-portal/discovery": "workspace:*",
+    "@job-portal/documents": "workspace:*",
     "@job-portal/mail": "workspace:*",
     "@job-portal/matching": "workspace:*",
     "@job-portal/migrations": "workspace:*",

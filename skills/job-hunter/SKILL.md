@@ -44,6 +44,18 @@ The system raises a Review item when it is not sure: an AI fit rejection (a job 
 - `decide_review`: confirm or disagree. This is the user's decision, never yours: read the item to them and wait for their answer. Confirm agrees with the AI (an AI merge then merges the two Jobs, a mail match applies the mail through the Timeline). Disagree tags the rejected Job or keeps two Jobs apart. For a mail match the user may pick another Job from the item's `possibleJobIds` with `jobId`. An item can be decided once.
 - `review_stats`: how often the user agreed with the AI, per kind and model, and how many items are still pending.
 
+## Career bank (resume and cover letter material)
+
+The Career bank holds the user's Master resume as Work experiences with Experience points. Files never travel through MCP. Upload one with curl (the same bearer token as the MCP endpoint) and pass the returned id to a tool:
+
+`curl -sS -X POST -H "Authorization: Bearer $TOKEN" --data-binary @cv.pdf "$BASE/files?kind=master_resume&filename=cv.pdf"`
+
+`kind` is `master_resume`, `master_cover_letter` or `photo`. PDF, DOCX, Markdown and UTF-8 text are accepted for the Master files and PNG or JPEG for the photo, up to 10 MB; the type is checked from the content. `GET $BASE/files/<id>` returns the stored file again. Replacing a Master keeps the older upload.
+
+- `register_master_document`: mark an uploaded file id as the current Master resume or Master cover letter.
+- `save_career_bank`: import a parse of the Master resume (Work experiences with role, organisation, start, end or null, place, and their Experience points with skills). Parse the file yourself, show the result to the user and call this only after they reviewed it. It adds to what is stored, so do not import the same resume twice.
+- `get_career_bank`: the current Master files and the Work experiences in order, each with its Experience points.
+
 ## How the system is running
 
 - `get_run_history`: recent Runs per source with counts, errors and the AI totals (calls, failures, tokens, cost). Use it when the user asks why nothing new arrived or what the AI costs.

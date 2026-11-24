@@ -10,6 +10,7 @@ import { createWatchlist } from '@job-portal/boards';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import { createDiscovery } from '@job-portal/discovery';
 import { createMatching } from '@job-portal/matching';
+import { createDocuments } from '@job-portal/documents';
 import { allMigrations } from '@job-portal/migrations';
 import { createPipeline } from '@job-portal/pipeline';
 import { createReview, type Review } from '@job-portal/review';
@@ -77,6 +78,7 @@ describe('Review queue over MCP', () => {
     });
     pipelineRef = createPipeline(handle.db, discovery, { matching, scoring: matching });
     server = createApiServer({
+      documents: createDocuments(handle.db),
       accounts,
       discovery,
       matching,
