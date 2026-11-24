@@ -121,7 +121,7 @@ describe('bundesagentur source', () => {
         queries: () =>
           Promise.resolve([
             bundesagenturQuery({ was: 'koch', wo: 'Musterstadt', umkreis: 0 }),
-            bundesagenturQuery({ was: 'kellner', wo: 'Musterstadt' }),
+            bundesagenturQuery({ was: 'beispiel', wo: 'Musterstadt' }),
           ]),
         fetch: search(urls) as unknown as typeof fetch,
       });

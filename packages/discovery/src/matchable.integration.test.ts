@@ -14,7 +14,7 @@ const source = (ids: string[]): Source => ({
         sourcePostingId: id,
         title: `Job ${id}`,
         company: `Firma ${id}`,
-        location: 'Bamberg',
+        location: 'Musterstadt',
         url: `https://jobs.example.invalid/${id}`,
         raw: { id, text: 'Koch' },
       })),
@@ -63,7 +63,7 @@ describe('what Matching reads from Discovery', () => {
     expect(matchable.map((j) => j.id).sort()).toEqual(ids.slice(2).sort());
     expect(matchable[0]).toMatchObject({
       company: expect.stringMatching(/^Firma/) as string,
-      location: 'Bamberg',
+      location: 'Musterstadt',
     });
     expect(matchable[0]?.raw).toMatchObject({ text: 'Koch' });
     expect(matchable[0]?.recency).toBeInstanceOf(Date);

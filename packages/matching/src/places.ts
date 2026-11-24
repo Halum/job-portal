@@ -21,7 +21,7 @@ export const normalizeName = (s: string): string =>
     .replace(/[^a-z0-9]/g, '');
 
 export interface PlaceTable {
-  /** A place from a postcode or a name in free text ("96047 Bamberg", "Bamberg, Oberfranken"), or null when unknown. */
+  /** A place from a postcode or a name in free text ("10115 Berlin", "Berlin, Mitte"), or null when unknown. */
   resolve: (text: string) => Place | null;
 }
 
