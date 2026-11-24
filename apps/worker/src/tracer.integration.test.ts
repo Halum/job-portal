@@ -18,6 +18,7 @@ import { createMatching } from '@job-portal/matching';
 import { createPipeline } from '@job-portal/pipeline';
 import { createLogger } from '@job-portal/shared';
 import { createApiServer } from '@job-portal/api';
+import { createTracker } from '@job-portal/tracker';
 import { startWorker, type WorkerHandle } from './worker';
 
 // Tracer bullet: a Target -> Bundesagentur search (recorded response) -> BullMQ schedule -> Pipeline
@@ -69,6 +70,7 @@ describe('Bundesagentur source to MCP list_jobs', () => {
       name: 'odd minijob',
       criteria: { keywords: ['koch'], locations: ['Musterstadt'], radiusKm: 25 },
     });
+    const tracker = createTracker(handle.db, discovery);
     const pipeline = createPipeline(handle.db, discovery, { matching });
     const logger = createLogger({ level: 'silent' });
 
@@ -79,7 +81,14 @@ describe('Bundesagentur source to MCP list_jobs', () => {
       sources: [{ sourceId: 'bundesagentur', intervalMinutes: 1 }],
       logger,
     });
-    server = createApiServer({ accounts, discovery, matching, pipeline, logger });
+    server = createApiServer({
+      accounts,
+      discovery,
+      matching,
+      pipeline,
+      tracker,
+      logger,
+    });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const url = new URL(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}/mcp`);
     client = new Client({ name: 'test', version: '0.0.0' });

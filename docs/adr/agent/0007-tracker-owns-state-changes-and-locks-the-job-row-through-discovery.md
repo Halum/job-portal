@@ -1,0 +1,9 @@
+# The Tracker writes every state change, under the Job row lock held through Discovery
+
+The Job row (and its discovery state) belongs to Discovery, the application side (status, furthest stage, applied and apply-by dates), Timeline events and notes to the Tracker. A change needs both sides to move together, so the Tracker opens one transaction, takes the Job row lock through `Discovery.lockJob(tx, ...)` (select for update), checks the transition table, writes its own rows and calls `Discovery.setDiscoveryState(tx, ...)`, which is the only writer of that column. The Timeline row and the state commit or roll back as one, and no module queries another's schema. `createTracker` takes the Discovery interface for this; the transaction handle type is `DbTx` from the db package.
+
+A tracker row exists only once an application starts or any change is made; no row means no application. Every change stores what it replaced (from, furthest stage before, dates before), so undo restores the furthest stage, the only backward move. Undo reverts the latest event of the Job, writes an undo event pointing at the reverted one, and is refused when the latest event is already an undo. Notes are not events. Gone cold (system actor) is in the transition table but its daily check belongs to a later ticket.
+
+Applied and apply-by are calendar dates (`date`, YYYY-MM-DD) in the user's timezone, default today computed from the user's timezone; event times are timestamptz.
+
+`list_jobs` filters apply in the query before the limit and cursor: discovery state, discovered-since and an id set are Discovery.listJobs options, and the Tracker supplies the id set for application status and apply-by date (`findJobIds`), which needs a tracker row anyway. The MCP `set_status` carries an actor of user or skill; Gmail and system writes come from their own modules. The score filter waits for the Matching ticket, as no scores exist yet.

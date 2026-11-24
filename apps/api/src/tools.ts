@@ -4,11 +4,20 @@ import { userSchema, type User } from '@job-portal/accounts';
 import { DISCOVERY_STATES, type Discovery } from '@job-portal/discovery';
 import { criteriaPatchSchema, criteriaSchema, type Matching } from '@job-portal/matching';
 import { RUN_STATUSES, type Pipeline } from '@job-portal/pipeline';
+import {
+  ACTORS,
+  APPLICATION_STATUSES,
+  STAGES,
+  TrackerError,
+  type ApplicationTracking,
+  type Tracker,
+} from '@job-portal/tracker';
 
 export interface ToolDeps {
   discovery: Discovery;
   matching: Matching;
   pipeline: Pipeline;
+  tracker: Tracker;
 }
 
 const isoDate = z.string().describe('ISO 8601 timestamp, UTC');
@@ -26,7 +35,31 @@ const postingSchema = z.object({
   lastSeenAt: isoDate,
 });
 
+const trackingSchema = z.object({
+  discoveryState: z.enum(DISCOVERY_STATES),
+  applicationStatus: z.enum(APPLICATION_STATUSES).nullable(),
+  furthestStage: z.enum(STAGES).nullable(),
+  appliedOn: z.string().nullable().describe('YYYY-MM-DD in the user timezone'),
+  applyBy: z.string().nullable().describe('YYYY-MM-DD in the user timezone'),
+});
+
+const dayInput = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'use YYYY-MM-DD');
+
+const timelineSchema = z.object({
+  id: z.string(),
+  field: z.enum(['discovery', 'application']),
+  from: z.string().nullable(),
+  to: z.string().nullable(),
+  actor: z.enum(ACTORS),
+  evidence: z.string().nullable(),
+  undoes: z.string().nullable(),
+  createdAt: isoDate,
+});
+
+const noteSchema = z.object({ id: z.string(), text: z.string(), createdAt: isoDate });
+
 const jobSchema = z.object({
+  tracking: trackingSchema,
   id: z.string(),
   title: z.string(),
   company: z.string().nullable(),
@@ -96,10 +129,37 @@ const failure = (
   content: [{ type: 'text', text: err instanceof Error ? err.message : fallback }],
 });
 
+const NO_APPLICATION: ApplicationTracking = {
+  applicationStatus: null,
+  furthestStage: null,
+  appliedOn: null,
+  applyBy: null,
+};
+
+/** A refused change is a tool error with the reason; anything else is a real failure and propagates. */
+async function refusable<T>(
+  run: () => Promise<T>,
+): Promise<
+  | { ok: true; value: T }
+  | { ok: false; error: { isError: true; content: { type: 'text'; text: string }[] } }
+> {
+  try {
+    return { ok: true, value: await run() };
+  } catch (err) {
+    if (err instanceof TrackerError) {
+      return {
+        ok: false,
+        error: { isError: true, content: [{ type: 'text', text: err.message }] },
+      };
+    }
+    throw err;
+  }
+}
+
 export function registerTools(
   mcp: McpServer,
   user: User,
-  { discovery, matching, pipeline }: ToolDeps,
+  { discovery, matching, pipeline, tracker }: ToolDeps,
 ): void {
   mcp.registerTool(
     'whoami',
@@ -114,7 +174,7 @@ export function registerTools(
     'list_jobs',
     {
       description:
-        'List stored Jobs with their postings, ordered and paged by Job id. Pass nextCursor back as cursor for the next page.',
+        'List stored Jobs with their postings and tracking, ordered and paged by Job id. All filters apply before paging, so a page is full whenever enough Jobs match. Pass nextCursor back as cursor for the next page.',
       inputSchema: {
         limit: z.number().int().min(1).max(200).optional(),
         cursor: z.uuid().optional().describe('The nextCursor of the previous page.'),
@@ -122,14 +182,54 @@ export function registerTools(
           .uuid()
           .optional()
           .describe('Only Jobs that passed the hard filters and prerank of this Target.'),
+        discoveryState: z.enum(DISCOVERY_STATES).optional(),
+        applicationStatus: z.enum(APPLICATION_STATUSES).optional(),
+        discoveredSince: z.iso
+          .datetime()
+          .optional()
+          .describe('Only Jobs first seen at or after this instant.'),
+        applyByBefore: dayInput
+          .optional()
+          .describe('Only Jobs with an apply-by date on or before this day.'),
       },
       outputSchema: { jobs: z.array(jobSchema), nextCursor: z.string().nullable() },
     },
-    async ({ limit, cursor, targetId }) => {
-      const jobIds = targetId ? await matching.listJobIds(user.id, { targetId }) : undefined;
-      const page = await discovery.listJobs(user.id, { limit, cursor, jobIds });
+    async ({
+      limit,
+      cursor,
+      targetId,
+      discoveryState,
+      applicationStatus,
+      discoveredSince,
+      applyByBefore,
+    }) => {
+      const filtered = await refusable(async () =>
+        applicationStatus || applyByBefore
+          ? tracker.findJobIds(user.id, { applicationStatus, applyByOnOrBefore: applyByBefore })
+          : null,
+      );
+      if (!filtered.ok) return filtered.error;
+      const byTarget = targetId ? await matching.listJobIds(user.id, { targetId }) : null;
+      const jobIds =
+        filtered.value && byTarget
+          ? filtered.value.filter((id) => byTarget.includes(id))
+          : (filtered.value ?? byTarget ?? undefined);
+      const page = await discovery.listJobs(user.id, {
+        limit,
+        cursor,
+        discoveryState,
+        jobIds,
+        discoveredSince: discoveredSince ? new Date(discoveredSince) : undefined,
+      });
+      const states = await tracker.getStates(
+        user.id,
+        page.jobs.map((j) => j.id),
+      );
       const out = {
-        jobs: page.jobs.map(jobOut),
+        jobs: page.jobs.map((j) => ({
+          ...jobOut(j),
+          tracking: { discoveryState: j.discoveryState, ...(states.get(j.id) ?? NO_APPLICATION) },
+        })),
         nextCursor: page.nextCursor,
       };
       return { content: [text(out)], structuredContent: out };
@@ -140,20 +240,34 @@ export function registerTools(
     'get_job',
     {
       description:
-        'Get one Job with all its postings, including each posting as the source gave it.',
+        'Get one Job with all its postings (each as the source gave it), its tracking, its Timeline (oldest first) and its notes.',
       inputSchema: { jobId: z.uuid() },
       outputSchema: {
-        job: jobSchema.extend({ postings: z.array(postingSchema.extend({ raw: z.unknown() })) }),
+        job: jobSchema.extend({
+          postings: z.array(postingSchema.extend({ raw: z.unknown() })),
+          timeline: z.array(timelineSchema),
+          notes: z.array(noteSchema),
+        }),
       },
     },
     async ({ jobId }) => {
       const job = await discovery.getJob(user.id, jobId);
       if (!job) return { isError: true, content: [{ type: 'text', text: `No Job ${jobId}` }] };
+      const [states, { events, notes }] = await Promise.all([
+        tracker.getStates(user.id, [jobId]),
+        tracker.getTimeline(user.id, jobId),
+      ]);
       const out = {
         job: {
           ...job,
           createdAt: job.createdAt.toISOString(),
           postings: job.postings.map(withDates),
+          tracking: {
+            discoveryState: job.discoveryState,
+            ...(states.get(jobId) ?? NO_APPLICATION),
+          },
+          timeline: events.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() })),
+          notes: notes.map((n) => ({ ...n, createdAt: n.createdAt.toISOString() })),
         },
       };
       return { content: [text(out)], structuredContent: out };
@@ -197,6 +311,86 @@ export function registerTools(
           content: [{ type: 'text', text: err instanceof Error ? err.message : 'split failed' }],
         };
       }
+    },
+  );
+
+  mcp.registerTool(
+    'set_status',
+    {
+      description:
+        'Change one thing about a Job: its discovery state (new, shortlisted, dismissed, expired) or its application status (applied, screening, interview, offer, accepted, declined, rejected, withdrawn). Applied takes appliedOn (default today in the user timezone) and an optional applyBy, only from the user or the skill, and a second Applied is refused with the existing date. Final statuses change only through undo_last_change. Set actor to skill when the applying skill makes the change.',
+      inputSchema: {
+        jobId: z.uuid(),
+        actor: z.enum(['user', 'skill']).default('user'),
+        discoveryState: z.enum(DISCOVERY_STATES).optional(),
+        applicationStatus: z.enum(APPLICATION_STATUSES).optional(),
+        appliedOn: dayInput.optional(),
+        applyBy: dayInput.optional(),
+        evidence: z.string().optional().describe('Why, for the Timeline.'),
+      },
+      outputSchema: { tracking: trackingSchema },
+    },
+    async ({ jobId, actor, discoveryState, applicationStatus, appliedOn, applyBy, evidence }) => {
+      if ((discoveryState === undefined) === (applicationStatus === undefined)) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text' as const,
+              text: 'give exactly one of discoveryState and applicationStatus',
+            },
+          ],
+        };
+      }
+      const done = await refusable(() =>
+        discoveryState
+          ? tracker.setDiscoveryState(user.id, jobId, discoveryState, actor, evidence)
+          : tracker.setApplicationStatus(user.id, jobId, {
+              to: applicationStatus ?? 'applied',
+              actor,
+              evidence,
+              appliedOn,
+              applyBy,
+              timezone: user.timezone,
+            }),
+      );
+      if (!done.ok) return done.error;
+      const out = { tracking: done.value };
+      return { content: [text(out)], structuredContent: out };
+    },
+  );
+
+  mcp.registerTool(
+    'undo_last_change',
+    {
+      description:
+        'Undo the last state change of a Job (discovery state or application status, including a final one). The undo is itself a Timeline event, and a second undo in a row is refused. Notes are not changes.',
+      inputSchema: { jobId: z.uuid(), actor: z.enum(['user', 'skill']).default('user') },
+      outputSchema: { tracking: trackingSchema },
+    },
+    async ({ jobId, actor }) => {
+      const done = await refusable(() => tracker.undoLastChange(user.id, jobId, actor));
+      if (!done.ok) return done.error;
+      const out = { tracking: done.value };
+      return { content: [text(out)], structuredContent: out };
+    },
+  );
+
+  mcp.registerTool(
+    'add_note',
+    {
+      description:
+        'Add a free-text note to a Job (who called, what was said). Notes are not state changes.',
+      inputSchema: { jobId: z.uuid(), text: z.string().min(1) },
+      outputSchema: { note: noteSchema },
+    },
+    async ({ jobId, text: body }) => {
+      if (!(await discovery.getJob(user.id, jobId))) {
+        return { isError: true, content: [{ type: 'text' as const, text: `No Job ${jobId}` }] };
+      }
+      const note = await tracker.addNote(user.id, jobId, body);
+      const out = { note: { ...note, createdAt: note.createdAt.toISOString() } };
+      return { content: [text(out)], structuredContent: out };
     },
   );
 

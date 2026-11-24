@@ -17,6 +17,7 @@ import {
 } from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
 import { createPipeline } from '@job-portal/pipeline';
+import { createTracker } from '@job-portal/tracker';
 import { createLogger } from '@job-portal/shared';
 import { startWorker, type ScheduledSource } from './worker';
 
@@ -28,10 +29,14 @@ const { db } = createDb(config.databaseUrl);
 const user = await createAccounts(db, config.mcpBearerToken).seedUser(config.seedUserEmail);
 
 // Targets decide what the Bundesagentur search asks for; Discovery supplies the Jobs Matching may look at.
-// ponytail: the Tracker's application-status exclusion (hasApplication) is wired when it exists.
-// (`discovery` is created below; the callback only runs during a run, after it exists.)
+// A Job with any application status is skipped by matching (hasApplication, from the Tracker).
+// (`discovery` and `tracker` are created below; the callbacks only run during a run, after they exist.)
 const matching = createMatching(db, {
   loadJobs: (userId, ids) => discovery.listMatchable(userId, ids),
+  hasApplication: async (userId, ids) => {
+    const states = await tracker.getStates(userId, ids);
+    return new Set(ids.filter((id) => states.get(id)?.applicationStatus != null));
+  },
   defaultPrerankTopN: config.prerankTopN,
 });
 
@@ -62,6 +67,7 @@ for (const ats of ATS_IDS) {
   );
   scheduled.push({ sourceId: ats, intervalMinutes: source.intervalMinutes });
 }
+const tracker = createTracker(db, discovery);
 const pipeline = createPipeline(db, discovery, { matching });
 
 const worker = await startWorker({

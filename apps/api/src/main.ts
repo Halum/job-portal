@@ -5,6 +5,7 @@ import { createDiscovery } from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
 import { createMatching } from '@job-portal/matching';
 import { createPipeline } from '@job-portal/pipeline';
+import { createTracker } from '@job-portal/tracker';
 import { createLogger } from '@job-portal/shared';
 import { createApiServer } from './server';
 
@@ -18,12 +19,17 @@ await accounts.seedUser(config.seedUserEmail);
 
 // The API only reads: it has no sources, so it can show runs and jobs but never polls.
 const discovery = createDiscovery(db, []);
+const tracker = createTracker(db, discovery);
 const matching = createMatching(db, {
   loadJobs: (userId, ids) => discovery.listMatchable(userId, ids),
+  hasApplication: async (userId, ids) => {
+    const states = await tracker.getStates(userId, ids);
+    return new Set(ids.filter((id) => states.get(id)?.applicationStatus != null));
+  },
   defaultPrerankTopN: config.prerankTopN,
 });
 const pipeline = createPipeline(db, discovery);
-createApiServer({ accounts, discovery, matching, pipeline, logger }).listen(
+createApiServer({ accounts, discovery, matching, pipeline, tracker, logger }).listen(
   config.port,
   config.host,
   () => {
