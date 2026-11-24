@@ -2,6 +2,7 @@ import { accountsMigrations } from '@job-portal/accounts';
 import type { ModuleMigrations } from '@job-portal/db';
 import { boardsMigrations } from '@job-portal/boards';
 import { discoveryMigrations } from '@job-portal/discovery';
+import { matchingMigrations } from '@job-portal/matching';
 import { pipelineMigrations } from '@job-portal/pipeline';
 import { trackerMigrations } from '@job-portal/tracker';
 
@@ -10,6 +11,7 @@ export const allMigrations: ModuleMigrations[] = [
   accountsMigrations,
   discoveryMigrations,
   boardsMigrations,
+  matchingMigrations,
   pipelineMigrations,
   trackerMigrations,
 ];

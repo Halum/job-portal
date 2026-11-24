@@ -26,6 +26,8 @@ export const runs = pipelineSchema.table(
     status: text('status').$type<RunStatus>().notNull(),
     fetched: integer('fetched').notNull().default(0),
     newPostings: integer('new_postings').notNull().default(0),
+    /** Job and Target pairs that passed the hard filters and the prerank in this run. */
+    prerankPassed: integer('prerank_passed').notNull().default(0),
     errors: jsonb('errors').$type<string[]>().notNull().default([]),
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp('finished_at', { withTimezone: true }),

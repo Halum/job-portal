@@ -27,7 +27,19 @@ export type DiscoveryState = (typeof DISCOVERY_STATES)[number];
 export interface PollResult {
   fetched: number;
   newPostings: number;
+  /** The Jobs of the Postings stored for the first time in this poll (a merge target counts once). */
+  jobIds: string[];
   errors: string[];
+}
+
+/** A Job in the shape Matching reads: the Source's own payload comes from its oldest Posting. */
+export interface MatchableJobRow {
+  id: string;
+  title: string;
+  company: string | null;
+  location: string | null;
+  raw: unknown;
+  recency: Date;
 }
 
 export interface PostingView {
@@ -78,6 +90,11 @@ export interface Discovery {
     options: ListJobsOptions,
   ) => Promise<{ jobs: JobView[]; nextCursor: string | null }>;
   getJob: (userId: string, jobId: string) => Promise<JobDetail | null>;
+  /**
+   * The Jobs among `ids` (all of the user's when not given) that Matching may look at: New or
+   * Shortlisted ones, never Dismissed or Expired.
+   */
+  listMatchable: (userId: string, ids?: string[]) => Promise<MatchableJobRow[]>;
   /** A manual Posting (source `manual`) through the same dedupe; adding the same URL again is a no-op. */
   addJob: (userId: string, input: AddJobInput) => Promise<{ jobId: string }>;
   /**
@@ -290,18 +307,23 @@ export function createDiscovery(db: Db, sources: Source[], logger?: Logger): Dis
       if (!source) throw new Error(`unknown source: ${sourceId}`);
       const { postings: fetched, errors } = await source.fetch();
       let newPostings = 0;
+      const jobIds = new Set<string>();
       for (const p of fetched) {
         // One Posting the database refuses is an error line; the rest of the poll goes on. Anything
         // else (a lost connection, an unexpected error) fails the run.
         try {
-          if ((await ingest(db, userId, sourceId, p)).isNew) newPostings += 1;
+          const placed = await ingest(db, userId, sourceId, p);
+          if (placed.isNew) {
+            newPostings += 1;
+            jobIds.add(placed.jobId);
+          }
         } catch (err) {
           if (!aboutThisPosting(err)) throw err;
           logger?.warn({ err, sourceId, sourcePostingId: p.sourcePostingId }, 'posting not stored');
           errors.push(`posting ${p.sourcePostingId} could not be stored`);
         }
       }
-      return { fetched: fetched.length, newPostings, errors };
+      return { fetched: fetched.length, newPostings, jobIds: [...jobIds], errors };
     },
 
     async addJob(userId, input) {
@@ -369,6 +391,35 @@ export function createDiscovery(db: Db, sources: Source[], logger?: Logger): Dis
         .orderBy(asc(mergeConflicts.createdAt));
     },
 
+    async listMatchable(userId, ids) {
+      if (ids && ids.length === 0) return [];
+      const rows = await db
+        .select({ job: jobs, posting: postings })
+        .from(jobs)
+        .innerJoin(postings, eq(postings.jobId, jobs.id))
+        .where(
+          and(
+            eq(jobs.userId, userId),
+            ids ? inArray(jobs.id, ids) : undefined,
+            inArray(jobs.discoveryState, ['new', 'shortlisted']),
+          ),
+        )
+        .orderBy(asc(postings.firstSeenAt));
+      const byJob = new Map<string, MatchableJobRow>();
+      for (const { job, posting } of rows) {
+        if (byJob.has(job.id)) continue; // the oldest Posting speaks for the Job
+        byJob.set(job.id, {
+          id: job.id,
+          title: job.title,
+          company: job.company,
+          location: job.location,
+          raw: posting.raw,
+          recency: posting.postedAt ?? posting.firstSeenAt,
+        });
+      }
+      return [...byJob.values()];
+    },
+
     async lockJob(tx, userId, jobId) {
       const [job] = await tx
         .select({ discoveryState: jobs.discoveryState })
@@ -400,6 +451,8 @@ export function createDiscovery(db: Db, sources: Source[], logger?: Logger): Dis
             cursor ? gt(jobs.id, cursor) : undefined,
             discoveredSince ? gte(jobs.createdAt, discoveredSince) : undefined,
             discoveryState ? eq(jobs.discoveryState, discoveryState) : undefined,
+            // ponytail: every candidate id is a bind parameter (Postgres ceiling about 65k); upgrade:
+            // page the candidates first and pass one page of ids.
             jobIds ? inArray(jobs.id, jobIds) : undefined,
           ),
         )

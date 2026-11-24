@@ -16,6 +16,7 @@
     "@job-portal/shared": "workspace:*",
     "@job-portal/tracker": "workspace:*",
     "@modelcontextprotocol/sdk": "1.32.2",
-    "zod": "4.6.7"
+    "zod": "4.6.7",
+    "@job-portal/matching": "workspace:*"
   }
 }

@@ -55,7 +55,13 @@ describe('discovery against real Postgres', () => {
 
   it('stores each posting and one Job per posting', async () => {
     const result = await discovery.poll(USER, 'fake');
-    expect(result).toEqual({ fetched: 2, newPostings: 2, errors: [] });
+    expect(result).toEqual({
+      fetched: 2,
+      newPostings: 2,
+      jobIds: expect.arrayContaining([expect.any(String), expect.any(String)]) as string[],
+      errors: [],
+    });
+    expect(result.jobIds).toHaveLength(2);
 
     const { jobs, nextCursor } = await discovery.listJobs(USER, {});
     expect(nextCursor).toBeNull();
@@ -91,6 +97,7 @@ describe('discovery against real Postgres', () => {
     expect(await noisy.poll(USER, 'fake')).toEqual({
       fetched: 0,
       newPostings: 0,
+      jobIds: [],
       errors: ['bad entry'],
     });
   });
