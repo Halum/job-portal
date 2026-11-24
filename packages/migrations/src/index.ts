@@ -1,5 +1,6 @@
 import { accountsMigrations } from '@job-portal/accounts';
 import type { ModuleMigrations } from '@job-portal/db';
+import { boardsMigrations } from '@job-portal/boards';
 import { discoveryMigrations } from '@job-portal/discovery';
 import { pipelineMigrations } from '@job-portal/pipeline';
 
@@ -7,5 +8,6 @@ import { pipelineMigrations } from '@job-portal/pipeline';
 export const allMigrations: ModuleMigrations[] = [
   accountsMigrations,
   discoveryMigrations,
+  boardsMigrations,
   pipelineMigrations,
 ];

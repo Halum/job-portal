@@ -17,7 +17,8 @@ describe('loadConfig', () => {
       host: '127.0.0.1',
       port: 3000,
       logLevel: 'info',
-      sources: { bundesagentur: null, bambase: null },
+      sources: { bundesagentur: null, bambase: null, greenhouse: null, lever: null, ashby: null },
+      boardRequestsPerSecond: 2,
     });
   });
 
@@ -53,6 +54,9 @@ describe('loadConfig', () => {
       expect(loadConfig({ ...valid, BUNDESAGENTUR_QUERY: 'wo=Musterstadt' }).sources).toEqual({
         bundesagentur: { query: 'wo=Musterstadt', intervalMinutes: 60 },
         bambase: null,
+        greenhouse: null,
+        lever: null,
+        ashby: null,
       });
     });
 
@@ -83,6 +87,9 @@ describe('loadConfig', () => {
       expect(loadConfig(env).sources).toEqual({
         bundesagentur: { query: 'wo=x', intervalMinutes: 60 },
         bambase: { intervalMinutes: 30 },
+        greenhouse: null,
+        lever: null,
+        ashby: null,
       });
     });
 
@@ -90,6 +97,30 @@ describe('loadConfig', () => {
       const env = { ...valid, BAMBASE_INTERVAL_MINUTES: value };
       expect(() => loadConfig(env)).toThrow(ConfigError);
       expect(() => loadConfig(env)).toThrow('BAMBASE_INTERVAL_MINUTES');
+    });
+  });
+
+  describe('company board sources', () => {
+    it.each([
+      ['greenhouse', 'GREENHOUSE_INTERVAL_MINUTES'],
+      ['lever', 'LEVER_INTERVAL_MINUTES'],
+      ['ashby', 'ASHBY_INTERVAL_MINUTES'],
+    ] as const)('%s is scheduled only when its interval is set', (name, key) => {
+      expect(loadConfig(valid).sources[name]).toBeNull();
+      expect(loadConfig({ ...valid, [key]: '' }).sources[name]).toBeNull();
+      expect(loadConfig({ ...valid, [key]: '45' }).sources[name]).toEqual({ intervalMinutes: 45 });
+      expect(() => loadConfig({ ...valid, [key]: '0' })).toThrow(key);
+    });
+
+    it('reads the request rate per host, which must be above zero', () => {
+      expect(
+        loadConfig({ ...valid, BOARD_REQUESTS_PER_SECOND: '0.5' }).boardRequestsPerSecond,
+      ).toBe(0.5);
+      for (const bad of ['0', '-1', 'abc']) {
+        expect(() => loadConfig({ ...valid, BOARD_REQUESTS_PER_SECOND: bad })).toThrow(
+          'BOARD_REQUESTS_PER_SECOND',
+        );
+      }
     });
   });
 });

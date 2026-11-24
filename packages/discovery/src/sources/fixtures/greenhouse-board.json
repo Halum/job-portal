@@ -1,0 +1,43 @@
+{
+  "jobs": [
+    {
+      "id": 1000001,
+      "internal_job_id": 2000001,
+      "title": "Backend Engineer (m/w/d)",
+      "company_name": "Beispiel Firma A",
+      "location": {
+        "name": "Berlin, Germany"
+      },
+      "absolute_url": "https://job-boards.greenhouse.io/beispielfirma/jobs/1000001",
+      "first_published": "2026-10-19T11:17:24-04:00",
+      "updated_at": "2026-10-20T08:00:00-04:00",
+      "content": "<p>Placeholder description.</p>",
+      "metadata": [
+        {
+          "id": 1,
+          "name": "Location Type",
+          "value": "On-Site",
+          "value_type": "single_select"
+        }
+      ]
+    },
+    {
+      "id": 1000002,
+      "title": "Account Executive",
+      "company_name": "Beispiel Firma A",
+      "location": {
+        "name": "San Francisco, CA"
+      },
+      "absolute_url": "https://job-boards.greenhouse.io/beispielfirma/jobs/1000002",
+      "updated_at": "2026-10-21T08:00:00-04:00",
+      "content": "<p>Placeholder.</p>"
+    },
+    {
+      "id": 1000003,
+      "title": "No link posting",
+      "location": {
+        "name": "Berlin"
+      }
+    }
+  ]
+}

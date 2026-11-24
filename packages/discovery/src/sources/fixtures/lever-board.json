@@ -1,0 +1,32 @@
+[
+  {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "text": "Werkstudent Marketing",
+    "hostedUrl": "https://jobs.lever.co/beispielfirma/00000000-0000-4000-8000-000000000001",
+    "createdAt": 1790000000000,
+    "workplaceType": "hybrid",
+    "country": "DE",
+    "categories": {
+      "commitment": "Part time",
+      "team": "Marketing",
+      "location": "Munich",
+      "allLocations": ["Munich", "Remote - Europe"]
+    },
+    "descriptionPlain": "Placeholder description.",
+    "lists": []
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000002",
+    "text": "Sales Lead",
+    "hostedUrl": "https://jobs.lever.co/beispielfirma/00000000-0000-4000-8000-000000000002",
+    "createdAt": 1790000100000,
+    "categories": {
+      "location": "New York"
+    },
+    "descriptionPlain": "Placeholder."
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000003",
+    "text": "Broken posting"
+  }
+]

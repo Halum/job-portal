@@ -1,0 +1,8 @@
+# Default rules plus one allowlist: the company lists hold public ATS board ids (some end in digits and
+# look like API keys to the generic rule). They are not secrets.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Public ATS board ids in the bundled company lists"
+paths = ['''packages/boards/data/.*\.json''']

@@ -1,12 +1,16 @@
 import { createAccounts } from '@job-portal/accounts';
+import { createBoardDirectory } from '@job-portal/boards';
 import { loadConfig } from '@job-portal/config';
 import { createDb, runMigrationsWithLock } from '@job-portal/db';
 import {
   BAMBASE,
   BUNDESAGENTUR,
+  ATS_IDS,
+  createAtsSource,
   createBambaseSource,
   createBundesagenturSource,
   createDiscovery,
+  createRateLimitedFetch,
   type Source,
 } from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
@@ -31,6 +35,17 @@ if (bundesagentur) {
 if (bambase) {
   sources.push(createBambaseSource());
   scheduled.push({ sourceId: BAMBASE, intervalMinutes: bambase.intervalMinutes });
+}
+// Company boards: only marked boards of the Board directory are fetched, at a bounded rate per ATS host.
+const directory = createBoardDirectory(db);
+const limitedFetch = createRateLimitedFetch(config.boardRequestsPerSecond);
+for (const ats of ATS_IDS) {
+  const source = config.sources[ats];
+  if (!source) continue;
+  sources.push(
+    createAtsSource(ats, { listBoards: () => directory.listMarked(ats), fetch: limitedFetch }),
+  );
+  scheduled.push({ sourceId: ats, intervalMinutes: source.intervalMinutes });
 }
 const pipeline = createPipeline(db, createDiscovery(db, sources));
 
