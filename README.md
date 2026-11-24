@@ -24,4 +24,4 @@ Call the endpoint with `Authorization: Bearer <MCP_BEARER_TOKEN>`; the `whoami` 
 pnpm typecheck && pnpm lint && pnpm test:coverage   # integration tests need Docker
 ```
 
-The pre-commit hook (husky, installed by `pnpm install`) runs typecheck, lint and the fast tests, plus gitleaks, osv-scanner and semgrep when those binaries are installed. CI always runs all of them.
+The pre-commit hook (husky) is installed per worktree by `pnpm install` (`scripts/prepare-hooks.sh` sets `core.hooksPath` with `git config --worktree`, so other worktrees and checkouts of this repo are not affected). Run `pnpm install` in each new worktree. It runs typecheck, lint and the fast tests, plus gitleaks, osv-scanner and semgrep when those binaries are installed. CI always runs all of them.

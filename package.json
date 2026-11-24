@@ -16,8 +16,7 @@
     "test": "vitest run",
     "test:fast": "FAST=1 vitest run",
     "test:coverage": "vitest run --coverage",
-    "precommit": "sh .husky/pre-commit",
-    "prepare": "husky",
+    "prepare": "sh scripts/prepare-hooks.sh",
     "db:generate": "pnpm --filter @job-portal/accounts db:generate",
     "dev:api": "tsx watch apps/api/src/main.ts",
     "dev:worker": "tsx watch apps/worker/src/main.ts"
