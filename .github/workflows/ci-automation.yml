@@ -17,6 +17,7 @@ on:
       - '.prettierignore'
       - '.github/workflows/ci-automation.yml'
       - '.husky/**'
+      - '.nvmrc'
   pull_request:
     branches: [develop-automation, main-automation]
     paths:
@@ -33,6 +34,7 @@ on:
       - '.prettierignore'
       - '.github/workflows/ci-automation.yml'
       - '.husky/**'
+      - '.nvmrc'
 
 permissions:
   contents: read
