@@ -17,6 +17,7 @@ import {
   createDiscovery,
   type Discovery,
 } from '@job-portal/discovery';
+import { createDocuments, type Documents } from '@job-portal/documents';
 import { createMatching, type Matching } from '@job-portal/matching';
 import { allMigrations } from '@job-portal/migrations';
 import type { Notifications } from '@job-portal/notifications';
@@ -35,6 +36,7 @@ export interface App {
   review: Review;
   matching: Matching;
   discovery: Discovery;
+  documents: Documents;
   tracker: Tracker;
   watchlist: Watchlist;
   aiLog: AiLog;
@@ -187,6 +189,7 @@ export async function composeApp(
     review,
     matching,
     discovery,
+    documents: createDocuments(db),
     tracker,
     watchlist,
     aiLog,

@@ -12,6 +12,7 @@ import type { AiLog } from '@job-portal/ai';
 import { criteriaPatchSchema, criteriaSchema, type Matching } from '@job-portal/matching';
 import { RUN_STATUSES, type Pipeline } from '@job-portal/pipeline';
 import type { Mail, Notify } from '@job-portal/mail';
+import type { Documents } from '@job-portal/documents';
 import type { Review } from '@job-portal/review';
 import type { Logger } from '@job-portal/shared';
 import { registerBoardTools, type BoardToolDeps } from './board-tools';
@@ -34,6 +35,7 @@ export interface ToolDeps {
   aiLog: Pick<AiLog, 'totals'>;
   boards: BoardToolDeps;
   review: Review;
+  documents: Documents;
   /** Applies decided ai_merge items; without it they cannot be decided. */
   aiMerge?: Pick<AiMerge, 'apply'>;
   /** The mail behind list_unmatched_mails and mail_match decisions; without it neither works. */

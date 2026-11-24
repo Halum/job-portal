@@ -150,6 +150,7 @@ describe('worker cycle through the real MCP endpoint', () => {
 
     server = createApiServer({
       accounts: app.accounts,
+      documents: app.documents,
       review: app.review,
       mail: app.mail,
       ...(app.notifications ? { notify: app.notifications } : {}),

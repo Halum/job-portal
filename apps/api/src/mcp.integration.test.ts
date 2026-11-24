@@ -10,6 +10,7 @@ import { createAiLog } from '@job-portal/ai';
 import { createWatchlist } from '@job-portal/boards';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import { ADD_JOB_LIMITS, createBundesagenturSource, createDiscovery } from '@job-portal/discovery';
+import { createDocuments } from '@job-portal/documents';
 import { allMigrations } from '@job-portal/migrations';
 import { createMatching } from '@job-portal/matching';
 import { createPipeline } from '@job-portal/pipeline';
@@ -58,6 +59,7 @@ describe('MCP endpoint over real HTTP', () => {
       },
     });
     server = createApiServer({
+      documents: createDocuments(handle.db),
       review: createReview(handle.db),
       accounts,
       discovery,
@@ -486,6 +488,7 @@ describe('MCP endpoint over real HTTP', () => {
     if (!serverB) {
       const discovery = createDiscovery(handle.db, []);
       serverB = createApiServer({
+        documents: createDocuments(handle.db),
         review: createReview(handle.db),
         accounts: {
           authenticate: () =>

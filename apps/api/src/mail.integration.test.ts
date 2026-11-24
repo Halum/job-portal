@@ -12,6 +12,7 @@ import { createDiscovery } from '@job-portal/discovery';
 import { createGmailClient, createMail, type Mail } from '@job-portal/mail';
 import { createFakeGmail } from '@job-portal/mail/testing';
 import { createMatching } from '@job-portal/matching';
+import { createDocuments } from '@job-portal/documents';
 import { allMigrations } from '@job-portal/migrations';
 import { createPipeline } from '@job-portal/pipeline';
 import { createReview } from '@job-portal/review';
@@ -145,6 +146,7 @@ describe('Gmail replies over MCP', () => {
     });
     const pipeline = createPipeline(handle.db, discovery, { matching });
     server = createApiServer({
+      documents: createDocuments(handle.db),
       accounts,
       discovery,
       matching,
