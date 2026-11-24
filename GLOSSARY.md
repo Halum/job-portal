@@ -25,6 +25,7 @@ Terms name things in code, database, tests and issues. Source of truth: the spec
 - **Run**: one execution of the Pipeline for one Source, with its counts and errors.
 - **Digest**: the notification message listing Jobs that newly gained a Target tag in a Run.
 - **Review item**: a question the system cannot settle alone (ai_merge, ai_fit_rejection, mail_match) that waits for the user's decision.
+- **Failure type**: a key naming one thing that can fail (a source, a board, an AI runner and error class, the webhook); an alert goes out once when it starts failing and once when it recovers.
 - **Tag override**: a stored mark that tags a Job for a Target whatever its score, written when the user disagrees with an AI fit rejection.
 - **Survived**: a Review item the user confirmed, meaning the AI's call held up.
 - **AI fit rejection**: a Review item raised when a Job's fit score for a Target lands below the threshold; disagreeing with it tags the Job with that Target (a tag override).

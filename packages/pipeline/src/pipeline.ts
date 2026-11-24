@@ -2,6 +2,7 @@ import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '@job-portal/db';
 import type { Discovery } from '@job-portal/discovery';
 import { emptyScoreResult, type Matching } from '@job-portal/matching';
+import type { Notifications } from '@job-portal/notifications';
 import { runs, type RunStatus } from './schema';
 
 export interface Run {
@@ -68,9 +69,43 @@ export interface PipelineOptions {
    * whose AI call failed is retried by the next run of any source. A failed call is an error line.
    */
   scoring?: Pick<Matching, 'score'>;
+  /**
+   * Runs last, after scoring: sends the digest and the failure alerts. A crash there is an error line, never
+   * a failed run (a webhook that is down is not a crash: Notifications keeps the messages).
+   */
+  notifications?: Pick<Notifications, 'afterRun'>;
+  /** Names the AI runner in failure types (`ai:<runner>:<class>`). Default "ai". */
+  aiRunnerName?: string;
 }
 
 const DEFAULT_STALE_AFTER_MS = 60 * 60 * 1000;
+
+const BOARD_LINE = /^(\S+) board (.+?): /;
+const AI_LINE = /^fit score failed \((\w+)\) for /;
+
+/**
+ * The failure types one finished run shows, from the stable error lines Discovery (a failing board) and
+ * Matching (a failed AI call with its class) write. A run sees only its own source's boards, and the AI
+ * types only when it made calls; whatever it could not see stays as it was.
+ */
+function observeFailures(
+  sourceId: string,
+  errors: string[],
+  aiCalls: number,
+  runner: string,
+): { failing: string[]; checked: string[] } {
+  const failing = new Set<string>();
+  for (const line of errors) {
+    const board = BOARD_LINE.exec(line);
+    if (board?.[1] === sourceId) failing.add(`board:${sourceId}:${board[2] ?? ''}`);
+    const ai = AI_LINE.exec(line);
+    if (ai) failing.add(`ai:${runner}:${ai[1] ?? ''}`);
+  }
+  return {
+    failing: [...failing],
+    checked: [`source:${sourceId}`, `board:${sourceId}:`, ...(aiCalls > 0 ? ['ai:'] : [])],
+  };
+}
 
 /**
  * ponytail: the only stage is Discovery (fetch and store). Matching, Review and Notifications
@@ -80,7 +115,13 @@ const DEFAULT_STALE_AFTER_MS = 60 * 60 * 1000;
 export function createPipeline(
   db: Db,
   discovery: Pick<Discovery, 'poll'>,
-  { staleAfterMs = DEFAULT_STALE_AFTER_MS, matching, scoring }: PipelineOptions = {},
+  {
+    staleAfterMs = DEFAULT_STALE_AFTER_MS,
+    matching,
+    scoring,
+    notifications,
+    aiRunnerName = 'ai',
+  }: PipelineOptions = {},
 ): Pipeline {
   /** Fails runs still "running" past the time bound that also match `scope`; returns how many. */
   const failLost = async (...scope: (SQL | undefined)[]): Promise<number> => {
@@ -110,8 +151,19 @@ export function createPipeline(
         .insert(runs)
         .values({ userId, sourceId, status: 'running' })
         .onConflictDoNothing()
-        .returning({ id: runs.id });
+        .returning({ id: runs.id, startedAt: runs.startedAt });
       if (!started) return null;
+
+      /** Never throws: a failed Notifications step is returned as an error line. */
+      const notify = async (failing: string[], checked: string[]): Promise<string[]> => {
+        if (!notifications) return [];
+        try {
+          await notifications.afterRun(userId, { since: started.startedAt, failing, checked });
+          return [];
+        } catch (err) {
+          return [`notifications failed: ${err instanceof Error ? err.message : String(err)}`];
+        }
+      };
 
       const finish = async (
         values: Pick<
@@ -159,6 +211,8 @@ export function createPipeline(
             errors.push(`scoring failed: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
+        const seen = observeFailures(sourceId, errors, ai.calls, aiRunnerName);
+        errors.push(...(await notify(seen.failing, seen.checked)));
         return await finish({
           status: errors.length > 0 ? 'completed_with_errors' : 'completed',
           fetched,
@@ -172,6 +226,8 @@ export function createPipeline(
           errors,
         });
       } catch (err) {
+        const key = `source:${sourceId}`;
+        const message = err instanceof Error ? err.message : String(err);
         return finish({
           status: 'failed',
           fetched: 0,
@@ -182,7 +238,7 @@ export function createPipeline(
           aiRejections: 0,
           aiCalls: 0,
           aiCostUsd: null,
-          errors: [err instanceof Error ? err.message : String(err)],
+          errors: [message, ...(await notify([key], [key]))],
         });
       }
     },

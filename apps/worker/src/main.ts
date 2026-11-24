@@ -16,6 +16,7 @@ import { createPipeline } from '@job-portal/pipeline';
 import { createReview } from '@job-portal/review';
 import { createTracker } from '@job-portal/tracker';
 import { createLogger } from '@job-portal/shared';
+import { buildNotifications } from './notifications';
 import { buildSources } from './sources';
 import { startWorker } from './worker';
 
@@ -68,7 +69,19 @@ const { sources, scheduled } = buildSources(config, {
 // Discovery snapshots its Sources, so it is created only now, with every one of them in the list.
 const discovery = createDiscovery(db, sources, logger);
 const tracker = createTracker(db, discovery);
-const pipeline = createPipeline(db, discovery, { matching, ...(ai ? { scoring: matching } : {}) });
+// Digest and failure alerts go out after each run when a webhook is configured; otherwise the step is skipped.
+const notifications = buildNotifications(db, config.notifications, {
+  matching,
+  discovery,
+  review: createReview(db),
+  log: logger,
+});
+const pipeline = createPipeline(db, discovery, {
+  matching,
+  ...(ai ? { scoring: matching } : {}),
+  ...(notifications ? { notifications } : {}),
+  ...(config.ai ? { aiRunnerName: config.ai.runner } : {}),
+});
 
 const worker = await startWorker({
   redisUrl: config.redisUrl,

@@ -127,6 +127,9 @@ importers:
       '@job-portal/migrations':
         specifier: workspace:*
         version: link:../../packages/migrations
+      '@job-portal/notifications':
+        specifier: workspace:*
+        version: link:../../packages/notifications
       '@job-portal/pipeline':
         specifier: workspace:*
         version: link:../../packages/pipeline
@@ -289,6 +292,9 @@ importers:
       '@job-portal/matching':
         specifier: workspace:*
         version: link:../matching
+      '@job-portal/notifications':
+        specifier: workspace:*
+        version: link:../notifications
       '@job-portal/pipeline':
         specifier: workspace:*
         version: link:../pipeline
@@ -298,6 +304,22 @@ importers:
       '@job-portal/tracker':
         specifier: workspace:*
         version: link:../tracker
+
+  packages/notifications:
+    dependencies:
+      '@job-portal/db':
+        specifier: workspace:*
+        version: link:../db
+      '@job-portal/shared':
+        specifier: workspace:*
+        version: link:../shared
+      drizzle-orm:
+        specifier: 0.45.4
+        version: 0.45.4(postgres@4.1.1)
+    devDependencies:
+      drizzle-kit:
+        specifier: 0.31.11
+        version: 0.31.11
 
   packages/pipeline:
     dependencies:
@@ -310,6 +332,9 @@ importers:
       '@job-portal/matching':
         specifier: workspace:*
         version: link:../matching
+      '@job-portal/notifications':
+        specifier: workspace:*
+        version: link:../notifications
       '@job-portal/shared':
         specifier: workspace:*
         version: link:../shared

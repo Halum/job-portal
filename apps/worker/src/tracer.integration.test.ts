@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import type { Server } from 'node:http';
+import http, { type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -22,6 +22,7 @@ import { createReview } from '@job-portal/review';
 import { createLogger } from '@job-portal/shared';
 import { createApiServer } from '@job-portal/api';
 import { createTracker } from '@job-portal/tracker';
+import { buildNotifications } from './notifications';
 import { startWorker, type WorkerHandle } from './worker';
 
 // Tracer bullet: a Target -> Bundesagentur search (recorded response) -> BullMQ schedule -> Pipeline
@@ -72,6 +73,8 @@ describe('Bundesagentur source to MCP list_jobs', () => {
   let worker: WorkerHandle;
   let server: Server;
   let client: Client;
+  let webhook: Server;
+  const digests: { topicId: string; kind: string; text: string }[] = [];
 
   beforeAll(async () => {
     [pg, redis] = await Promise.all([
@@ -111,8 +114,32 @@ describe('Bundesagentur source to MCP list_jobs', () => {
       },
     });
     const tracker = createTracker(handle.db, discovery);
-    const pipeline = createPipeline(handle.db, discovery, { matching, scoring: matching });
     const logger = createLogger({ level: 'silent' });
+    // The n8n webhook is a local server: the digest goes out over real HTTP, nothing leaves the machine.
+    webhook = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (c: Buffer) => (body += c.toString()));
+      req.on('end', () => {
+        digests.push(JSON.parse(body) as (typeof digests)[number]);
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => webhook.listen(0, '127.0.0.1', resolve));
+    const notifications = buildNotifications(
+      handle.db,
+      {
+        webhookUrl: `http://127.0.0.1:${String((webhook.address() as AddressInfo).port)}/hook`,
+        topicId: 'topic-placeholder',
+        maxAttempts: 1,
+        backoffMs: 0,
+      },
+      { matching, discovery, review: createReview(handle.db), log: logger },
+    );
+    const pipeline = createPipeline(handle.db, discovery, {
+      matching,
+      scoring: matching,
+      ...(notifications ? { notifications } : {}),
+    });
 
     worker = await startWorker({
       redisUrl: redis.getConnectionUrl(),
@@ -150,6 +177,7 @@ describe('Bundesagentur source to MCP list_jobs', () => {
     await client.close();
     await new Promise((resolve) => server.close(resolve));
     await worker.close();
+    await new Promise((resolve) => webhook.close(resolve));
     await handle.close();
     await Promise.all([pg.stop(), redis.stop()]);
   });
@@ -242,5 +270,19 @@ describe('Bundesagentur source to MCP list_jobs', () => {
     const history = (await client.callTool({ name: 'get_run_history', arguments: {} }))
       .structuredContent as { aiTotals: { calls: number; failures: number; inputTokens: number } };
     expect(history.aiTotals).toMatchObject({ calls: 1, failures: 0, inputTokens: 50 });
+  });
+
+  it('sends one digest through the webhook for the Job the run tagged, with its link', () => {
+    expect(digests).toHaveLength(1);
+    expect(digests[0]).toMatchObject({ topicId: 'topic-placeholder', kind: 'digest' });
+    for (const part of [
+      'Koch (m/w/d)',
+      'odd minijob',
+      '85',
+      'kitchen role',
+      'https://www.arbeitsagentur.de/jobsuche/jobdetail/18024-0000000002-S',
+      'Review waiting: 0',
+    ])
+      expect(digests[0]?.text).toContain(part);
   });
 });

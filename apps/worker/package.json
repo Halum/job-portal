@@ -12,6 +12,7 @@
     "@job-portal/discovery": "workspace:*",
     "@job-portal/matching": "workspace:*",
     "@job-portal/migrations": "workspace:*",
+    "@job-portal/notifications": "workspace:*",
     "@job-portal/pipeline": "workspace:*",
     "@job-portal/review": "workspace:*",
     "@job-portal/shared": "workspace:*",

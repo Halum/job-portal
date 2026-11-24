@@ -109,6 +109,18 @@ export const emptyScoreResult = (): ScoreResult => ({
   errors: [],
 });
 
+/** A Job and Target pair that is tagged now and is new to a digest. */
+export interface NewTag {
+  jobId: string;
+  targetId: string;
+  targetName: string;
+  /** null only for an override on a pair that was never scored. */
+  score: number | null;
+  reasons: string[];
+  /** The user disagreed with an AI fit rejection, so the pair is tagged whatever its score. */
+  override: boolean;
+}
+
 /** One Job's standing with one Target it is a candidate for. */
 export interface JobScore {
   targetId: string;
@@ -163,6 +175,12 @@ export interface Matching {
    * score at or above the threshold the Target resolves to now, so editing a threshold retags without a new call.
    */
   listScores: (userId: string, jobId: string) => Promise<JobScore[]>;
+  /**
+   * The pairs tagged now that were scored at or after `since`, plus every tag override whatever its date (the
+   * caller, the digest, remembers which pairs it already listed). Candidates of active Targets only; a pair
+   * whose score fell under a raised threshold is not listed.
+   */
+  listNewTags: (userId: string, since: Date) => Promise<NewTag[]>;
   /** Search parameters for the active Targets: one per keyword and location, none for a Target that sets neither. */
   searchQueries: (userId: string) => Promise<SearchQuery[]>;
 }
@@ -456,6 +474,44 @@ export function createMatching(
         languageMet: s?.languageMet ?? null,
         tagged: o !== null || (s !== null && s.score >= thresholdOf(globals, read(t.criteria))),
       }));
+    },
+
+    async listNewTags(userId, since) {
+      const rows = await db
+        .select({ jobId: candidates.jobId, t: targets, s: scores, o: tagOverrides.id })
+        .from(candidates)
+        .innerJoin(targets, eq(targets.id, candidates.targetId))
+        .leftJoin(
+          scores,
+          and(eq(scores.targetId, candidates.targetId), eq(scores.jobId, candidates.jobId)),
+        )
+        .leftJoin(
+          tagOverrides,
+          and(
+            eq(tagOverrides.userId, candidates.userId),
+            eq(tagOverrides.targetId, candidates.targetId),
+            eq(tagOverrides.jobId, candidates.jobId),
+          ),
+        )
+        .where(and(eq(candidates.userId, userId), eq(targets.paused, false)))
+        .orderBy(asc(candidates.jobId), asc(targets.name));
+      const globals = await getGlobals(userId);
+      return rows.flatMap(({ jobId, t, s, o }) => {
+        const override = o !== null;
+        const byScore =
+          s !== null && s.scoredAt >= since && s.score >= thresholdOf(globals, read(t.criteria));
+        if (!override && !byScore) return [];
+        return [
+          {
+            jobId,
+            targetId: t.id,
+            targetName: t.name,
+            score: s?.score ?? null,
+            reasons: s?.reasons ?? [],
+            override,
+          },
+        ];
+      });
     },
 
     async applyFitRejection(tx, userId, subject, decision) {
