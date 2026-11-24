@@ -13,10 +13,15 @@
     "@job-portal/shared": "workspace:*",
     "bullmq": "6.7.10",
     "ioredis": "5.11.1",
-    "@job-portal/matching": "workspace:*"
+    "@job-portal/matching": "workspace:*",
+    "@job-portal/boards": "workspace:*"
   },
   "devDependencies": {
     "@job-portal/api": "workspace:*",
     "@modelcontextprotocol/sdk": "1.32.2"
+  },
+  "scripts": {
+    "boards:import": "tsx --env-file-if-exists=.env src/boards.ts import",
+    "boards:mark": "tsx --env-file-if-exists=.env src/boards.ts mark"
   }
 }

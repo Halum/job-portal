@@ -28,6 +28,12 @@ const envSchema = z.object({
   BAMBASE_INTERVAL_MINUTES: optionalInterval,
   // How many postings per Target per run the prerank passes on when neither the Target nor the Global defaults set it.
   PRERANK_TOP_N: z.coerce.number().int().min(1).default(20),
+  // Company boards: each ATS is scheduled when its interval is set. Only marked boards of the
+  // Board directory are fetched, at most this many requests per second to each ATS host.
+  GREENHOUSE_INTERVAL_MINUTES: optionalInterval,
+  LEVER_INTERVAL_MINUTES: optionalInterval,
+  ASHBY_INTERVAL_MINUTES: optionalInterval,
+  BOARD_REQUESTS_PER_SECOND: z.coerce.number().positive().default(2),
 });
 
 export interface IntervalConfig {
@@ -46,9 +52,17 @@ export interface Config {
   port: number;
   logLevel: z.infer<typeof envSchema>['LOG_LEVEL'];
   /** One entry per source; null means the source is not configured and is never scheduled. */
-  sources: { bundesagentur: IntervalConfig | null; bambase: IntervalConfig | null };
+  sources: {
+    bundesagentur: IntervalConfig | null;
+    bambase: IntervalConfig | null;
+    greenhouse: IntervalConfig | null;
+    lever: IntervalConfig | null;
+    ashby: IntervalConfig | null;
+  };
   /** Default prerank_top_n, an integer of at least 1. */
   prerankTopN: number;
+  /** Requests per second to each ATS host, a positive number. */
+  boardRequestsPerSecond: number;
 }
 
 /** Validates the environment once at process start; throws ConfigError naming each bad variable. */
@@ -70,7 +84,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     sources: {
       bundesagentur: interval(e.BUNDESAGENTUR_INTERVAL_MINUTES),
       bambase: interval(e.BAMBASE_INTERVAL_MINUTES),
+      greenhouse: interval(e.GREENHOUSE_INTERVAL_MINUTES),
+      lever: interval(e.LEVER_INTERVAL_MINUTES),
+      ashby: interval(e.ASHBY_INTERVAL_MINUTES),
     },
     prerankTopN: e.PRERANK_TOP_N,
+    boardRequestsPerSecond: e.BOARD_REQUESTS_PER_SECOND,
   };
 }
