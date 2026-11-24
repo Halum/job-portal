@@ -6,6 +6,8 @@ export * from './discovery';
 export * from './source';
 export * from './sources/bambase';
 export * from './sources/bundesagentur';
+export * from './sources/ats';
+export * from './rate-limit';
 
 export const discoveryMigrations: ModuleMigrations = {
   name: 'discovery',

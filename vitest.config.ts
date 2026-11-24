@@ -20,6 +20,7 @@ export default defineConfig({
         '**/index.ts',
         // Thin process entrypoints: wiring only, covered by the integration test through the code they call.
         '**/main.ts',
+        'apps/worker/src/boards.ts',
         // Schema files hold declarative table definitions only; the integration tests exercise them.
         'packages/*/src/schema.ts',
       ],
