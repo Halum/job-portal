@@ -1,0 +1,13 @@
+{
+  "name": "@job-portal/config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@job-portal/shared": "workspace:*",
+    "zod": "4.6.7"
+  }
+}

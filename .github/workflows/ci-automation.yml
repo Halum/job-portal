@@ -1,0 +1,130 @@
+name: CI automation
+
+on:
+  push:
+    branches: [develop-automation, 'feature/**', 'hotfix/**']
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig*.json'
+      - 'eslint.config.js'
+      - 'vitest.config.ts'
+      - '.prettierrc.json'
+      - '.prettierignore'
+      - '.github/workflows/ci-automation.yml'
+      - '.husky/**'
+      - '.nvmrc'
+  pull_request:
+    branches: [develop-automation, main-automation]
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig*.json'
+      - 'eslint.config.js'
+      - 'vitest.config.ts'
+      - '.prettierrc.json'
+      - '.prettierignore'
+      - '.github/workflows/ci-automation.yml'
+      - '.husky/**'
+      - '.nvmrc'
+
+permissions:
+  contents: read
+
+env:
+  # Images the integration tests pull (ryuk is the Testcontainers reaper). Keep in sync with the tests.
+  TEST_IMAGES: postgres:16-alpine redis:7-alpine testcontainers/ryuk:0.14.0
+  SEMGREP_IMAGE: semgrep/semgrep:1.186.0
+
+concurrency:
+  group: ci-automation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format:check
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # Docker is preinstalled on ubuntu runners; Testcontainers uses it. Cache the pulled images.
+      - uses: actions/cache@v4
+        id: images
+        with:
+          path: ~/docker-images.tar
+          key: docker-images-${{ env.TEST_IMAGES }}
+      - if: steps.images.outputs.cache-hit == 'true'
+        run: docker load -i ~/docker-images.tar
+      - if: steps.images.outputs.cache-hit != 'true'
+        run: |
+          for image in $TEST_IMAGES; do docker pull "$image"; done
+          docker save -o ~/docker-images.tar $TEST_IMAGES
+      - run: pnpm test:coverage
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  osv-scanner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: google/osv-scanner-action/osv-scanner-action@v2.7.1
+        with:
+          scan-args: |-
+            --lockfile=pnpm-lock.yaml
+
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache@v4
+        id: image
+        with:
+          path: ~/semgrep-image.tar
+          key: docker-image-${{ env.SEMGREP_IMAGE }}
+      - if: steps.image.outputs.cache-hit == 'true'
+        run: docker load -i ~/semgrep-image.tar
+      - if: steps.image.outputs.cache-hit != 'true'
+        run: |
+          docker pull "$SEMGREP_IMAGE"
+          docker save -o ~/semgrep-image.tar "$SEMGREP_IMAGE"
+      - run: >-
+          docker run --rm -v "$PWD:/src" -w /src "$SEMGREP_IMAGE"
+          semgrep scan --config auto --error --quiet apps packages

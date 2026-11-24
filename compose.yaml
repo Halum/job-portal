@@ -1,0 +1,12 @@
+# Throwaway local dependencies. Nothing persists: `docker compose down` wipes it.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: automation
+    ports: ['127.0.0.1:55432:5432']
+  redis:
+    image: redis:7-alpine
+    ports: ['127.0.0.1:56379:6379']

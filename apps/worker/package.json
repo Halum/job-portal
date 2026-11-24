@@ -1,0 +1,12 @@
+{
+  "name": "@job-portal/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@job-portal/config": "workspace:*",
+    "@job-portal/shared": "workspace:*",
+    "bullmq": "6.7.10",
+    "ioredis": "5.11.1"
+  }
+}
