@@ -1,0 +1,6 @@
+ALTER TABLE "documents"."career_items" DROP CONSTRAINT "career_items_kind";--> statement-breakpoint
+ALTER TABLE "documents"."career_revisions" DROP CONSTRAINT "career_revisions_reason";--> statement-breakpoint
+ALTER TABLE "documents"."career_items" ADD COLUMN "hidden" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "career_items_singleton" ON "documents"."career_items" USING btree ("user_id","kind") WHERE "documents"."career_items"."kind" in ('writing_style', 'contact');--> statement-breakpoint
+ALTER TABLE "documents"."career_items" ADD CONSTRAINT "career_items_kind" CHECK ("documents"."career_items"."kind" in ('work_experience', 'experience_point', 'resume_entry', 'outline_section', 'cover_letter_paragraph', 'writing_style', 'contact'));--> statement-breakpoint
+ALTER TABLE "documents"."career_revisions" ADD CONSTRAINT "career_revisions_reason" CHECK ("documents"."career_revisions"."reason" in ('import', 'coaching', 'enrichment', 'user_edit', 'hide', 'restore'));

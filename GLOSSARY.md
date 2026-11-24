@@ -53,6 +53,7 @@ Terms name things in code, database, tests and issues. Source of truth: the spec
 - **Experience point**: one achievement line inside a Work experience, labelled with the skills it shows.
 - **Resume entry**: one education, skill, language or certificate item in the Career bank.
 - **Cover letter outline**: the user's own cover letter sections, in their order.
+- **Outline section**: one named section of the Cover letter outline (code and database name for it); a Cover letter paragraph belongs to one.
 - **Cover letter paragraph**: one paragraph for a section of the Cover letter outline, labelled with its themes and skills.
 - **Writing style profile**: how the user writes: tone, sentence length, words used and avoided, salutation and sign-off.
 - **Target career bank**: one Target's view of the Career bank: everything inherited, changed only by Career bank overrides.

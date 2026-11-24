@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  boolean,
   check,
   customType,
   index,
@@ -9,6 +10,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 
@@ -23,10 +25,28 @@ export type FileKind = (typeof FILE_KINDS)[number];
 export const MASTER_KINDS = ['master_resume', 'master_cover_letter'] as const;
 export type MasterKind = (typeof MASTER_KINDS)[number];
 
-export const CAREER_ITEM_KINDS = ['work_experience', 'experience_point'] as const;
+/** Kinds with exactly one item per user: a write to them updates it. */
+export const SINGLETON_KINDS: readonly CareerItemKind[] = ['writing_style', 'contact'];
+
+export const CAREER_ITEM_KINDS = [
+  'work_experience',
+  'experience_point',
+  'resume_entry',
+  'outline_section',
+  'cover_letter_paragraph',
+  'writing_style',
+  'contact',
+] as const;
 export type CareerItemKind = (typeof CAREER_ITEM_KINDS)[number];
 
-export const REVISION_REASONS = ['import'] as const;
+export const REVISION_REASONS = [
+  'import',
+  'coaching',
+  'enrichment',
+  'user_edit',
+  'hide',
+  'restore',
+] as const;
 export type RevisionReason = (typeof REVISION_REASONS)[number];
 
 export const REVISION_ACTORS = ['user', 'skill'] as const;
@@ -77,7 +97,7 @@ export const masterDocuments = documentsSchema.table(
   ],
 );
 
-/** Career bank items. A Work experience has no parent; an Experience point has its Work experience. */
+/** Career bank items. An Experience point has its Work experience and a Cover letter paragraph its Cover letter outline section as parent; the other kinds have none. */
 export const careerItems = documentsSchema.table(
   'career_items',
   {
@@ -86,11 +106,16 @@ export const careerItems = documentsSchema.table(
     kind: text('kind').$type<CareerItemKind>().notNull(),
     parentId: uuid('parent_id'),
     position: integer('position').notNull(),
+    hidden: boolean('hidden').notNull().default(false),
     value: jsonb('value').$type<Record<string, unknown>>().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('career_items_user_idx').on(t.userId, t.kind, t.position),
+    // One Writing style profile and one set of contact details per user.
+    uniqueIndex('career_items_singleton')
+      .on(t.userId, t.kind)
+      .where(sql`${t.kind} in (${inList(SINGLETON_KINDS)})`),
     check('career_items_kind', sql`${t.kind} in (${inList(CAREER_ITEM_KINDS)})`),
   ],
 );

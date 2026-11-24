@@ -329,7 +329,7 @@ describe('Documents through the API', () => {
         ],
       });
       expect(first.isError).toBe(false);
-      expect(first.out).toEqual({ workExperiences: 2, experiencePoints: 2 });
+      expect(first.out).toMatchObject({ workExperiences: 2, experiencePoints: 2 });
 
       await call('save_career_bank', {
         workExperiences: [experience('Souschef', ['Bestellte Waren'])],
@@ -343,6 +343,7 @@ describe('Documents through the API', () => {
       ]);
       expect(bank.workExperiences[0]).toEqual({
         id: expect.any(String) as string,
+        hidden: false,
         role: 'Koch',
         organisation: 'Muster Küche GmbH',
         start: '2020-03',
@@ -351,11 +352,13 @@ describe('Documents through the API', () => {
         points: [
           {
             id: expect.any(String) as string,
+            hidden: false,
             text: 'Plante die Speisekarte für 80 Gäste',
             skills: ['kochen'],
           },
           {
             id: expect.any(String) as string,
+            hidden: false,
             text: 'Schulte zwei Auszubildende',
             skills: ['kochen'],
           },
