@@ -135,6 +135,11 @@ describe('narrow strong flag', () => {
     );
   });
 
+  it('is weak when the company is the platform itself', () => {
+    const own = [job('8', 'LinkedIn', ['careers.linkedin.com'])];
+    expect(narrow(mail('jobs-noreply@linkedin.com', 'Hi'), own)[0]?.strong).toBe(false);
+  });
+
   it('does not treat a country second level as a company domain', () => {
     const co = [job('5', 'Beispiel Firma', ['careers.beispiel-firma.co.uk'])];
     expect(narrow(mail('hr@beispiel-firma.co.uk', 'Hi'), co)[0]?.strong).toBe(true);

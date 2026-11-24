@@ -24,6 +24,8 @@ export interface FakeGmail {
   tokenMode: 'ok' | 'invalid_grant' | 'bad_request' | 'unavailable';
   /** Ids whose message read answers 500, as a mail Gmail cannot serve right now. */
   failIds: string[];
+  /** Ids that are listed but whose read answers 404, as a mail that is gone for good. */
+  notFoundIds: string[];
   /** When true, a list that asks for older mail (a before: bound) answers 500. */
   failBefore: boolean;
   /** When set, the Gmail API answers every request with this status and Google-style error reason. */
@@ -76,6 +78,7 @@ export function createFakeGmail(mails: FakeMail[] = []): FakeGmail {
     tokenMode: 'ok',
     apiError: null,
     failIds: [],
+    notFoundIds: [],
     failBefore: false,
     rejectAccessTokens: false,
     requests: [],
@@ -114,6 +117,9 @@ export function createFakeGmail(mails: FakeMail[] = []): FakeGmail {
       }
       const single = /\/messages\/([^/]+)$/.exec(url.pathname);
       if (single?.[1]) {
+        if (fake.notFoundIds.includes(single[1])) {
+          return Promise.resolve(new Response('', { status: 404 }));
+        }
         if (fake.failIds.includes(single[1])) {
           return Promise.resolve(new Response('', { status: 500 }));
         }

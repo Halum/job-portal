@@ -15,6 +15,12 @@ export class GmailAuthError extends Error {
 /** Any other failure talking to Google: outage, rate limit, network. Retried by the next poll. */
 export class GmailError extends Error {
   override name = 'GmailError';
+  /** True when asking again cannot help (the mail does not exist or has a shape that is rejected). */
+  readonly permanent: boolean;
+  constructor(message: string, permanent = false) {
+    super(message);
+    this.permanent = permanent;
+  }
 }
 
 export interface GmailMessage {
@@ -212,7 +218,7 @@ export function createGmailClient({
         // Insufficient scope or access revoked: signing in again is the fix.
         throw new GmailAuthError('Gmail refused access to the inbox');
       }
-      if (!res.ok) throw new GmailError(`Gmail answered ${String(res.status)}`);
+      if (!res.ok) throw new GmailError(`Gmail answered ${String(res.status)}`, res.status === 404);
       return res.json().catch(() => {
         throw new GmailError('Gmail answered a body that is not JSON');
       });
@@ -241,7 +247,8 @@ export function createGmailClient({
       const parsed = messageSchema.safeParse(
         await api(`${API}/${encodeURIComponent(id)}?format=full`),
       );
-      if (!parsed.success) throw new GmailError('Gmail returned a mail in an unexpected shape');
+      if (!parsed.success)
+        throw new GmailError('Gmail returned a mail in an unexpected shape', true);
       const { payload } = parsed.data;
       const header = (name: string): string =>
         payload.headers?.find((h) => h.name.toLowerCase() === name)?.value ?? '';

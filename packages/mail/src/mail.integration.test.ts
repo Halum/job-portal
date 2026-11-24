@@ -640,7 +640,7 @@ describe('Mail against real Postgres, a fake Gmail API and a scripted AI runner'
       mail('good1', 'Goodco'),
     ]);
     say('good1', verdict('screening', good));
-    fake.failIds = ['bad1'];
+    fake.notFoundIds = ['bad1'];
     const mailer = make();
     for (let i = 0; i < 2; i += 1) await mailer.poll(USER);
     expect(await ledger('bad1')).toBeUndefined();
@@ -648,9 +648,25 @@ describe('Mail against real Postgres, a fake Gmail API and a scripted AI runner'
     expect(await ledger('bad1')).toBe('failed');
     expect(await status(job)).toBe('applied');
     expect(await status(good)).toBe('screening');
+    // It is shown among the unmatched mails, not lost.
+    expect((await mailer.listUnmatched(USER, {})).items.map((u) => u.messageId)).toContain('bad1');
     // The next poll lists nothing new to retry and the cursor can move.
     fake.requests.length = 0;
     expect(await mailer.poll(USER)).toMatchObject({ status: 'done', seen: 0 });
+  });
+
+  it('never gives a mail up over an outage: three polls of 503 leave it unfailed and it applies once Gmail recovers', async () => {
+    const job = await applied('Outageco');
+    reset([mail('o1', 'Outageco')]);
+    say('o1', verdict('screening', job));
+    fake.failIds = ['o1'];
+    const mailer = make();
+    for (let i = 0; i < 4; i += 1) await mailer.poll(USER);
+    expect(await ledger('o1')).toBeUndefined();
+    fake.failIds = [];
+    await mailer.poll(USER);
+    expect(await ledger('o1')).toBe('applied');
+    expect(await status(job)).toBe('screening');
   });
 
   it('sends a mail from a job board that holds the Job to Review, however well DKIM passes', async () => {

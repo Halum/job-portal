@@ -410,7 +410,21 @@ export function createMail(db: Db, deps: MailDeps): Mail {
         { messageId },
         'Gmail never served this mail: given up, it is kept in the ledger as failed',
       );
-      await db.transaction((tx) => claim(tx, userId, messageId, 'failed'));
+      await db.transaction(async (tx) => {
+        if (!(await claim(tx, userId, messageId, 'failed'))) return;
+        // The user sees it among the unmatched mails instead of losing it silently.
+        await tx
+          .insert(unmatched)
+          .values({
+            userId,
+            messageId,
+            fromAddress: '(unreadable mail)',
+            subject: messageId,
+            summary: 'Gmail never served this mail; open it in Gmail.',
+            receivedAt: new Date(),
+          })
+          .onConflictDoNothing();
+      });
       return true;
     }
 
@@ -480,7 +494,9 @@ export function createMail(db: Db, deps: MailDeps): Mail {
         } catch (err) {
           if (err instanceof GmailAuthError) throw err;
           log.warn({ err }, 'Gmail read failed; the poll goes on and retries it next time');
-          if (!(await giveUpOnBadMail(userId, id))) run.complete = false;
+          // Only an error that asking again cannot fix counts; an outage or quota never gives a mail up.
+          const permanent = err instanceof GmailError && err.permanent;
+          if (!permanent || !(await giveUpOnBadMail(userId, id))) run.complete = false;
           continue;
         }
         await handle(m);

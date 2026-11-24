@@ -96,6 +96,21 @@ function ownedDomain(host: string): string {
   return labels.slice(-n).join('.');
 }
 
+/** Job boards and Source hosts: they send member messages and alerts from their own domain, so never the company. */
+const BOARD_DOMAINS = [
+  'arbeitsagentur.de',
+  'bambase.de',
+  'linkedin.com',
+  'indeed.com',
+  'xing.com',
+  'stepstone.de',
+  'glassdoor.com',
+  'monster.de',
+  'kimeta.de',
+];
+const isBoard = (domain: string): boolean =>
+  BOARD_DOMAINS.some((d) => domain === d || domain.endsWith(`.${d}`));
+
 const isAts = (domain: string): boolean =>
   ATS_DOMAINS.some((d) => domain === d || domain.endsWith(`.${d}`));
 
@@ -139,6 +154,7 @@ export function narrow(mail: MailText, jobs: ReplyCandidate[]): NarrowedCandidat
     const strong =
       !ats &&
       domain !== null &&
+      !isBoard(domain) &&
       key !== null &&
       job.hosts.some((h) => !isAts(h) && brand(h) === key && withinDomain(domain, ownedDomain(h)));
     return byName || byDomain ? [{ job, strong, score: Number(byName) + Number(byDomain) }] : [];
