@@ -427,10 +427,11 @@ export function createDiscovery(db: Db, sources: Source[], logger?: Logger): Dis
     },
 
     async lockJob(tx, userId, jobId) {
+      // A Job folded into another by an AI merge is gone for every writer.
       const [job] = await tx
         .select({ discoveryState: jobs.discoveryState })
         .from(jobs)
-        .where(and(eq(jobs.userId, userId), eq(jobs.id, jobId)))
+        .where(and(eq(jobs.userId, userId), eq(jobs.id, jobId), isNull(jobs.mergedInto)))
         .for('update');
       return job ?? null;
     },

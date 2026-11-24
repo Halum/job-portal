@@ -256,7 +256,31 @@ describe('AI merge against real Postgres and a faked runner', () => {
     expect(calls).toBe(1);
   });
 
-  it('confirm is refused, leaving the item pending, when a Job has an application', async () => {
+  it('confirm keeps the Job that has an application, even when it is the newer one', async () => {
+    reset();
+    const user = fresh();
+    const { discovery, merge } = await setup(user, [
+      posting('a'),
+      posting('b', { title: 'Alpha Developer Backend Senior' }),
+    ]);
+    const jobs = (await discovery.listJobs(user, {})).jobs;
+    const [older, newer] = [...jobs].sort((x, y) => x.createdAt.getTime() - y.createdAt.getTime());
+    applied = new Set([newer?.id ?? '']);
+    expect(await merge.run(user)).toMatchObject({ calls: 1, items: 1 });
+    const [item] = await pending(user);
+    await decide(user, merge, item?.id ?? '', 'confirm');
+    const after = (await discovery.listJobs(user, {})).jobs;
+    expect(after.map((j) => j.id)).toEqual([newer?.id]);
+    expect(after[0]?.postings).toHaveLength(2);
+    expect(await discovery.getJob(user, older?.id ?? '')).toBeNull();
+    // no writer can reach the folded Job any more
+    const locked = await handle.db.transaction((tx) =>
+      discovery.lockJob(tx, user, older?.id ?? ''),
+    );
+    expect(locked).toBeNull();
+  });
+
+  it('two Jobs that both have an application are never asked about, and a confirm of one is refused with the reason', async () => {
     reset();
     const user = fresh();
     const { discovery, merge } = await setup(user, [
@@ -266,21 +290,85 @@ describe('AI merge against real Postgres and a faked runner', () => {
     await merge.run(user);
     const [item] = await pending(user);
     const jobs = (await discovery.listJobs(user, {})).jobs;
-    applied = new Set([jobs[1]?.id ?? '']);
-    await expect(decide(user, merge, item?.id ?? '', 'confirm')).rejects.toThrow(/application/);
+    applied = new Set(jobs.map((j) => j.id));
+    await expect(decide(user, merge, item?.id ?? '', 'confirm')).rejects.toThrow(
+      /both Jobs have an application.*disagree instead/,
+    );
     expect(await pending(user)).toHaveLength(1);
     expect((await discovery.listJobs(user, {})).jobs).toHaveLength(2);
+    // disagree is the way out
+    await decide(user, merge, item?.id ?? '', 'disagree');
+    expect(await pending(user)).toHaveLength(0);
+    // and a fresh pair of such Jobs costs no AI call
+    const other = fresh();
+    const two = await setup(other, [
+      posting('a'),
+      posting('b', { title: 'Alpha Developer Backend Senior' }),
+    ]);
+    applied = new Set((await two.discovery.listJobs(other, {})).jobs.map((j) => j.id));
+    calls = 0;
+    expect(await two.merge.run(other)).toMatchObject({ calls: 0, items: 0 });
   });
 
-  it('skips Jobs that already have an application', async () => {
+  it('confirm is refused with the reason when a Job was dismissed since the check', async () => {
     reset();
     const user = fresh();
     const { discovery, merge } = await setup(user, [
       posting('a'),
       posting('b', { title: 'Alpha Developer Backend Senior' }),
     ]);
-    applied = new Set([(await discovery.listJobs(user, {})).jobs[0]?.id ?? '']);
+    await merge.run(user);
+    const [item] = await pending(user);
+    const first = (await discovery.listJobs(user, {})).jobs[0];
+    await handle.db.transaction((tx) =>
+      discovery.setDiscoveryState(tx, user, first?.id ?? '', 'dismissed'),
+    );
+    await expect(decide(user, merge, item?.id ?? '', 'confirm')).rejects.toThrow(
+      /dismissed or expired.*disagree instead/,
+    );
+    expect(await pending(user)).toHaveLength(1);
+  });
+
+  it('confirm is refused with the reason when a disagreed pair now bars it', async () => {
+    reset();
+    const user = fresh();
+    const { discovery, merge } = await setup(user, [
+      posting('a'),
+      posting('b', { title: 'Alpha Developer Backend Senior' }),
+      posting('c', { title: 'Alpha Developer Backend Lead' }),
+    ]);
+    expect(await merge.run(user)).toMatchObject({ items: 3 });
+    const [j0, j1, j2] = [...(await discovery.listJobs(user, {})).jobs].sort(
+      (x, y) => x.createdAt.getTime() - y.createdAt.getTime(),
+    );
+    const items = await pending(user);
+    const itemOf = (x: string, y: string) =>
+      items.find((i) => {
+        const s = mergeSubject.parse(i.subject);
+        return [s.jobA, s.jobB].sort().join() === [x, y].sort().join();
+      });
+    // the user says j1 and j2 are different, then merges j1 into j0: j2 is now barred from j0 as well
+    await decide(user, merge, itemOf(j1?.id ?? '', j2?.id ?? '')?.id ?? '', 'disagree');
+    await decide(user, merge, itemOf(j0?.id ?? '', j1?.id ?? '')?.id ?? '', 'confirm');
+    const stale = itemOf(j0?.id ?? '', j2?.id ?? '');
+    await expect(decide(user, merge, stale?.id ?? '', 'confirm')).rejects.toThrow(
+      /keeps these Jobs apart.*disagree instead/,
+    );
+    expect((await discovery.listJobs(user, {})).jobs).toHaveLength(2);
+  });
+
+  it('skips a pair only when both Jobs have an application', async () => {
+    reset();
+    const user = fresh();
+    const { discovery, merge } = await setup(user, [
+      posting('a'),
+      posting('b', { title: 'Alpha Developer Backend Senior' }),
+    ]);
+    const jobs = (await discovery.listJobs(user, {})).jobs;
+    applied = new Set(jobs.map((j) => j.id));
     expect(await merge.run(user)).toMatchObject({ calls: 0, items: 0 });
+    applied = new Set([jobs[0]?.id ?? '']);
+    expect(await merge.run(user)).toMatchObject({ calls: 1, items: 1 });
   });
 
   it("never reads or merges another user's Jobs", async () => {

@@ -29,7 +29,7 @@ export interface AiMergeDeps {
   /** Without it `run` asks nothing (the API only applies decisions). */
   ai?: Pick<Ai, 'run'>;
   review: Pick<Review, 'create' | 'exists'>;
-  /** Ids among `ids` that already have an application status; those Jobs are never merged. Wired by the Tracker. */
+  /** Ids among `ids` that already have an application status; a pair where both have one is never merged, and the one that has one survives a merge. Wired by the Tracker. */
   hasApplication?: (userId: string, ids: string[]) => Promise<Set<string>>;
   /** Title word overlap (0 to 1) at or above which two Jobs of one company and city are asked about. Default 0.6. */
   minJaccard?: number;
@@ -68,7 +68,7 @@ export interface AiMerge {
   run: (userId: string) => Promise<AiMergeResult>;
   /**
    * Applies a decided ai_merge item inside the decision's transaction. Confirm folds the newer Job into the
-   * older one (refused with a DiscoveryError when a Job has an application, was dismissed or expired, or a
+   * older one, or into the one that has an application (refused with a DiscoveryError when both have one, a Job was dismissed or expired, or a
    * split now keeps the pair apart); disagree records never-merge pairs so the pair is not asked again.
    */
   apply: (
@@ -198,11 +198,13 @@ export function createAiMerge(db: Db, deps: AiMergeDeps): AiMerge {
           active.map((j) => j.id),
         )
       : new Set<string>();
-    const eligible = active.filter((j) => !blocked.has(j.id));
+    // A Job with an application may be the survivor of a merge, so it stays a candidate; two Jobs that both
+    // have one are never merged (one application cannot absorb another).
+    const eligible = active;
     const ids = new Set(eligible.map((j) => j.id));
     const pairs = new Map<string, { a: string; b: string }>();
     const add = (x: string, y: string): void => {
-      if (x === y) return;
+      if (x === y || (blocked.has(x) && blocked.has(y))) return;
       const p = pairOf(x, y);
       pairs.set(pairKey(p), p);
     };
@@ -381,15 +383,20 @@ export function createAiMerge(db: Db, deps: AiMergeDeps): AiMerge {
         throw new DiscoveryError(
           'a Job was dismissed or expired since the AI check: disagree instead',
         );
-      if (hasApplication && (await hasApplication(userId, [ra, rb])).size > 0)
-        throw new DiscoveryError('a Job has an application since the AI check: disagree instead');
+      const applied = hasApplication ? await hasApplication(userId, [ra, rb]) : new Set<string>();
+      if (applied.has(ra) && applied.has(rb))
+        throw new DiscoveryError(
+          'both Jobs have an application, so they cannot be merged: disagree instead',
+        );
       if (await covered(tx, userId, ra, rb))
         throw new DiscoveryError(
           'a split since the AI check keeps these Jobs apart: disagree instead',
         );
 
-      const xFirst =
+      // The Job with an application survives (its Tracker state stays reachable); otherwise the older one.
+      const older =
         x.createdAt.getTime() === y.createdAt.getTime() ? x.id < y.id : x.createdAt < y.createdAt;
+      const xFirst = applied.has(x.id) ? true : applied.has(y.id) ? false : older;
       const [kept, loser] = xFirst ? [x, y] : [y, x];
       await tx
         .update(postings)

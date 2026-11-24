@@ -151,7 +151,7 @@ export function registerReviewTools(
     'decide_review',
     {
       description:
-        'Decide a pending Review item. confirm: you agree with the AI (an AI fit rejection stays untagged; an AI merge folds the newer Job into the older one, keeping all postings, and is refused while either Job has an application, is dismissed or expired, or was split apart). disagree: you do not; for an AI fit rejection the Job is tagged with that Target at once, for an AI merge the two Jobs are never proposed for merging again. An item can be decided once.',
+        'Decide a pending Review item. confirm: you agree with the AI (an AI fit rejection stays untagged; an AI merge merges the two Jobs into one with all postings, keeping the one that has an application, else the older; refused with the reason while both have an application, either is dismissed or expired, or a split or earlier disagreement bars the pair). disagree: you do not; for an AI fit rejection the Job is tagged with that Target at once, for an AI merge the two Jobs are never proposed for merging again. An item can be decided once.',
       inputSchema: { id: z.uuid(), decision: z.enum(['confirm', 'disagree']) },
       outputSchema: { item: itemOut },
     },
