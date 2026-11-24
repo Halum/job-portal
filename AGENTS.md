@@ -24,6 +24,7 @@ Search and tracking system for job postings: sources are polled on a schedule, p
 - Coverage gate: statements, lines, functions 80%, branches 70%.
 - Hooks are per worktree: `pnpm install` runs `scripts/prepare-hooks.sh`, which sets `core.hooksPath` with `git config --worktree` (never the shared `.git/config`). Run it in every new worktree.
 - Pre-commit runs typecheck, lint, fast tests, and gitleaks, osv-scanner, semgrep when installed. CI runs all of them.
+- Agent decisions are in `docs/adr/agent/`.
 - Terms in `GLOSSARY.md` name things in code, database, tests and issues.
 
 ## Architecture map
@@ -32,7 +33,10 @@ Search and tracking system for job postings: sources are polled on a schedule, p
 - `packages/config`: zod-validated env config (`loadConfig`).
 - `packages/db`: Drizzle on postgres.js client and `runMigrationsWithLock` (advisory lock, one tracking table per module in schema `drizzle`).
 - `packages/accounts`: schema `accounts`, users table, seed, constant-time bearer token check (`MCP_BEARER_TOKEN`).
-- `apps/api`: stateless Streamable HTTP MCP endpoint at `/mcp`, bearer auth, tool `whoami`. Migrates and seeds on start.
-- `apps/worker`: connects to Redis through BullMQ 6 and logs ready; nothing scheduled yet.
+- `packages/discovery`: schema `discovery`: Postings (unique per user, source, source posting id) and Jobs (one per Posting for now). Source interface, the Bundesagentur source (`src/sources/`, recorded fixtures in `src/sources/fixtures/`), `poll`, `listJobs`, `getJob`.
+- `packages/pipeline`: schema `pipeline`: Runs (counts, status running / completed / completed_with_errors / failed). `execute` polls one source through Discovery; the database allows one running run per user and source; a run still running after `staleAfterMs` (default one hour) counts as lost: the next `execute` for that source and the sweep on worker start (`failStaleRuns`) fail it, and never touch a fresh run, so several workers can share a database.
+- `packages/migrations`: `allMigrations`, the one ordered list of every module's migrations (api, worker and tests apply it).
+- `apps/api`: stateless Streamable HTTP MCP endpoint at `/mcp`, bearer auth, tools `whoami`, `list_jobs`, `get_job`, `get_run_history` (`src/tools.ts`). `get_run_history` includes `errorCount`. Package entry exports `createApiServer`, so the worker's end-to-end test depends on `@job-portal/api` explicitly. Migrates and seeds on start; read only, it never polls.
+- `apps/worker`: migrates, seeds, marks stale runs failed, then schedules one BullMQ Job Scheduler per configured source (scheduler id = source id) and runs each tick through the Pipeline. `src/tracer.integration.test.ts` is the end-to-end test through MCP.
 
 Packages export TypeScript source directly (no build step); processes run with `tsx`.

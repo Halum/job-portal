@@ -3,10 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/server.ts"
+  },
   "dependencies": {
     "@job-portal/accounts": "workspace:*",
     "@job-portal/config": "workspace:*",
     "@job-portal/db": "workspace:*",
+    "@job-portal/discovery": "workspace:*",
+    "@job-portal/migrations": "workspace:*",
+    "@job-portal/pipeline": "workspace:*",
     "@job-portal/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "1.32.2",
     "zod": "4.6.7"

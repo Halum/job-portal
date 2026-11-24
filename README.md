@@ -11,13 +11,13 @@ pnpm install
 docker compose up -d          # throwaway Postgres 16 and Redis 7
 cp .env.example .env          # then set MCP_BEARER_TOKEN
 pnpm dev:api                  # migrates, seeds one user, serves MCP at http://localhost:3000/mcp
-pnpm dev:worker               # connects to Redis and logs ready
+pnpm dev:worker               # polls the configured sources on their interval
 docker compose down           # wipes everything
 ```
 
 The API listens on `127.0.0.1` by default; set `HOST` (for example to the tailnet IP, or `0.0.0.0`) to reach the MCP endpoint over the tailnet.
 
-Call the endpoint with `Authorization: Bearer <MCP_BEARER_TOKEN>`; the `whoami` tool returns the seeded user.
+Call the endpoint with `Authorization: Bearer <MCP_BEARER_TOKEN>`; the `whoami` tool returns the seeded user. Set `BUNDESAGENTUR_QUERY` in `.env` and the worker polls the Bundesagentur job board; `list_jobs`, `get_job` and `get_run_history` show the result.
 
 ## Check
 

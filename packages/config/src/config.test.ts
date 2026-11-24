@@ -17,6 +17,7 @@ describe('loadConfig', () => {
       host: '127.0.0.1',
       port: 3000,
       logLevel: 'info',
+      sources: { bundesagentur: null },
     });
   });
 
@@ -45,5 +46,28 @@ describe('loadConfig', () => {
   it('rejects a short bearer token and a bad port', () => {
     expect(() => loadConfig({ ...valid, MCP_BEARER_TOKEN: 'short' })).toThrow(ConfigError);
     expect(() => loadConfig({ ...valid, PORT: '0' })).toThrow(ConfigError);
+  });
+
+  describe('bundesagentur source', () => {
+    it('is unset until a query is given, and then defaults to hourly', () => {
+      expect(loadConfig({ ...valid, BUNDESAGENTUR_QUERY: 'wo=Musterstadt' }).sources).toEqual({
+        bundesagentur: { query: 'wo=Musterstadt', intervalMinutes: 60 },
+      });
+    });
+
+    it('treats an empty query as unset', () => {
+      expect(loadConfig({ ...valid, BUNDESAGENTUR_QUERY: '' }).sources.bundesagentur).toBeNull();
+    });
+
+    it('reads the interval in minutes', () => {
+      const env = { ...valid, BUNDESAGENTUR_QUERY: 'wo=x', BUNDESAGENTUR_INTERVAL_MINUTES: '15' };
+      expect(loadConfig(env).sources.bundesagentur?.intervalMinutes).toBe(15);
+    });
+
+    it.each(['0', '-5', '1.5', 'abc', ''])('rejects the interval %j', (value) => {
+      const env = { ...valid, BUNDESAGENTUR_INTERVAL_MINUTES: value };
+      expect(() => loadConfig(env)).toThrow(ConfigError);
+      expect(() => loadConfig(env)).toThrow('BUNDESAGENTUR_INTERVAL_MINUTES');
+    });
   });
 });

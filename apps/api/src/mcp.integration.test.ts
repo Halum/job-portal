@@ -1,13 +1,27 @@
+import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { accountsMigrations, createAccounts } from '@job-portal/accounts';
+import { createAccounts } from '@job-portal/accounts';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
+import { createBundesagenturSource, createDiscovery } from '@job-portal/discovery';
+import { allMigrations } from '@job-portal/migrations';
+import { createPipeline } from '@job-portal/pipeline';
 import { createLogger } from '@job-portal/shared';
 import { createApiServer } from './server';
+
+const fixture = readFileSync(
+  new URL(
+    '../../../packages/discovery/src/sources/fixtures/bundesagentur-search.json',
+    import.meta.url,
+  ),
+  'utf8',
+);
+const fakeFetch = (() =>
+  Promise.resolve(new Response(fixture, { status: 200 }))) as unknown as typeof fetch;
 
 const TOKEN = 'placeholder-token-for-tests';
 const EMAIL = 'user@example.invalid';
@@ -21,11 +35,21 @@ describe('MCP endpoint over real HTTP', () => {
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16-alpine').start();
-    await runMigrationsWithLock(container.getConnectionUri(), [accountsMigrations]);
+    await runMigrationsWithLock(container.getConnectionUri(), allMigrations);
     handle = createDb(container.getConnectionUri());
     const accounts = createAccounts(handle.db, TOKEN);
     userId = (await accounts.seedUser(EMAIL)).id;
-    server = createApiServer(accounts, createLogger({ level: 'silent' }));
+    const discovery = createDiscovery(handle.db, [
+      createBundesagenturSource({ query: 'wo=Musterstadt', fetch: fakeFetch }),
+    ]);
+    const pipeline = createPipeline(handle.db, discovery);
+    await pipeline.execute(userId, 'bundesagentur');
+    server = createApiServer({
+      accounts,
+      discovery,
+      pipeline,
+      logger: createLogger({ level: 'silent' }),
+    });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     url = new URL(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}/mcp`);
   });
@@ -36,22 +60,102 @@ describe('MCP endpoint over real HTTP', () => {
     await container.stop();
   });
 
-  it('whoami returns the seeded user for a valid token', async () => {
+  async function connect(): Promise<Client> {
     const client = new Client({ name: 'test', version: '0.0.0' });
     await client.connect(
       new StreamableHTTPClientTransport(url, {
         requestInit: { headers: { Authorization: `Bearer ${TOKEN}` } },
       }),
     );
-    const tools = await client.listTools();
-    expect(tools.tools.map((t) => t.name)).toEqual(['whoami']);
+    return client;
+  }
 
+  it('lists the tools', async () => {
+    const client = await connect();
+    const names = (await client.listTools()).tools.map((t) => t.name).sort();
+    expect(names).toEqual(['get_job', 'get_run_history', 'list_jobs', 'whoami']);
+    await client.close();
+  });
+
+  it('whoami returns the seeded user for a valid token', async () => {
+    const client = await connect();
     const result = await client.callTool({ name: 'whoami', arguments: {} });
     expect(result.structuredContent).toEqual({
       id: userId,
       email: EMAIL,
       timezone: 'Europe/Berlin',
     });
+    await client.close();
+  });
+
+  it('list_jobs returns the stored Jobs with their postings, paged by cursor', async () => {
+    const client = await connect();
+    const first = (await client.callTool({ name: 'list_jobs', arguments: { limit: 3 } }))
+      .structuredContent as { jobs: { postings: unknown[] }[]; nextCursor: string | null };
+    expect(first.jobs).toHaveLength(3);
+    expect(first.nextCursor).not.toBeNull();
+    expect(first.jobs[0]?.postings).toHaveLength(1);
+
+    const second = (
+      await client.callTool({
+        name: 'list_jobs',
+        arguments: { limit: 3, cursor: first.nextCursor },
+      })
+    ).structuredContent as { jobs: unknown[]; nextCursor: string | null };
+    expect(second.jobs).toHaveLength(2);
+    expect(second.nextCursor).toBeNull();
+    await client.close();
+  });
+
+  it('list_jobs refuses a malformed cursor with a clean tool error', async () => {
+    const client = await connect();
+    const outcome = await client
+      .callTool({ name: 'list_jobs', arguments: { cursor: 'not-a-uuid' } })
+      .catch((err: unknown) => err);
+    const message = JSON.stringify(outcome instanceof Error ? outcome.message : outcome);
+    expect(message).toMatch(/cursor/i);
+    expect(message).not.toMatch(/invalid input syntax|postgres/i);
+    // The endpoint still works afterwards.
+    expect((await client.callTool({ name: 'list_jobs', arguments: {} })).isError).toBeFalsy();
+    await client.close();
+  });
+
+  it('get_job returns a Job with the raw posting, and an error for an unknown id', async () => {
+    const client = await connect();
+    const { jobs } = (await client.callTool({ name: 'list_jobs', arguments: {} }))
+      .structuredContent as { jobs: { id: string; title: string }[] };
+    const id = jobs[0]?.id ?? '';
+
+    const found = await client.callTool({ name: 'get_job', arguments: { jobId: id } });
+    expect(found.structuredContent).toMatchObject({
+      job: {
+        id,
+        postings: [{ sourceId: 'bundesagentur', raw: { stellenangebotsTitel: jobs[0]?.title } }],
+      },
+    });
+
+    const missing = await client.callTool({
+      name: 'get_job',
+      arguments: { jobId: '00000000-0000-4000-8000-0000000000ff' },
+    });
+    expect(missing.isError).toBe(true);
+    await client.close();
+  });
+
+  it('get_run_history returns the recorded runs with their counts', async () => {
+    const client = await connect();
+    const { runs } = (await client.callTool({ name: 'get_run_history', arguments: {} }))
+      .structuredContent as { runs: unknown[] };
+    expect(runs).toEqual([
+      expect.objectContaining({
+        sourceId: 'bundesagentur',
+        status: 'completed',
+        fetched: 5,
+        newPostings: 5,
+        errors: [],
+        errorCount: 0,
+      }),
+    ]);
     await client.close();
   });
 

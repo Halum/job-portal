@@ -16,7 +16,16 @@ const envSchema = z.object({
   HOST: z.string().min(1).default('127.0.0.1'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z.enum(LOG_LEVELS).default('info'),
+  // API parameters for the Bundesagentur search (for example `wo=Musterstadt&umkreis=25`). The
+  // source is scheduled only when this is set; the real value lives in the local .env only.
+  BUNDESAGENTUR_QUERY: z.string().optional(),
+  BUNDESAGENTUR_INTERVAL_MINUTES: z.coerce.number().int().min(1).default(60),
 });
+
+export interface SourceConfig {
+  query: string;
+  intervalMinutes: number;
+}
 
 export interface Config {
   databaseUrl: string;
@@ -26,6 +35,8 @@ export interface Config {
   host: string;
   port: number;
   logLevel: z.infer<typeof envSchema>['LOG_LEVEL'];
+  /** One entry per source; null means the source is not configured and is never scheduled. */
+  sources: { bundesagentur: SourceConfig | null };
 }
 
 /** Validates the environment once at process start; throws ConfigError naming each bad variable. */
@@ -44,5 +55,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     host: e.HOST,
     port: e.PORT,
     logLevel: e.LOG_LEVEL,
+    sources: {
+      bundesagentur:
+        e.BUNDESAGENTUR_QUERY === undefined || e.BUNDESAGENTUR_QUERY === ''
+          ? null
+          : { query: e.BUNDESAGENTUR_QUERY, intervalMinutes: e.BUNDESAGENTUR_INTERVAL_MINUTES },
+    },
   };
 }

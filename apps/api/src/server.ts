@@ -1,21 +1,13 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { userSchema, type Accounts, type User } from '@job-portal/accounts';
+import type { Accounts, User } from '@job-portal/accounts';
 import type { Logger } from '@job-portal/shared';
+import { registerTools, type ToolDeps } from './tools';
 
-function buildMcpServer(user: User): McpServer {
+function buildMcpServer(user: User, deps: ToolDeps): McpServer {
   const mcp = new McpServer({ name: 'job-automation', version: '0.1.0' });
-  mcp.registerTool(
-    'whoami',
-    {
-      description: 'Return the id, email and timezone of the authenticated user.',
-      outputSchema: userSchema.shape,
-    },
-    () => {
-      return { content: [{ type: 'text', text: JSON.stringify(user) }], structuredContent: user };
-    },
-  );
+  registerTools(mcp, user, deps);
   return mcp;
 }
 
@@ -42,7 +34,12 @@ function reply(res: ServerResponse, status: number, headers: Record<string, stri
  * Stateless Streamable HTTP MCP endpoint at /mcp, bearer-authenticated.
  * ponytail: a fresh MCP server and transport per request, no sessions; add sessions only if a tool needs server push.
  */
-export function createApiServer(accounts: Accounts, logger: Logger): Server {
+export interface ApiDeps extends ToolDeps {
+  accounts: Accounts;
+  logger: Logger;
+}
+
+export function createApiServer({ accounts, logger, ...tools }: ApiDeps): Server {
   return createServer((req, res) => {
     void (async () => {
       if (req.url !== '/mcp') {
@@ -66,7 +63,7 @@ export function createApiServer(accounts: Accounts, logger: Logger): Server {
         reply(res, err instanceof BodyTooLargeError ? 413 : 400, { Connection: 'close' });
         return;
       }
-      const mcp = buildMcpServer(user);
+      const mcp = buildMcpServer(user, tools);
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       res.on('close', () => {
         void transport.close();
