@@ -28,7 +28,7 @@ export const criteriaSchema = z.object({
   prerankTopN: z.number().int().min(1).max(200).nullable(),
   /**
    * Days without a status change before an application goes Gone cold; null disables the check. A Global
-   * default only: the Tracker's check reads it from the defaults, so on a Target it has no effect.
+   * default only: the Tracker's check reads it from the defaults, and upsertTarget refuses it on a Target.
    */
   goneColdDays: z.number().int().min(1).nullable(),
 });
@@ -72,7 +72,10 @@ const union = (a: string[] | null, b: string[] | null): string[] => {
 };
 
 /** Criteria after resolution: exclusions are always lists, everything else may still be null. */
-export type ResolvedCriteria = Omit<Criteria, 'exclusionWords' | 'blockedCompanies'> & {
+export type ResolvedCriteria = Omit<
+  Criteria,
+  'exclusionWords' | 'blockedCompanies' | 'goneColdDays'
+> & {
   exclusionWords: string[];
   blockedCompanies: string[];
 };
@@ -93,7 +96,6 @@ export function resolveCriteria(globals: Criteria, target: Criteria): ResolvedCr
     alertThreshold: pick('alertThreshold'),
     languageAbility: pick('languageAbility'),
     prerankTopN: pick('prerankTopN'),
-    goneColdDays: pick('goneColdDays'),
     exclusionWords: union(globals.exclusionWords, target.exclusionWords),
     blockedCompanies: union(globals.blockedCompanies, target.blockedCompanies),
   };

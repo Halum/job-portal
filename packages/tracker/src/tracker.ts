@@ -339,7 +339,8 @@ export function createTracker(
         .groupBy(jobState.jobId);
       const moves: GoneColdMove[] = [];
       for (const { jobId, last } of waiting) {
-        if ((silentDays(last) ?? 0) < days) continue;
+        const silentNow = silentDays(last);
+        if (silentNow === null || silentNow < days) continue;
         const move = await db.transaction(async (tx): Promise<GoneColdMove | null> => {
           // A Job folded into another is gone for every writer: lockJob finds no row and it is skipped.
           const locked = await lock(tx, userId, jobId).catch((err: unknown) => {

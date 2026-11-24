@@ -93,6 +93,13 @@ describe('matching against real Postgres', () => {
     ).toBeNull();
   });
 
+  it('refuses goneColdDays on a Target: it is a Global default only', async () => {
+    await expect(
+      matching.upsertTarget(USER, { name: 'gc', criteria: { goneColdDays: 5 } }),
+    ).rejects.toThrow('goneColdDays');
+    expect((await matching.listTargets(USER)).find((t) => t.name === 'gc')).toBeUndefined();
+  });
+
   describe('a run over Jobs', () => {
     beforeAll(async () => {
       await matching.updateGlobalDefaults(USER, {

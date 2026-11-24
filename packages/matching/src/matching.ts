@@ -342,6 +342,9 @@ export function createMatching(
 
     async upsertTarget(userId, { name, paused, criteria }) {
       const patch = criteria ?? {};
+      if (patch.goneColdDays !== undefined) {
+        throw new Error('goneColdDays is a Global default: set it with update_global_defaults');
+      }
       const updated = await db.transaction(async (tx) => {
         // The row lock serializes two edits of the same Target, so neither patch is lost.
         await tx

@@ -66,13 +66,13 @@ const envSchema = z
     // Most AI merge checks one run makes. A throughput limit, not a spend cap: pairs left over wait for the next run.
     AI_MERGE_MAX_CALLS_PER_RUN: z.coerce.number().int().min(1).default(20),
     ALERT_THRESHOLD: z.coerce.number().int().min(0).max(100).default(70),
-    // Digest and failure alerts go through the n8n webhook into a Telegram topic. Both are secrets or
-    // private ids, from env only, with no default: unset means nothing is sent.
     // How often the Gone cold check runs, in minutes (default daily). The check itself is idempotent.
     GONE_COLD_INTERVAL_MINUTES: z.preprocess(
       emptyToUndefined,
       z.coerce.number().int().min(1).default(1440),
     ),
+    // Digest and failure alerts go through the n8n webhook into a Telegram topic. Both are secrets or
+    // private ids, from env only, with no default: unset means nothing is sent.
     NOTIFY_WEBHOOK_URL: z.preprocess(emptyToUndefined, httpUrl.optional()),
     NOTIFY_TOPIC_ID: optionalText,
     // Sends per message before it stays unsent, and the wait before the second send (it doubles after that).

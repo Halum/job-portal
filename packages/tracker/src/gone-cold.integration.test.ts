@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -140,18 +141,54 @@ describe('gone cold against real Postgres and a controlled clock', () => {
     expect(await status(shell)).toBe('applied');
   });
 
-  it('lets a racing set_status win cleanly: no error, no stale Gone cold on top of the newer status', async () => {
+  it('rejects a stale candidate under the Job lock: a status change committed meanwhile wins', async () => {
     const jobId = await appliedAt('2026-01-01T10:00:00Z');
     at('2026-02-01T10:00:00Z');
-    const [moves] = await Promise.all([
-      run(),
-      tracker.setApplicationStatus(USER, jobId, { to: 'interview', actor: 'user', timezone: TZ }),
-    ]);
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let locked: () => void = () => undefined;
+    const holding = new Promise<void>((resolve) => {
+      locked = resolve;
+    });
+    // A writer holds the Job lock and commits Interview with a fresh event while the check is waiting for it.
+    const writer = handle.db.transaction(async (tx) => {
+      await discovery.lockJob(tx, USER, jobId);
+      locked();
+      await held;
+      await tx.execute(sql`insert into tracker.timeline_events (user_id, job_id, field, from_value, to_value, actor, created_at)
+        values (${USER}, ${jobId}, 'application', 'applied', 'interview', 'user', ${clock.toISOString()}::timestamptz)`);
+      await tx.execute(
+        sql`update tracker.job_state set application_status = 'interview' where user_id = ${USER} and job_id = ${jobId}`,
+      );
+    });
+    await holding;
+    const running = run();
+    for (let i = 0; i < 100; i += 1) {
+      const waiting = await handle.db.execute<{ n: number }>(
+        sql`select count(*)::int as n from pg_stat_activity where wait_event_type = 'Lock'`,
+      );
+      if ((waiting[0]?.n ?? 0) > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    release();
+    await writer;
+    expect(await running).toEqual([]);
     expect(await status(jobId)).toBe('interview');
     const { events } = await tracker.getTimeline(USER, jobId);
-    // Either the check lost the lock race and found a fresh event, or it ran first and the reply moved on.
-    expect(moves.length).toBeLessThanOrEqual(1);
-    expect(events.at(-1)?.to).toBe('interview');
+    expect(events.some((ev) => ev.to === 'gone_cold')).toBe(false);
+  });
+
+  it('counts across the spring DST switch of 29 March in Berlin', async () => {
+    const user = randomUUID();
+    const jobId = await appliedAt('2026-03-20T12:00:00Z', user);
+    // 21:30 UTC on 2 April is 23:30 in Berlin (CEST): still 2 April, 13 days.
+    at('2026-04-02T21:30:00Z');
+    expect(await run(user)).toEqual([]);
+    // 22:30 UTC is 00:30 on 3 April in Berlin: day 14.
+    at('2026-04-02T22:30:00Z');
+    expect(await run(user)).toEqual([{ jobId, daysSilent: 14, from: 'applied' }]);
   });
 
   it('refuses days that are not an integer of at least 1', async () => {

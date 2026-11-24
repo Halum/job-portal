@@ -32,14 +32,18 @@ export function createGoneColdCheck(deps: {
       if (moves.length === 0) return 0;
       log.info({ moved: moves.length, days }, 'jobs went gone cold');
       if (notifications === null) return moves.length;
-      try {
-        const lines: string[] = [];
-        for (const move of moves) {
+      const lines: string[] = [];
+      for (const move of moves) {
+        try {
           const job = await discovery.getJob(user.id, move.jobId);
           if (job === null) continue;
           const at = job.company === null ? '' : ` at ${job.company}`;
           lines.push(`Gone cold: ${job.title}${at}, ${String(move.daysSilent)} days silent`);
+        } catch (err) {
+          log.error({ err, jobId: move.jobId }, 'gone cold line not built');
         }
+      }
+      try {
         await notifications.sendLines(user.id, lines);
       } catch (err) {
         log.error({ err }, 'gone cold lines not sent');

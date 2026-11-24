@@ -62,8 +62,10 @@ describe('resolveCriteria', () => {
   });
 
   it('leaves everything unset when nothing is set anywhere', () => {
+    // goneColdDays is a Global default only: it is not part of what a Target resolves to.
+    const { goneColdDays: _unused, ...unset } = emptyCriteria();
     expect(resolveCriteria(emptyCriteria(), emptyCriteria())).toEqual({
-      ...emptyCriteria(),
+      ...unset,
       exclusionWords: [],
       blockedCompanies: [],
     });
