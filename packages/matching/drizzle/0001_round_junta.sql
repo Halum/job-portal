@@ -8,7 +8,6 @@ CREATE TABLE "matching"."scores" (
 	"red_flags" jsonb NOT NULL,
 	"languages" jsonb NOT NULL,
 	"language_met" boolean,
-	"tagged" boolean NOT NULL,
 	"scored_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "scores_target_job" UNIQUE("target_id","job_id"),
 	CONSTRAINT "scores_range" CHECK ("matching"."scores"."score" between 0 and 100)

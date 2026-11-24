@@ -161,6 +161,21 @@ describe('fit scores over MCP', () => {
     expect(await ids({ targetId, minScore: 90 })).toEqual([]);
     // Filters apply before the page: a page of one still holds the one Job that passes.
     expect(await ids({ targetId, minScore: 80, limit: 1 })).toEqual([strongId]);
+    // The tag follows the threshold now (60 for this Target): 88 is tagged, 41 is not.
+    expect(await ids({ targetId, tagged: true })).toEqual([strongId]);
+    expect(await ids({ targetId, tagged: false })).toEqual([weakId]);
+    const lowered = await call('upsert_target', {
+      name: 'alpha',
+      criteria: { alertThreshold: 40 },
+    });
+    expect(lowered.isError).toBe(false);
+    expect((await ids({ targetId, tagged: true })).sort()).toEqual([strongId, weakId].sort());
+    const weakTag = (await call('get_job', { jobId: weakId })).out as {
+      job: { scores: { tagged: boolean }[] };
+    };
+    expect(weakTag.job.scores[0]?.tagged).toBe(true);
+    await call('upsert_target', { name: 'alpha', criteria: { alertThreshold: 60 } });
+    expect((await call('list_jobs', { tagged: true })).isError).toBe(true);
     const refused = await call('list_jobs', { minScore: 50 });
     expect(refused.isError).toBe(true);
     expect(refused.text).toContain('targetId');

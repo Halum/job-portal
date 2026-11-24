@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, inArray, notExists, notInArray, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, lt, notExists, notInArray, sql } from 'drizzle-orm';
 import { AiError, type Ai } from '@job-portal/ai';
 import type { Db } from '@job-portal/db';
 import {
@@ -106,7 +106,7 @@ export interface Matching {
   /** Ids of the Jobs that passed the filters and prerank of a Target, for list_jobs. */
   listJobIds: (
     userId: string,
-    filter: { targetId: string; minScore?: number },
+    filter: { targetId: string; minScore?: number; tagged?: boolean },
   ) => Promise<string[]>;
   /**
    * Scores every unscored candidate of an active Target, oldest first, whichever run made it, so a
@@ -114,7 +114,10 @@ export interface Matching {
    * never score the same pair twice. Stops after three failures in a row.
    */
   score: (userId: string) => Promise<ScoreResult>;
-  /** The Job's score and tag for each Target it is a candidate for. */
+  /**
+   * The Job's score and tag for each Target it is a candidate for. The tag is derived on every read: a
+   * score at or above the threshold the Target resolves to now, so editing a threshold retags without a new call.
+   */
   listScores: (userId: string, jobId: string) => Promise<JobScore[]>;
   /** Search parameters for the active Targets: one per keyword and location, none for a Target that sets neither. */
   searchQueries: (userId: string) => Promise<SearchQuery[]>;
@@ -147,6 +150,10 @@ export function createMatching(
     const [row] = await db.select().from(globalDefaults).where(eq(globalDefaults.userId, userId));
     return row ? read(row.criteria) : emptyCriteria();
   };
+
+  /** The alert threshold a Target uses: its own, then the Global default, then the configured one. 0 is real. */
+  const thresholdOf = (globals: Criteria, target: Criteria): number =>
+    resolveCriteria(globals, target).alertThreshold ?? defaultAlertThreshold;
 
   const view = (globals: Criteria, t: typeof targets.$inferSelect): TargetView => {
     const criteria = read(t.criteria);
@@ -329,11 +336,22 @@ export function createMatching(
       });
     },
 
-    async listJobIds(userId, { targetId, minScore }) {
+    async listJobIds(userId, { targetId, minScore, tagged }) {
       const where = and(eq(candidates.userId, userId), eq(candidates.targetId, targetId));
       // minScore 0 is a real filter (it needs a score), so it is tested against undefined, not falsy.
+      const conditions = [];
+      if (minScore !== undefined) conditions.push(gte(scores.score, minScore));
+      if (tagged !== undefined) {
+        const [t] = await db
+          .select()
+          .from(targets)
+          .where(and(eq(targets.id, targetId), eq(targets.userId, userId)));
+        if (!t) return [];
+        const threshold = thresholdOf(await getGlobals(userId), read(t.criteria));
+        conditions.push(tagged ? gte(scores.score, threshold) : lt(scores.score, threshold));
+      }
       const rows =
-        minScore === undefined
+        conditions.length === 0
           ? await db.select({ jobId: candidates.jobId }).from(candidates).where(where)
           : await db
               .select({ jobId: candidates.jobId })
@@ -342,13 +360,13 @@ export function createMatching(
                 scores,
                 and(eq(scores.targetId, candidates.targetId), eq(scores.jobId, candidates.jobId)),
               )
-              .where(and(where, gte(scores.score, minScore)));
+              .where(and(where, ...conditions));
       return rows.map((r) => r.jobId);
     },
 
     async listScores(userId, jobId) {
       const rows = await db
-        .select({ c: candidates, t: targets.name, s: scores })
+        .select({ c: candidates, t: targets, s: scores })
         .from(candidates)
         .innerJoin(targets, eq(targets.id, candidates.targetId))
         .leftJoin(
@@ -357,9 +375,10 @@ export function createMatching(
         )
         .where(and(eq(candidates.userId, userId), eq(candidates.jobId, jobId)))
         .orderBy(asc(targets.name));
+      const globals = await getGlobals(userId);
       return rows.map(({ c, t, s }) => ({
         targetId: c.targetId,
-        targetName: t,
+        targetName: t.name,
         prerankScore: c.prerankScore,
         unknownLocation: c.unknownLocation,
         score: s?.score ?? null,
@@ -367,7 +386,7 @@ export function createMatching(
         redFlags: s?.redFlags ?? [],
         languages: s?.languages ?? [],
         languageMet: s?.languageMet ?? null,
-        tagged: s?.tagged ?? false,
+        tagged: s !== null && s.score >= thresholdOf(globals, read(t.criteria)),
       }));
     },
 
@@ -449,6 +468,7 @@ export function createMatching(
               met === false
                 ? [...redFlags, `language requirement not met: ${unmet.join(', ')}`]
                 : redFlags;
+            // Only the score is stored: the tag is derived when read (see listScores). The count is this run's.
             const tagged = score >= (criteria.alertThreshold ?? defaultAlertThreshold);
             await tx
               .insert(scores)
@@ -461,7 +481,6 @@ export function createMatching(
                 redFlags: flags,
                 languages,
                 languageMet: met,
-                tagged,
               })
               .onConflictDoNothing();
             result.scored += 1;

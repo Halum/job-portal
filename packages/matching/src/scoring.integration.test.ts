@@ -109,6 +109,33 @@ describe('fit scoring against real Postgres', () => {
     await matching.updateGlobalDefaults(USER, { alertThreshold: null });
   });
 
+  it('the tag follows the threshold as it is now: editing it retags with no new AI call', async () => {
+    reset();
+    jobs = [job(70)];
+    respond = () => answer(50);
+    const id = await target({ alertThreshold: 60 });
+    await matching.score(USER);
+    const tagged = async (): Promise<boolean | undefined> => (await scoreOf(J(70), id))?.tagged;
+    expect(await tagged()).toBe(false);
+    expect(await matching.listJobIds(USER, { targetId: id, tagged: true })).toEqual([]);
+    expect(await matching.listJobIds(USER, { targetId: id, tagged: false })).toEqual([J(70)]);
+    prompts = [];
+    await matching.upsertTarget(USER, { name: `t${String(n)}`, criteria: { alertThreshold: 50 } });
+    expect(await tagged()).toBe(true);
+    expect(await matching.listJobIds(USER, { targetId: id, tagged: true })).toEqual([J(70)]);
+    expect(await matching.listJobIds(USER, { targetId: id, tagged: false })).toEqual([]);
+    // Back to inheriting: the Global default decides, then the configured default (70).
+    await matching.upsertTarget(USER, {
+      name: `t${String(n)}`,
+      criteria: { alertThreshold: null },
+    });
+    expect(await tagged()).toBe(false);
+    await matching.updateGlobalDefaults(USER, { alertThreshold: 40 });
+    expect(await tagged()).toBe(true);
+    await matching.updateGlobalDefaults(USER, { alertThreshold: null });
+    expect(prompts).toEqual([]);
+  });
+
   it('judges the extracted language requirement in code against the Target ability', async () => {
     reset();
     jobs = [job(4)];

@@ -1,5 +1,5 @@
 {
-  "id": "d2236a22-ed07-4c14-a673-9d9332dd8d39",
+  "id": "3ad4e02b-7bb5-4658-b7b6-1241e6a1b6ff",
   "prevId": "9c6e136b-0adc-4377-b39e-1bb188512e13",
   "version": "7",
   "dialect": "postgresql",
@@ -197,12 +197,6 @@
           "type": "boolean",
           "primaryKey": false,
           "notNull": false
-        },
-        "tagged": {
-          "name": "tagged",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true
         },
         "scored_at": {
           "name": "scored_at",

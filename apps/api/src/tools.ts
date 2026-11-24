@@ -239,6 +239,12 @@ export function registerTools(
           .describe(
             'With targetId: only Jobs whose AI fit score for that Target is at least this. Unscored Jobs never match, not even 0.',
           ),
+        tagged: z
+          .boolean()
+          .optional()
+          .describe(
+            'With targetId: true keeps Jobs scored at or above the threshold the Target uses now, false keeps Jobs scored below it. Unscored Jobs match neither.',
+          ),
         discoveryState: z.enum(DISCOVERY_STATES).optional(),
         applicationStatus: z.enum(APPLICATION_STATUSES).optional(),
         discoveredSince: z.iso
@@ -256,16 +262,20 @@ export function registerTools(
       cursor,
       targetId,
       minScore,
+      tagged,
       discoveryState,
       applicationStatus,
       discoveredSince,
       applyByBefore,
     }) => {
-      if (minScore !== undefined && targetId === undefined) {
+      if ((minScore !== undefined || tagged !== undefined) && targetId === undefined) {
         return {
           isError: true,
           content: [
-            { type: 'text' as const, text: 'minScore needs targetId: scores are per Target' },
+            {
+              type: 'text' as const,
+              text: 'minScore and tagged need targetId: scores are per Target',
+            },
           ],
         };
       }
@@ -276,7 +286,7 @@ export function registerTools(
       );
       if (!filtered.ok) return filtered.error;
       const byTarget = targetId
-        ? new Set(await matching.listJobIds(user.id, { targetId, minScore }))
+        ? new Set(await matching.listJobIds(user.id, { targetId, minScore, tagged }))
         : null;
       const jobIds =
         filtered.value && byTarget
@@ -483,7 +493,7 @@ export function registerTools(
     'upsert_target',
     {
       description:
-        'Create a Target, or update the one with this name. Only the criteria keys you pass change; null clears a field so it inherits the Global default again. Exclusion words and blocked companies add up with the Global defaults. radiusKm 0 means the same city only; paused stops matching. The Target is matched at once over every stored Job and its list_jobs candidates are replaced; a Target with no keywords gets the top N stored Jobs at once (the newest), because nothing scores them. salaryFloor is stored but not enforced yet (no source reports salary).',
+        'Create a Target, or update the one with this name. Only the criteria keys you pass change; null clears a field so it inherits the Global default again. Exclusion words and blocked companies add up with the Global defaults. radiusKm 0 means the same city only; paused stops matching. The Target is matched at once over every stored Job and its list_jobs candidates are replaced; a Target with no keywords gets the top N stored Jobs at once (the newest), because nothing scores them. salaryFloor is stored but not enforced yet (no source reports salary). Editing criteria never rescores a Job that already has an AI fit score (that would cost AI calls); only alertThreshold changes what is tagged, because the tag is derived from the score and the threshold when read.',
       inputSchema: {
         name: z.string().trim().min(1).max(100),
         paused: z.boolean().optional(),

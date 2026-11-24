@@ -78,8 +78,6 @@ export const scores = matchingSchema.table(
     languages: jsonb('languages').$type<LanguageRequirement[]>().notNull(),
     /** Judged in code against the Target's language ability; null when the Target sets none. */
     languageMet: boolean('language_met'),
-    /** Score at or above the alert threshold when it was scored. */
-    tagged: boolean('tagged').notNull(),
     scoredAt: timestamp('scored_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
