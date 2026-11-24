@@ -51,6 +51,17 @@ describe('Review items against real Postgres', () => {
     });
   });
 
+  it('exists sees an item of any status for this user, kind and subject only', async () => {
+    const subject = { jobA: J(40), jobB: J(41) };
+    expect(await review.exists(A, 'ai_merge', subject)).toBe(false);
+    const { id } = await review.create(A, { kind: 'ai_merge', subject, model: 'vendor/model-a' });
+    expect(await review.exists(A, 'ai_merge', subject)).toBe(true);
+    await review.decide(A, id, 'disagree', noApply);
+    expect(await review.exists(A, 'ai_merge', subject)).toBe(true);
+    expect(await review.exists(B, 'ai_merge', subject)).toBe(false);
+    expect(await review.exists(A, 'ai_fit_rejection', subject)).toBe(false);
+  });
+
   it('lists pending by default, filters by kind and status, and scopes by user', async () => {
     const a = await review.create(A, rejection(10));
     await review.create(A, {

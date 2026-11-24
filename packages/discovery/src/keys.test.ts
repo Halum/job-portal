@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { companyKey, urlKey } from './keys';
+import { companyKey, nearBucket, titleOverlap, urlKey } from './keys';
+
+describe('nearBucket and titleOverlap', () => {
+  it('buckets by normalized company and city, null when either is missing', () => {
+    expect(nearBucket({ company: 'Beispiel GmbH', location: '96047 Bamberg' })).toBe(
+      nearBucket({ company: 'beispiel', location: 'Bamberg' }),
+    );
+    expect(nearBucket({ company: 'Beispiel GmbH', location: null })).toBeNull();
+    expect(nearBucket({ company: ' ', location: 'Bamberg' })).toBeNull();
+  });
+
+  it('is the share of title words in common, ignoring case, gender tags and punctuation', () => {
+    expect(titleOverlap('Koch (m/w/d)', 'koch')).toBe(1);
+    expect(titleOverlap('Alpha Developer Backend', 'Alpha Developer Backend Senior')).toBe(0.75);
+    expect(titleOverlap('Gardener', 'Alpha Developer')).toBe(0);
+    expect(titleOverlap('', 'Alpha')).toBe(0);
+  });
+});
 
 describe('companyKey', () => {
   it('is null unless company, title and city are all present', () => {

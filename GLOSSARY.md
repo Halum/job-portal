@@ -6,7 +6,7 @@ Terms name things in code, database, tests and issues. Source of truth: the spec
 - **Posting**: one raw listing from one Source, identified by source id plus the Source's own posting id.
 - **Job**: the deduplicated thing the user tracks, made of one or more Postings.
 - **Rule merge**: automatic attachment of a Posting to an existing Job when its company key or URL key matches exactly one Job.
-- **AI merge**: a merge proposed by the AI check for a near match, stored as an ai_merge Review item and applied only once confirmed.
+- **AI merge**: a merge proposed by the AI check for a near match or a merge conflict, stored as an ai_merge Review item and applied only once confirmed. Confirming folds the newer Job into the older one (the folded Job is hidden, keeps its keys as aliases and points at the Job it went into through `merged_into`).
 - **Split**: moving Postings out of a Job into a new Job, which records a Never-merge pair.
 - **Board directory**: the shared list of ATS company boards (Greenhouse, Lever, Ashby), with a mark for boards that have posted in Germany or remote EU.
 - **Watchlist**: the user's own list of boards that narrows which directory boards are fetched.
@@ -34,6 +34,8 @@ Terms name things in code, database, tests and issues. Source of truth: the spec
 - **Timeline event**: one recorded state change (from, to, actor, evidence, time), the only write path for any state change.
 - **Gone cold**: the status the daily check gives an application with no state-changing or Gmail event for N days.
 - **Processed-mail ledger**: the record of Gmail message ids already handled, keyed by user id and message id, so a mail is never applied twice.
+- **Merge check**: a stored answer "not the same job" for a pair of Jobs, so the AI is not asked about that pair again.
+- **Fold**: what a confirmed AI merge does to the Job that does not survive: its Postings move to the surviving Job (the one with an application, else the older), and its row stays hidden with `merged_into`, keeping its keys as aliases.
 - **Never-merge pair**: a recorded (Posting, Job) pair that rule and AI merges must skip, created by a Split.
 - **Manual job**: a Job the user adds by hand (add_job) as a Posting with source `manual`, which still goes through dedupe.
 - **Board URL resolver**: `resolveBoardUrl`, the pure first step of add_board: it recognises a Greenhouse, Lever or Ashby careers URL (https, exact host, no credentials) and extracts the ATS, the board id and Lever's EU host, or returns null. Verifying the board with one fetch and adding it to the directory and Watchlist are the later steps of add_board.

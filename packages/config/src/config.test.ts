@@ -22,6 +22,8 @@ describe('loadConfig', () => {
       boardRequestsPerSecond: 2,
       ai: null,
       aiMaxCallsPerRun: 50,
+      aiMergeJaccard: 0.6,
+      aiMergeMaxCallsPerRun: 20,
       alertThreshold: 70,
     });
   });
@@ -200,6 +202,26 @@ describe('loadConfig', () => {
       for (const bad of ['0', '-1', '1.5', 'abc']) {
         expect(() => loadConfig({ ...valid, AI_MAX_CALLS_PER_RUN: bad })).toThrow(
           'AI_MAX_CALLS_PER_RUN',
+        );
+      }
+    });
+  });
+
+  describe('AI merge', () => {
+    it('defaults to 0.6 overlap and 20 checks a run, and validates both', () => {
+      expect(loadConfig(valid).aiMergeJaccard).toBe(0.6);
+      expect(loadConfig(valid).aiMergeMaxCallsPerRun).toBe(20);
+      expect(loadConfig({ ...valid, AI_MERGE_JACCARD: '1' }).aiMergeJaccard).toBe(1);
+      expect(loadConfig({ ...valid, AI_MERGE_MAX_CALLS_PER_RUN: '3' }).aiMergeMaxCallsPerRun).toBe(
+        3,
+      );
+      expect(loadConfig({ ...valid, AI_MERGE_JACCARD: '0' }).aiMergeJaccard).toBe(0);
+      for (const bad of ['1.1', '-1', 'abc']) {
+        expect(() => loadConfig({ ...valid, AI_MERGE_JACCARD: bad })).toThrow('AI_MERGE_JACCARD');
+      }
+      for (const bad of ['0', '1.5', 'abc']) {
+        expect(() => loadConfig({ ...valid, AI_MERGE_MAX_CALLS_PER_RUN: bad })).toThrow(
+          'AI_MERGE_MAX_CALLS_PER_RUN',
         );
       }
     });

@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, gte, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { Db, DbTx } from '@job-portal/db';
 import type { Logger } from '@job-portal/shared';
 import type { Source } from './source';
@@ -106,8 +106,6 @@ export interface Discovery {
     jobId: string,
     postingIds: string[],
   ) => Promise<{ jobId: string; splitCount: number }>;
-  /** Postings whose two keys hit different Jobs, kept for the AI merge ticket. */
-  listMergeConflicts: (userId: string) => Promise<MergeConflict[]>;
   /**
    * Takes the Job row lock (select for update) inside the caller's transaction; null when the user has no
    * such Job. The Tracker takes it before every Timeline write.
@@ -131,12 +129,6 @@ export interface AddJobInput {
   company?: string | null;
   city?: string | null;
   url: string;
-}
-
-export interface MergeConflict {
-  postingId: string;
-  jobIds: string[];
-  createdAt: Date;
 }
 
 const DEFAULT_LIMIT = 50;
@@ -195,6 +187,7 @@ async function ingest(
     company: p.company ?? null,
     location: p.location ?? null,
     url: p.url,
+    urlKey: urlKey(p.url),
     postedAt: p.postedAt ?? null,
     raw: p.raw,
   };
@@ -222,17 +215,33 @@ async function ingest(
     const keyMatch = or(
       ck ? eq(jobs.companyKey, ck) : undefined,
       uk ? eq(jobs.urlKey, uk) : undefined,
+      // Any Posting of a Job with this URL counts, not only the Posting that created the Job, so a Job that
+      // took a copy by company key also takes a later one that shares the copy's URL.
+      uk
+        ? inArray(
+            jobs.id,
+            tx
+              .select({ id: postings.jobId })
+              .from(postings)
+              .where(and(eq(postings.userId, userId), eq(postings.urlKey, uk))),
+          )
+        : undefined,
     );
     let jobId: string | undefined;
     let spare = false;
     let conflict: string[] = [];
     for (let attempt = 0; !jobId && attempt < MAX_ATTEMPTS; attempt += 1) {
-      const hits = keyMatch
+      const found = keyMatch
         ? await tx
-            .select({ id: jobs.id })
+            .select({ id: jobs.id, into: jobs.mergedInto })
             .from(jobs)
             .where(and(eq(jobs.userId, userId), keyMatch))
+            // A share lock waits for an AI merge that is moving this Job's keys and Postings, then rechecks the
+            // keys, so a Posting is never attached to a Job that was just folded into another.
+            .for('share')
         : [];
+      // A Job folded into another by a confirmed AI merge still holds its keys: it stands for the Job it went into.
+      const hits = [...new Set(found.map((h) => h.into ?? h.id))].map((id) => ({ id }));
       if (hits.length === 1) {
         jobId = hits[0]?.id; // rule merge (a Dismissed Job takes the Posting too)
       } else if (hits.length > 1) {
@@ -286,7 +295,7 @@ async function newJob(
 
 /**
  * ponytail: postings are ingested one by one (one or two queries each); polls hold tens of postings, not
- * thousands. Rule merge only: AI merge arrives with its own ticket.
+ * thousands. Rule merge only here; the AI merge is in ai-merge.ts.
  */
 /** Postgres class 22 (data exception) and 23 (constraint violation) are about the row sent, not the connection. */
 function aboutThisPosting(err: unknown): boolean {
@@ -348,7 +357,7 @@ export function createDiscovery(db: Db, sources: Source[], logger?: Logger): Dis
         const [job] = await tx
           .select({ id: jobs.id })
           .from(jobs)
-          .where(and(eq(jobs.userId, userId), eq(jobs.id, jobId)))
+          .where(and(eq(jobs.userId, userId), eq(jobs.id, jobId), isNull(jobs.mergedInto)))
           .for('update');
         if (!job) throw new DiscoveryError(`No Job ${jobId}`);
         const own = await tx
@@ -379,18 +388,6 @@ export function createDiscovery(db: Db, sources: Source[], logger?: Logger): Dis
       });
     },
 
-    async listMergeConflicts(userId) {
-      return db
-        .select({
-          postingId: mergeConflicts.postingId,
-          jobIds: mergeConflicts.jobIds,
-          createdAt: mergeConflicts.createdAt,
-        })
-        .from(mergeConflicts)
-        .where(eq(mergeConflicts.userId, userId))
-        .orderBy(asc(mergeConflicts.createdAt));
-    },
-
     async listMatchable(userId, ids) {
       if (ids && ids.length === 0) return [];
       const rows = await db
@@ -400,6 +397,7 @@ export function createDiscovery(db: Db, sources: Source[], logger?: Logger): Dis
         .where(
           and(
             eq(jobs.userId, userId),
+            isNull(jobs.mergedInto),
             ids ? inArray(jobs.id, ids) : undefined,
             inArray(jobs.discoveryState, ['new', 'shortlisted']),
           ),
@@ -421,10 +419,11 @@ export function createDiscovery(db: Db, sources: Source[], logger?: Logger): Dis
     },
 
     async lockJob(tx, userId, jobId) {
+      // A Job folded into another by an AI merge is gone for every writer.
       const [job] = await tx
         .select({ discoveryState: jobs.discoveryState })
         .from(jobs)
-        .where(and(eq(jobs.userId, userId), eq(jobs.id, jobId)))
+        .where(and(eq(jobs.userId, userId), eq(jobs.id, jobId), isNull(jobs.mergedInto)))
         .for('update');
       return job ?? null;
     },
@@ -448,6 +447,7 @@ export function createDiscovery(db: Db, sources: Source[], logger?: Logger): Dis
         .where(
           and(
             eq(jobs.userId, userId),
+            isNull(jobs.mergedInto),
             cursor ? gt(jobs.id, cursor) : undefined,
             discoveredSince ? gte(jobs.createdAt, discoveredSince) : undefined,
             discoveryState ? eq(jobs.discoveryState, discoveryState) : undefined,
@@ -487,7 +487,7 @@ export function createDiscovery(db: Db, sources: Source[], logger?: Logger): Dis
       const [job] = await db
         .select()
         .from(jobs)
-        .where(and(eq(jobs.userId, userId), eq(jobs.id, jobId)));
+        .where(and(eq(jobs.userId, userId), eq(jobs.id, jobId), isNull(jobs.mergedInto)));
       if (!job) return null;
       const ps = await db
         .select({ ...postingColumns, raw: postings.raw })
