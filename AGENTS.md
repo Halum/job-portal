@@ -34,8 +34,9 @@ Search and tracking system for job postings: sources are polled on a schedule, p
 - `packages/db`: Drizzle on postgres.js client and `runMigrationsWithLock` (advisory lock, one tracking table per module in schema `drizzle`).
 - `packages/accounts`: schema `accounts`, users table, seed, constant-time bearer token check (`MCP_BEARER_TOKEN`).
 - `packages/discovery`: schema `discovery`: Postings (unique per user, source, source posting id) and Jobs (one per Posting for now). Source interface, the Bundesagentur source (`src/sources/`, recorded fixtures in `src/sources/fixtures/`), `poll`, `listJobs`, `getJob`.
-- `packages/pipeline`: schema `pipeline`: Runs (counts, status running / completed / completed_with_errors / failed). `execute` polls one source through Discovery; the database allows one running run per user and source; `failStaleRuns` on worker start.
-- `apps/api`: stateless Streamable HTTP MCP endpoint at `/mcp`, bearer auth, tools `whoami`, `list_jobs`, `get_job`, `get_run_history` (`src/tools.ts`). Migrates and seeds on start; read only, it never polls.
+- `packages/pipeline`: schema `pipeline`: Runs (counts, status running / completed / completed_with_errors / failed). `execute` polls one source through Discovery; the database allows one running run per user and source; `failStaleRuns` on worker start, and a run still running after `staleAfterMs` (default one hour) is failed by the next `execute` for that source.
+- `packages/migrations`: `allMigrations`, the one ordered list of every module's migrations (api, worker and tests apply it).
+- `apps/api`: stateless Streamable HTTP MCP endpoint at `/mcp`, bearer auth, tools `whoami`, `list_jobs`, `get_job`, `get_run_history` (`src/tools.ts`). `get_run_history` includes `errorCount`. Package entry exports `createApiServer`, so the worker's end-to-end test depends on `@job-portal/api` explicitly. Migrates and seeds on start; read only, it never polls.
 - `apps/worker`: migrates, seeds, marks stale runs failed, then schedules one BullMQ Job Scheduler per configured source (scheduler id = source id) and runs each tick through the Pipeline. `src/tracer.integration.test.ts` is the end-to-end test through MCP.
 
 Packages export TypeScript source directly (no build step); processes run with `tsx`.

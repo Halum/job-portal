@@ -1,19 +1,16 @@
-import { createDiscovery, discoveryMigrations } from '@job-portal/discovery';
-import { createPipeline, pipelineMigrations } from '@job-portal/pipeline';
-import { accountsMigrations, createAccounts } from '@job-portal/accounts';
+import { createAccounts } from '@job-portal/accounts';
 import { loadConfig } from '@job-portal/config';
 import { createDb, runMigrationsWithLock } from '@job-portal/db';
+import { createDiscovery } from '@job-portal/discovery';
+import { allMigrations } from '@job-portal/migrations';
+import { createPipeline } from '@job-portal/pipeline';
 import { createLogger } from '@job-portal/shared';
 import { createApiServer } from './server';
 
 const config = loadConfig();
 const logger = createLogger({ level: config.logLevel, name: 'api' });
 
-await runMigrationsWithLock(
-  config.databaseUrl,
-  [accountsMigrations, discoveryMigrations, pipelineMigrations],
-  logger,
-);
+await runMigrationsWithLock(config.databaseUrl, allMigrations, logger);
 const { db } = createDb(config.databaseUrl);
 const accounts = createAccounts(db, config.mcpBearerToken);
 await accounts.seedUser(config.seedUserEmail);

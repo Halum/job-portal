@@ -6,16 +6,13 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testconta
 import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redis';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { accountsMigrations, createAccounts } from '@job-portal/accounts';
+import { createAccounts } from '@job-portal/accounts';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
-import {
-  createBundesagenturSource,
-  createDiscovery,
-  discoveryMigrations,
-} from '@job-portal/discovery';
-import { createPipeline, pipelineMigrations } from '@job-portal/pipeline';
+import { createBundesagenturSource, createDiscovery } from '@job-portal/discovery';
+import { allMigrations } from '@job-portal/migrations';
+import { createPipeline } from '@job-portal/pipeline';
 import { createLogger } from '@job-portal/shared';
-import { createApiServer } from '../../api/src/server';
+import { createApiServer } from '@job-portal/api';
 import { startWorker, type WorkerHandle } from './worker';
 
 // Tracer bullet: Bundesagentur (recorded response) -> BullMQ schedule -> Pipeline -> Discovery
@@ -48,11 +45,7 @@ describe('Bundesagentur source to MCP list_jobs', () => {
       new PostgreSqlContainer('postgres:16-alpine').start(),
       new RedisContainer('redis:7-alpine').start(),
     ]);
-    await runMigrationsWithLock(pg.getConnectionUri(), [
-      accountsMigrations,
-      discoveryMigrations,
-      pipelineMigrations,
-    ]);
+    await runMigrationsWithLock(pg.getConnectionUri(), allMigrations);
     handle = createDb(pg.getConnectionUri());
     const accounts = createAccounts(handle.db, TOKEN);
     const user = await accounts.seedUser('user@example.invalid');

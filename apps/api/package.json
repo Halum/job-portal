@@ -3,8 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/server.ts"
+  },
   "dependencies": {
     "@job-portal/accounts": "workspace:*",
+    "@job-portal/migrations": "workspace:*",
     "@job-portal/config": "workspace:*",
     "@job-portal/db": "workspace:*",
     "@job-portal/discovery": "workspace:*",

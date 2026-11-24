@@ -7,6 +7,9 @@ const API_URL = 'https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6
 const DETAIL_API_URL = 'https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobdetails';
 const API_KEY = 'jobboerse-jobsuche'; // public key documented for this endpoint
 
+// ponytail: a single page of results, as on main; add paging with a page cap when one query needs more.
+const REQUEST_TIMEOUT_MS = 30_000;
+
 // Only these query parameters reach the API.
 const ALLOWED_PARAMS = ['wo', 'umkreis', 'arbeitszeit', 'angebotsart', 'sort'];
 
@@ -51,7 +54,10 @@ export function createBundesagenturSource({
   fetch: fetchImpl = fetch,
 }: BundesagenturOptions): Source {
   const get = async (url: string): Promise<unknown> => {
-    const res = await fetchImpl(url, { headers: { 'X-API-Key': API_KEY } });
+    const res = await fetchImpl(url, {
+      headers: { 'X-API-Key': API_KEY },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     if (!res.ok) throw new Error(`bundesagentur API returned HTTP ${String(res.status)}`);
     return res.json();
   };

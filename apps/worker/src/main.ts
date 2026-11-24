@@ -1,25 +1,21 @@
-import { accountsMigrations, createAccounts } from '@job-portal/accounts';
+import { createAccounts } from '@job-portal/accounts';
 import { loadConfig } from '@job-portal/config';
 import { createDb, runMigrationsWithLock } from '@job-portal/db';
 import {
   BUNDESAGENTUR,
   createBundesagenturSource,
   createDiscovery,
-  discoveryMigrations,
   type Source,
 } from '@job-portal/discovery';
-import { createPipeline, pipelineMigrations } from '@job-portal/pipeline';
+import { allMigrations } from '@job-portal/migrations';
+import { createPipeline } from '@job-portal/pipeline';
 import { createLogger } from '@job-portal/shared';
 import { startWorker, type ScheduledSource } from './worker';
 
 const config = loadConfig();
 const logger = createLogger({ level: config.logLevel, name: 'worker' });
 
-await runMigrationsWithLock(
-  config.databaseUrl,
-  [accountsMigrations, discoveryMigrations, pipelineMigrations],
-  logger,
-);
+await runMigrationsWithLock(config.databaseUrl, allMigrations, logger);
 const { db } = createDb(config.databaseUrl);
 const user = await createAccounts(db, config.mcpBearerToken).seedUser(config.seedUserEmail);
 

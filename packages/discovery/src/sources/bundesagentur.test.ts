@@ -15,11 +15,15 @@ const fixture = JSON.parse(
 function fakeFetch(
   status: number,
   body: unknown,
-): { fetch: typeof fetch; calls: { url: string; key: string | null }[] } {
-  const calls: { url: string; key: string | null }[] = [];
+): { fetch: typeof fetch; calls: { url: string; key: string | null; signal: boolean }[] } {
+  const calls: { url: string; key: string | null; signal: boolean }[] = [];
   const fakeImpl = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    calls.push({ url, key: new Headers(init?.headers).get('X-API-Key') });
+    calls.push({
+      signal: init?.signal != null,
+      url,
+      key: new Headers(init?.headers).get('X-API-Key'),
+    });
     return Promise.resolve(new Response(JSON.stringify(body), { status }));
   };
   return { fetch: fakeImpl, calls };
@@ -45,6 +49,7 @@ describe('bundesagentur source', () => {
     expect(postings[0]?.postedAt).toEqual(new Date('2026-07-09'));
     expect(postings[0]?.raw).toEqual(fixture.ergebnisliste[0]);
     expect(calls).toHaveLength(1);
+    expect(calls[0]?.signal).toBe(true); // outbound requests carry a timeout
     expect(calls[0]?.key).toBe('jobboerse-jobsuche');
     expect(new URL(calls[0]?.url ?? '').searchParams.get('wo')).toBe('Musterstadt');
     expect(new URL(calls[0]?.url ?? '').searchParams.get('umkreis')).toBe('25');

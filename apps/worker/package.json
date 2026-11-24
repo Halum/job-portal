@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@job-portal/accounts": "workspace:*",
+    "@job-portal/migrations": "workspace:*",
     "@job-portal/config": "workspace:*",
     "@job-portal/db": "workspace:*",
     "@job-portal/discovery": "workspace:*",
@@ -14,6 +15,7 @@
     "ioredis": "5.11.1"
   },
   "devDependencies": {
+    "@job-portal/api": "workspace:*",
     "@modelcontextprotocol/sdk": "1.32.2"
   }
 }

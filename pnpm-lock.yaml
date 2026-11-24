@@ -67,6 +67,9 @@ importers:
       '@job-portal/discovery':
         specifier: workspace:*
         version: link:../../packages/discovery
+      '@job-portal/migrations':
+        specifier: workspace:*
+        version: link:../../packages/migrations
       '@job-portal/pipeline':
         specifier: workspace:*
         version: link:../../packages/pipeline
@@ -94,6 +97,9 @@ importers:
       '@job-portal/discovery':
         specifier: workspace:*
         version: link:../../packages/discovery
+      '@job-portal/migrations':
+        specifier: workspace:*
+        version: link:../../packages/migrations
       '@job-portal/pipeline':
         specifier: workspace:*
         version: link:../../packages/pipeline
@@ -107,6 +113,9 @@ importers:
         specifier: 5.11.1
         version: 5.11.1
     devDependencies:
+      '@job-portal/api':
+        specifier: workspace:*
+        version: link:../api
       '@modelcontextprotocol/sdk':
         specifier: 1.32.2
         version: 1.32.2(zod@4.6.7)
@@ -166,6 +175,21 @@ importers:
       drizzle-kit:
         specifier: 0.31.11
         version: 0.31.11
+
+  packages/migrations:
+    dependencies:
+      '@job-portal/accounts':
+        specifier: workspace:*
+        version: link:../accounts
+      '@job-portal/db':
+        specifier: workspace:*
+        version: link:../db
+      '@job-portal/discovery':
+        specifier: workspace:*
+        version: link:../discovery
+      '@job-portal/pipeline':
+        specifier: workspace:*
+        version: link:../pipeline
 
   packages/pipeline:
     dependencies:

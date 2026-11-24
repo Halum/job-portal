@@ -62,7 +62,7 @@ export async function startWorker({
       await queue.upsertJobScheduler(
         sourceId,
         { every: intervalMinutes * 60_000 },
-        { name: sourceId, data: { sourceId } },
+        { name: sourceId },
       );
     }
 

@@ -5,13 +5,9 @@ import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redi
 import { Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
-import {
-  createBundesagenturSource,
-  createDiscovery,
-  discoveryMigrations,
-  type Discovery,
-} from '@job-portal/discovery';
-import { createPipeline, pipelineMigrations, type Pipeline } from '@job-portal/pipeline';
+import { createBundesagenturSource, createDiscovery, type Discovery } from '@job-portal/discovery';
+import { allMigrations } from '@job-portal/migrations';
+import { createPipeline, type Pipeline } from '@job-portal/pipeline';
 import { createLogger } from '@job-portal/shared';
 import { startWorker, type WorkerHandle } from './worker';
 
@@ -51,7 +47,7 @@ describe('worker against real Postgres and Redis', () => {
       new PostgreSqlContainer('postgres:16-alpine').start(),
       new RedisContainer('redis:7-alpine').start(),
     ]);
-    await runMigrationsWithLock(pg.getConnectionUri(), [discoveryMigrations, pipelineMigrations]);
+    await runMigrationsWithLock(pg.getConnectionUri(), allMigrations);
     handle = createDb(pg.getConnectionUri());
     discovery = createDiscovery(handle.db, [
       createBundesagenturSource({ query: 'wo=Musterstadt', fetch: fakeFetch }),

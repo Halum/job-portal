@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import type { ModuleMigrations } from '@job-portal/db';
 
 export * from './pipeline';
-export type { RunStatus } from './schema';
+export { RUN_STATUSES, type RunStatus } from './schema';
 
 export const pipelineMigrations: ModuleMigrations = {
   name: 'pipeline',

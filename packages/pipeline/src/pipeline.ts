@@ -1,4 +1,4 @@
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import type { Db } from '@job-portal/db';
 import type { Discovery } from '@job-portal/discovery';
 import { runs, type RunStatus } from './schema';
@@ -37,14 +37,44 @@ const columns = {
   finishedAt: runs.finishedAt,
 };
 
+export interface PipelineOptions {
+  /**
+   * A run still "running" after this long is treated as lost (its worker died or its status write
+   * failed) and is failed by the next execute for the same source. Default one hour.
+   */
+  staleAfterMs?: number;
+}
+
+const DEFAULT_STALE_AFTER_MS = 60 * 60 * 1000;
+
 /**
  * ponytail: the only stage is Discovery (fetch and store). Matching, Review and Notifications
  * join the run in later tickets. failStaleRuns assumes one worker process; with several, it would
  * fail another worker's live run.
  */
-export function createPipeline(db: Db, discovery: Pick<Discovery, 'poll'>): Pipeline {
+export function createPipeline(
+  db: Db,
+  discovery: Pick<Discovery, 'poll'>,
+  { staleAfterMs = DEFAULT_STALE_AFTER_MS }: PipelineOptions = {},
+): Pipeline {
   return {
     async execute(userId, sourceId) {
+      // A lost run would otherwise hold the one-active-run index until the next worker start.
+      await db
+        .update(runs)
+        .set({
+          status: 'failed',
+          errors: ['run did not finish within the time bound'],
+          finishedAt: sql`now()`,
+        })
+        .where(
+          and(
+            eq(runs.userId, userId),
+            eq(runs.sourceId, sourceId),
+            eq(runs.status, 'running'),
+            lt(runs.startedAt, sql`now() - ${staleAfterMs} * interval '1 millisecond'`),
+          ),
+        );
       const [started] = await db
         .insert(runs)
         .values({ userId, sourceId, status: 'running' })

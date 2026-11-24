@@ -90,6 +90,22 @@ describe('pipeline against real Postgres', () => {
     expect((await pipeline().execute(USER, 'src-e'))?.status).toBe('completed');
   });
 
+  it('recovers a source whose run never finished: the next tick fails the old run after the bound', async () => {
+    poll = () => new Promise(() => undefined); // a run that never finishes and is never marked
+    void pipeline().execute(USER, 'src-f');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(await pipeline().execute(USER, 'src-f')).toBeNull(); // within the bound it still blocks
+
+    poll = () => Promise.resolve({ fetched: 1, newPostings: 1, errors: [] });
+    const patient = createPipeline(handle.db, { poll: (u, s) => poll(u, s) }, { staleAfterMs: 50 });
+    expect((await patient.execute(USER, 'src-f'))?.status).toBe('completed');
+    const runs = (await patient.listRuns(USER, 50)).filter((r) => r.sourceId === 'src-f');
+    expect(runs.map((r) => r.status).sort()).toEqual(['completed', 'failed']);
+    expect(runs.find((r) => r.status === 'failed')?.errors).toEqual([
+      'run did not finish within the time bound',
+    ]);
+  });
+
   it('lists the newest runs first, limited, scoped to the user', async () => {
     const runs = await pipeline().listRuns(USER, 2);
     expect(runs).toHaveLength(2);

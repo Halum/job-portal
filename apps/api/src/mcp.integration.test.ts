@@ -5,14 +5,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { accountsMigrations, createAccounts } from '@job-portal/accounts';
+import { createAccounts } from '@job-portal/accounts';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
-import {
-  createBundesagenturSource,
-  createDiscovery,
-  discoveryMigrations,
-} from '@job-portal/discovery';
-import { createPipeline, pipelineMigrations } from '@job-portal/pipeline';
+import { createBundesagenturSource, createDiscovery } from '@job-portal/discovery';
+import { allMigrations } from '@job-portal/migrations';
+import { createPipeline } from '@job-portal/pipeline';
 import { createLogger } from '@job-portal/shared';
 import { createApiServer } from './server';
 
@@ -38,11 +35,7 @@ describe('MCP endpoint over real HTTP', () => {
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16-alpine').start();
-    await runMigrationsWithLock(container.getConnectionUri(), [
-      accountsMigrations,
-      discoveryMigrations,
-      pipelineMigrations,
-    ]);
+    await runMigrationsWithLock(container.getConnectionUri(), allMigrations);
     handle = createDb(container.getConnectionUri());
     const accounts = createAccounts(handle.db, TOKEN);
     userId = (await accounts.seedUser(EMAIL)).id;
@@ -114,6 +107,19 @@ describe('MCP endpoint over real HTTP', () => {
     await client.close();
   });
 
+  it('list_jobs refuses a malformed cursor with a clean tool error', async () => {
+    const client = await connect();
+    const outcome = await client
+      .callTool({ name: 'list_jobs', arguments: { cursor: 'not-a-uuid' } })
+      .catch((err: unknown) => err);
+    const message = JSON.stringify(outcome instanceof Error ? outcome.message : outcome);
+    expect(message).toMatch(/cursor/i);
+    expect(message).not.toMatch(/invalid input syntax|postgres/i);
+    // The endpoint still works afterwards.
+    expect((await client.callTool({ name: 'list_jobs', arguments: {} })).isError).toBeFalsy();
+    await client.close();
+  });
+
   it('get_job returns a Job with the raw posting, and an error for an unknown id', async () => {
     const client = await connect();
     const { jobs } = (await client.callTool({ name: 'list_jobs', arguments: {} }))
@@ -147,6 +153,7 @@ describe('MCP endpoint over real HTTP', () => {
         fetched: 5,
         newPostings: 5,
         errors: [],
+        errorCount: 0,
       }),
     ]);
     await client.close();

@@ -54,6 +54,14 @@ export interface Discovery {
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
+const jobFields = (j: typeof jobs.$inferSelect): Omit<JobView, 'postings'> => ({
+  id: j.id,
+  title: j.title,
+  company: j.company,
+  location: j.location,
+  createdAt: j.createdAt,
+});
+
 const postingColumns = {
   sourceId: postings.sourceId,
   sourcePostingId: postings.sourcePostingId,
@@ -67,7 +75,7 @@ const postingColumns = {
 };
 
 /**
- * ponytail: one Job per Posting for now and one query per posting. Dedupe (rule and AI merges)
+ * ponytail: one Job per Posting for now and one or two queries per posting. Dedupe (rule and AI merges)
  * and batching arrive with the Discovery dedupe ticket; polls hold tens of postings, not thousands.
  */
 export function createDiscovery(db: Db, sources: Source[]): Discovery {
@@ -82,11 +90,6 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
       let newPostings = 0;
       await db.transaction(async (tx) => {
         for (const p of fetched) {
-          const [job] = await tx
-            .insert(jobs)
-            .values({ userId, title: p.title, company: p.company, location: p.location })
-            .returning({ id: jobs.id });
-          if (!job) throw new Error('job insert returned no row');
           const values = {
             title: p.title,
             company: p.company ?? null,
@@ -95,9 +98,25 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
             postedAt: p.postedAt ?? null,
             raw: p.raw,
           };
-          // Insert, or update on the identity (user, source, source posting id). xmax is 0 only
-          // for a row this statement inserted.
-          const [row] = await tx
+          const identity = and(
+            eq(postings.userId, userId),
+            eq(postings.sourceId, sourceId),
+            eq(postings.sourcePostingId, p.sourcePostingId),
+          );
+          const touch = (): Promise<{ id: string }[]> =>
+            tx
+              .update(postings)
+              .set({ ...values, lastSeenAt: sql`now()` })
+              .where(identity)
+              .returning({ id: postings.id });
+
+          if ((await touch()).length > 0) continue; // seen before: no new Job
+          const [job] = await tx
+            .insert(jobs)
+            .values({ userId, title: p.title, company: p.company, location: p.location })
+            .returning({ id: jobs.id });
+          if (!job) throw new Error('job insert returned no row');
+          const inserted = await tx
             .insert(postings)
             .values({
               userId,
@@ -106,13 +125,15 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
               jobId: job.id,
               ...values,
             })
-            .onConflictDoUpdate({
-              target: [postings.userId, postings.sourceId, postings.sourcePostingId],
-              set: { ...values, lastSeenAt: sql`now()` },
-            })
-            .returning({ inserted: sql<boolean>`(xmax = 0)` });
-          if (row?.inserted) newPostings += 1;
-          else await tx.delete(jobs).where(eq(jobs.id, job.id)); // seen before: drop the spare Job
+            .onConflictDoNothing()
+            .returning({ id: postings.id });
+          if (inserted.length > 0) {
+            newPostings += 1;
+          } else {
+            // A concurrent poll inserted it first: drop our spare Job and update theirs.
+            await tx.delete(jobs).where(eq(jobs.id, job.id));
+            await touch();
+          }
         }
       });
       return { fetched: fetched.length, newPostings, errors };
@@ -144,11 +165,7 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
         : [];
       return {
         jobs: page.map((j) => ({
-          id: j.id,
-          title: j.title,
-          company: j.company,
-          location: j.location,
-          createdAt: j.createdAt,
+          ...jobFields(j),
           postings: ps.filter((p) => p.jobId === j.id).map(({ jobId: _jobId, ...p }) => p),
         })),
         nextCursor: rows.length > size ? (page.at(-1)?.id ?? null) : null,
@@ -166,14 +183,7 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
         .from(postings)
         .where(and(eq(postings.userId, userId), eq(postings.jobId, jobId)))
         .orderBy(asc(postings.firstSeenAt));
-      return {
-        id: job.id,
-        title: job.title,
-        company: job.company,
-        location: job.location,
-        createdAt: job.createdAt,
-        postings: ps,
-      };
+      return { ...jobFields(job), postings: ps };
     },
   };
 }
