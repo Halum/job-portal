@@ -1,6 +1,8 @@
 import { crc32 } from 'node:zlib';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { createAccounts } from '@job-portal/accounts';
@@ -63,13 +65,14 @@ describe('Documents through the API', () => {
   let server: Server;
   let base: string;
   let documents: Documents;
+  let userId: string;
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16-alpine').start();
     await runMigrationsWithLock(container.getConnectionUri(), allMigrations);
     handle = createDb(container.getConnectionUri());
     const accounts = createAccounts(handle.db, TOKEN);
-    await accounts.seedUser('user@example.invalid');
+    userId = (await accounts.seedUser('user@example.invalid')).id;
     const discovery = createDiscovery(handle.db, []);
     documents = createDocuments(handle.db);
     server = createApiServer({
@@ -203,6 +206,190 @@ describe('Documents through the API', () => {
       ).toBe(404);
       expect((await fetch(`${base}/files/not-a-uuid`, { headers: auth })).status).toBe(404);
       expect((await fetch(`${base}/files`, { headers: auth })).status).toBe(405);
+    });
+  });
+  describe('MCP tools', () => {
+    let client: Client;
+    beforeAll(async () => {
+      client = new Client({ name: 'test', version: '0.0.0' });
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+          requestInit: { headers: auth },
+        }),
+      );
+    });
+    afterAll(async () => {
+      await client.close();
+    });
+
+    type Bank = {
+      masterDocuments: {
+        masterResume: { id: string; filename: string } | null;
+        masterCoverLetter: { id: string } | null;
+      };
+      workExperiences: { id: string; role: string; points: { id: string }[] }[];
+    };
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      const r = await client.callTool({ name, arguments: args });
+      return { isError: r.isError === true, out: r.structuredContent };
+    };
+    const readBank = async (): Promise<Bank> => (await call('get_career_bank')).out as Bank;
+    const uploaded = async (kind: string, filename: string, body: Uint8Array | string) =>
+      ((await (await upload(kind, filename, body)).json()) as { id: string }).id;
+
+    it('registers the tools', async () => {
+      const names = (await client.listTools()).tools.map((x) => x.name);
+      expect(names).toEqual(
+        expect.arrayContaining(['register_master_document', 'save_career_bank', 'get_career_bank']),
+      );
+    });
+
+    it('registers an uploaded file as the current Master and keeps the older upload', async () => {
+      const first = await uploaded('master_resume', 'alt.md', RESUME_MD);
+      const second = await uploaded('master_resume', 'neu.pdf', PDF);
+      const letter = await uploaded('master_cover_letter', 'brief.txt', 'Guten Tag');
+
+      const r1 = await call('register_master_document', { kind: 'master_resume', fileId: first });
+      expect(r1.isError).toBe(false);
+      expect((r1.out as { file: unknown }).file).toMatchObject({ id: first, filename: 'alt.md' });
+      expect((await readBank()).masterDocuments.masterResume?.id).toBe(first);
+
+      await call('register_master_document', { kind: 'master_resume', fileId: second });
+      await call('register_master_document', { kind: 'master_cover_letter', fileId: letter });
+      const bank = await readBank();
+      expect(bank.masterDocuments.masterResume).toMatchObject({ id: second, filename: 'neu.pdf' });
+      expect(bank.masterDocuments.masterCoverLetter).toMatchObject({ id: letter });
+      expect((await fetch(`${base}/files/${first}`, { headers: auth })).status).toBe(200);
+    });
+
+    it("refuses a file of the wrong kind, another user's file and an unknown id the same way", async () => {
+      const photo = await uploaded('photo', 'foto.png', PNG);
+      const foreign = (
+        await documents.storeFile(OTHER_USER, {
+          kind: 'master_resume',
+          filename: 'fremd.md',
+          bytes: Buffer.from(RESUME_MD),
+        })
+      ).id;
+      const unknown = '00000000-0000-4000-8000-000000000998';
+      const refusals = await Promise.all(
+        [photo, foreign, unknown].map((fileId) =>
+          client.callTool({
+            name: 'register_master_document',
+            arguments: { kind: 'master_resume', fileId },
+          }),
+        ),
+      );
+      expect(refusals.map((r) => r.isError)).toEqual([true, true, true]);
+      const [, foreignRefusal, unknownRefusal] = refusals.map(
+        (r) => (r.content as { text: string }[])[0]?.text,
+      );
+      expect(foreignRefusal).toBe(unknownRefusal);
+    });
+
+    const experience = (role: string, points: string[]) => ({
+      role,
+      organisation: 'Muster Küche GmbH',
+      start: '2020-03',
+      end: null,
+      place: 'Musterstadt',
+      points: points.map((text) => ({ text, skills: ['kochen'] })),
+    });
+
+    it('imports Work experiences with Experience points and reads them back in order', async () => {
+      const first = await call('save_career_bank', {
+        workExperiences: [
+          experience('Koch', ['Plante die Speisekarte für 80 Gäste', 'Schulte zwei Auszubildende']),
+          experience('Küchenhilfe', []),
+        ],
+      });
+      expect(first.isError).toBe(false);
+      expect(first.out).toEqual({ workExperiences: 2, experiencePoints: 2 });
+
+      await call('save_career_bank', {
+        workExperiences: [experience('Souschef', ['Bestellte Waren'])],
+      });
+
+      const bank = await readBank();
+      expect(bank.workExperiences.map((x: { role: string }) => x.role)).toEqual([
+        'Koch',
+        'Küchenhilfe',
+        'Souschef',
+      ]);
+      expect(bank.workExperiences[0]).toEqual({
+        id: expect.any(String) as string,
+        role: 'Koch',
+        organisation: 'Muster Küche GmbH',
+        start: '2020-03',
+        end: null,
+        place: 'Musterstadt',
+        points: [
+          {
+            id: expect.any(String) as string,
+            text: 'Plante die Speisekarte für 80 Gäste',
+            skills: ['kochen'],
+          },
+          {
+            id: expect.any(String) as string,
+            text: 'Schulte zwei Auszubildende',
+            skills: ['kochen'],
+          },
+        ],
+      });
+      expect(bank.workExperiences[1]?.points).toEqual([]);
+    });
+
+    it('records every imported item as a Career bank revision with reason import', async () => {
+      const bank = await readBank();
+      const job = bank.workExperiences[0];
+      if (!job) throw new Error('no Work experience stored');
+      const [jobRevisions, pointRevisions] = await Promise.all([
+        documents.listRevisions(userId, job.id),
+        documents.listRevisions(userId, job.points[0]?.id ?? ''),
+      ]);
+      expect(jobRevisions).toEqual([
+        expect.objectContaining({
+          itemKind: 'work_experience',
+          reason: 'import',
+          actor: 'skill',
+          oldValue: null,
+        }),
+      ]);
+      expect(jobRevisions[0]?.newValue).toMatchObject({ role: 'Koch' });
+      expect(pointRevisions[0]).toMatchObject({ itemKind: 'experience_point', reason: 'import' });
+      expect(pointRevisions[0]?.newValue).toMatchObject({
+        text: 'Plante die Speisekarte für 80 Gäste',
+      });
+    });
+
+    it('caps text lengths, list sizes and date shapes', async () => {
+      const bad: Record<string, unknown>[] = [
+        { workExperiences: [{ ...experience('x'.repeat(201), []) }] },
+        { workExperiences: [{ ...experience('Koch', ['y'.repeat(1001)]) }] },
+        { workExperiences: Array.from({ length: 51 }, () => experience('Koch', [])) },
+        {
+          workExperiences: [
+            experience(
+              'Koch',
+              Array.from({ length: 51 }, () => 'Punkt'),
+            ),
+          ],
+        },
+        { workExperiences: [{ ...experience('Koch', []), start: 'March 2020' }] },
+        {
+          workExperiences: [
+            { ...experience('Koch', []), points: [{ text: 'a', skills: Array(21).fill('s') }] },
+          ],
+        },
+        { workExperiences: [] },
+      ];
+      for (const args of bad) {
+        const r = await client
+          .callTool({ name: 'save_career_bank', arguments: args })
+          .catch(() => ({ isError: true }));
+        expect(r.isError).toBe(true);
+      }
+      expect((await readBank()).workExperiences).toHaveLength(3);
     });
   });
 });

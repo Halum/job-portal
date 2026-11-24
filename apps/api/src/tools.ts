@@ -16,6 +16,7 @@ import type { Documents } from '@job-portal/documents';
 import type { Review } from '@job-portal/review';
 import type { Logger } from '@job-portal/shared';
 import { registerBoardTools, type BoardToolDeps } from './board-tools';
+import { registerDocumentsTools } from './documents-tools';
 import { registerMailTools } from './mail-tools';
 import { registerReviewTools } from './review-tools';
 import {
@@ -236,6 +237,7 @@ export function registerTools(
     tracker,
     aiLog,
     boards,
+    documents,
     review,
     aiMerge,
     mail,
@@ -244,6 +246,7 @@ export function registerTools(
   }: ToolDeps,
 ): void {
   registerBoardTools(mcp, user, boards, logger);
+  registerDocumentsTools(mcp, user, documents, logger);
   registerReviewTools(mcp, user, { review, discovery, matching, aiMerge, mail, notify, logger });
   if (mail) registerMailTools(mcp, user, mail);
 

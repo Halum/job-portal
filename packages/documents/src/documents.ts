@@ -1,11 +1,68 @@
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
+import { z } from 'zod';
 import type { Db } from '@job-portal/db';
-import { fileBytes, files, type FileKind } from './schema';
+import {
+  careerItems,
+  careerRevisions,
+  fileBytes,
+  files,
+  masterDocuments,
+  type CareerItemKind,
+  type FileKind,
+  type MasterKind,
+  type RevisionActor,
+  type RevisionReason,
+} from './schema';
 
 export { FILE_KINDS, MASTER_KINDS, type FileKind, type MasterKind } from './schema';
+export type { CareerItemKind, RevisionActor, RevisionReason } from './schema';
 
 /** The upload limit, per file. The route enforces it before it reads the whole body. */
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+/** Caps on the Career bank: text lengths and list sizes, enforced at the MCP boundary and on import. */
+export const CAREER_LIMITS = {
+  text: 1000,
+  short: 200,
+  skill: 60,
+  skills: 20,
+  points: 50,
+  experiences: 50,
+};
+
+const partialDate = z
+  .string()
+  .regex(/^\d{4}(-\d{2}(-\d{2})?)?$/, 'use YYYY, YYYY-MM or YYYY-MM-DD');
+
+/** The stored value of a Work experience. */
+export const workExperienceValue = z.object({
+  role: z.string().min(1).max(CAREER_LIMITS.short),
+  organisation: z.string().min(1).max(CAREER_LIMITS.short),
+  start: partialDate,
+  end: partialDate.nullable().describe('null while the role is current'),
+  place: z.string().max(CAREER_LIMITS.short).nullable(),
+});
+export type WorkExperienceValue = z.infer<typeof workExperienceValue>;
+
+/** The stored value of an Experience point; skills are its labels. */
+export const experiencePointValue = z.object({
+  text: z.string().min(1).max(CAREER_LIMITS.text),
+  skills: z.array(z.string().min(1).max(CAREER_LIMITS.skill)).max(CAREER_LIMITS.skills),
+});
+export type ExperiencePointValue = z.infer<typeof experiencePointValue>;
+
+/** A reviewed parse of a Master resume: Work experiences, each with its Experience points. */
+export const careerBankImport = z.object({
+  workExperiences: z
+    .array(
+      workExperienceValue.extend({
+        points: z.array(experiencePointValue).max(CAREER_LIMITS.points),
+      }),
+    )
+    .min(1)
+    .max(CAREER_LIMITS.experiences),
+});
+export type CareerBankImport = z.infer<typeof careerBankImport>;
 
 export class DocumentsError extends Error {
   constructor(
@@ -71,11 +128,41 @@ const infoColumns = {
   createdAt: files.createdAt,
 };
 
+export interface CareerBank {
+  masterDocuments: { masterResume: FileInfo | null; masterCoverLetter: FileInfo | null };
+  workExperiences: (WorkExperienceValue & {
+    id: string;
+    points: (ExperiencePointValue & { id: string })[];
+  })[];
+}
+
+export interface CareerRevision {
+  id: string;
+  itemKind: CareerItemKind;
+  itemId: string;
+  oldValue: Record<string, unknown> | null;
+  newValue: Record<string, unknown>;
+  reason: RevisionReason;
+  actor: RevisionActor;
+  createdAt: Date;
+}
+
 export interface Documents {
   /** Checks the content type and stores the file; a new upload of a kind never removes an older one. */
   storeFile: (userId: string, file: NewFile) => Promise<FileInfo>;
   /** The file and its bytes, or null when the id is unknown or belongs to another user. */
   getFile: (userId: string, id: string) => Promise<{ info: FileInfo; bytes: Buffer } | null>;
+  /** Makes an uploaded file of that kind the current Master; older uploads stay. Another user's or unknown id: not_found. */
+  registerMaster: (userId: string, kind: MasterKind, fileId: string) => Promise<FileInfo>;
+  /** Adds the Work experiences of a reviewed parse after the existing ones, each write a Career bank revision (reason import). */
+  importCareerBank: (
+    userId: string,
+    input: CareerBankImport,
+    actor: RevisionActor,
+  ) => Promise<{ workExperiences: number; experiencePoints: number }>;
+  getCareerBank: (userId: string) => Promise<CareerBank>;
+  /** The history of one item, oldest first. */
+  listRevisions: (userId: string, itemId: string) => Promise<CareerRevision[]>;
 }
 
 export function createDocuments(db: Db): Documents {
@@ -110,6 +197,135 @@ export function createDocuments(db: Db): Documents {
         await tx.insert(fileBytes).values({ fileId: info.id, bytes: file.bytes });
         return info;
       });
+    },
+
+    async registerMaster(userId, kind, fileId) {
+      return db.transaction(async (tx) => {
+        const [info] = await tx
+          .select(infoColumns)
+          .from(files)
+          .where(and(eq(files.id, fileId), eq(files.userId, userId), eq(files.kind, kind)));
+        if (!info) throw new DocumentsError('not_found', `no uploaded ${kind} with that file id`);
+        await tx
+          .insert(masterDocuments)
+          .values({ userId, kind, fileId })
+          .onConflictDoUpdate({
+            target: [masterDocuments.userId, masterDocuments.kind],
+            set: { fileId, registeredAt: sql`now()` },
+          });
+        return info;
+      });
+    },
+
+    async importCareerBank(userId, input, actor) {
+      return db.transaction(async (tx) => {
+        // One import at a time per user, so positions continue without gaps or duplicates.
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${'documents.career:' + userId}))`,
+        );
+        const [last] = await tx
+          .select({ position: careerItems.position })
+          .from(careerItems)
+          .where(and(eq(careerItems.userId, userId), eq(careerItems.kind, 'work_experience')))
+          .orderBy(sql`${careerItems.position} desc`)
+          .limit(1);
+        let position = (last?.position ?? -1) + 1;
+        let experiencePoints = 0;
+        const revise = (
+          itemKind: CareerItemKind,
+          itemId: string,
+          newValue: Record<string, unknown>,
+        ) =>
+          tx.insert(careerRevisions).values({
+            userId,
+            itemKind,
+            itemId,
+            oldValue: null,
+            newValue,
+            reason: 'import',
+            actor,
+          });
+        for (const { points, ...value } of input.workExperiences) {
+          const [item] = await tx
+            .insert(careerItems)
+            .values({ userId, kind: 'work_experience', position: position++, value })
+            .returning({ id: careerItems.id });
+          if (!item) throw new Error('career item insert returned no row');
+          await revise('work_experience', item.id, value);
+          for (const [i, point] of points.entries()) {
+            const [row] = await tx
+              .insert(careerItems)
+              .values({
+                userId,
+                kind: 'experience_point',
+                parentId: item.id,
+                position: i,
+                value: point,
+              })
+              .returning({ id: careerItems.id });
+            if (!row) throw new Error('career item insert returned no row');
+            await revise('experience_point', row.id, point);
+            experiencePoints++;
+          }
+        }
+        return { workExperiences: input.workExperiences.length, experiencePoints };
+      });
+    },
+
+    async getCareerBank(userId) {
+      const [items, masters] = await Promise.all([
+        db
+          .select()
+          .from(careerItems)
+          .where(eq(careerItems.userId, userId))
+          .orderBy(asc(careerItems.position), asc(careerItems.createdAt)),
+        db
+          .select(infoColumns)
+          .from(masterDocuments)
+          .innerJoin(files, eq(files.id, masterDocuments.fileId))
+          .where(eq(masterDocuments.userId, userId)),
+      ]);
+      const infoOf = (kind: MasterKind): FileInfo | null => {
+        const m = masters.find((x) => x.kind === kind);
+        return m ?? null;
+      };
+      const pointsOf = new Map<string, CareerBank['workExperiences'][number]['points']>();
+      for (const item of items) {
+        if (item.kind !== 'experience_point' || item.parentId === null) continue;
+        const list = pointsOf.get(item.parentId) ?? [];
+        list.push({ id: item.id, ...experiencePointValue.parse(item.value) });
+        pointsOf.set(item.parentId, list);
+      }
+      return {
+        masterDocuments: {
+          masterResume: infoOf('master_resume'),
+          masterCoverLetter: infoOf('master_cover_letter'),
+        },
+        workExperiences: items
+          .filter((item) => item.kind === 'work_experience')
+          .map((item) => ({
+            id: item.id,
+            ...workExperienceValue.parse(item.value),
+            points: pointsOf.get(item.id) ?? [],
+          })),
+      };
+    },
+
+    async listRevisions(userId, itemId) {
+      return db
+        .select({
+          id: careerRevisions.id,
+          itemKind: careerRevisions.itemKind,
+          itemId: careerRevisions.itemId,
+          oldValue: careerRevisions.oldValue,
+          newValue: careerRevisions.newValue,
+          reason: careerRevisions.reason,
+          actor: careerRevisions.actor,
+          createdAt: careerRevisions.createdAt,
+        })
+        .from(careerRevisions)
+        .where(and(eq(careerRevisions.userId, userId), eq(careerRevisions.itemId, itemId)))
+        .orderBy(asc(careerRevisions.createdAt), asc(careerRevisions.id));
     },
 
     async getFile(userId, id) {
