@@ -137,6 +137,9 @@ describe('Gmail replies over MCP', () => {
         fetch: fake.fetch,
       }),
       notify,
+      // The first poll would otherwise start at its own instant; Gmail's after: is in whole seconds, so mails made
+      // just before it could fall out of the window on a slow machine.
+      startDate: new Date('2026-01-01T00:00:00Z'),
       maxCallsPerPass: 10,
       log: createLogger({ level: 'silent' }),
     });

@@ -188,6 +188,7 @@ describe('Bundesagentur source to MCP list_jobs', () => {
         fetch: gmail.fetch,
       }),
       ...(notifications ? { notify: notifications } : {}),
+      startDate: new Date('2026-01-01T00:00:00Z'),
       maxCallsPerPass: 5,
       log: logger,
     });
