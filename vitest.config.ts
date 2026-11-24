@@ -20,7 +20,7 @@ export default defineConfig({
         '**/index.ts',
         // Thin process entrypoints: wiring only, covered by the integration test through the code they call.
         '**/main.ts',
-        'packages/accounts/src/schema.ts',
+        'packages/*/src/schema.ts',
       ],
       thresholds: { statements: 80, lines: 80, functions: 80, branches: 70 },
     },

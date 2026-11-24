@@ -1,0 +1,207 @@
+{
+  "ergebnisliste": [
+    {
+      "stellenangebotsart": "ARBEIT",
+      "stellenangebotsTitel": "Personalsachbearbeiter (m/w/d)",
+      "quereinstiegGeeignet": false,
+      "arbeitszeitSchichtNachtWochenende": false,
+      "arbeitszeitTeilzeitAbend": false,
+      "arbeitszeitTeilzeitNachmittag": false,
+      "arbeitszeitTeilzeitVormittag": false,
+      "arbeitszeitTeilzeitFlexibel": false,
+      "arbeitszeitVollzeit": true,
+      "eintrittszeitraum": {
+        "von": "2026-10-01"
+      },
+      "verguetungsangabe": "KEINE_ANGABEN",
+      "vertragsdauer": "KEINE_ANGABE",
+      "istGeringfuegigeBeschaeftigung": false,
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Musterstadt",
+            "region": "BAYERN",
+            "land": "DEUTSCHLAND"
+          },
+          "breite": 50,
+          "laenge": 10
+        }
+      ],
+      "homeofficemoeglich": false,
+      "veroeffentlichungszeitraum": {
+        "von": "2026-07-09"
+      },
+      "datumErsteVeroeffentlichung": "2026-07-09",
+      "aenderungsdatum": "2026-07-09T10:58:42.306",
+      "hauptberuf": "Betriebswirt/in (Hochschule) - Personalmanagement",
+      "alternativBeruf1": "Personalsachbearbeiter/in",
+      "alternativBeruf2": "Fachkaufmann/-frau - Personal",
+      "firma": "Beispiel Firma A",
+      "referenznummer": "10000-0000000001-S",
+      "entfernung": 1,
+      "alleBerufe": [
+        "Betriebswirt/in (Hochschule) - Personalmanagement",
+        "Personalsachbearbeiter/in",
+        "Fachkaufmann/-frau - Personal"
+      ]
+    },
+    {
+      "stellenangebotsart": "ARBEIT",
+      "stellenangebotsTitel": "Koch (m/w/d)",
+      "quereinstiegGeeignet": false,
+      "arbeitszeitSchichtNachtWochenende": false,
+      "arbeitszeitTeilzeitAbend": false,
+      "arbeitszeitTeilzeitNachmittag": false,
+      "arbeitszeitTeilzeitVormittag": false,
+      "arbeitszeitTeilzeitFlexibel": false,
+      "arbeitszeitVollzeit": true,
+      "eintrittszeitraum": {
+        "von": "2026-08-08"
+      },
+      "verguetungsangabe": "KEINE_ANGABEN",
+      "vertragsdauer": "UNBEFRISTET",
+      "istGeringfuegigeBeschaeftigung": false,
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Musterstadt",
+            "region": "BAYERN",
+            "land": "DEUTSCHLAND"
+          },
+          "breite": 50,
+          "laenge": 10
+        }
+      ],
+      "homeofficemoeglich": false,
+      "veroeffentlichungszeitraum": {
+        "von": "2026-07-09"
+      },
+      "datumErsteVeroeffentlichung": "2026-07-09",
+      "aenderungsdatum": "2026-07-09T09:21:19.449",
+      "externeURL": "https://jobs.example.invalid/ad/2",
+      "hauptberuf": "Koch/Köchin",
+      "firma": "Beispiel Firma B",
+      "referenznummer": "18024-0000000002-S",
+      "entfernung": 1,
+      "alleBerufe": ["Koch/Köchin"]
+    },
+    {
+      "stellenangebotsart": "ARBEIT",
+      "stellenangebotsTitel": "DevOps Engineer (m/w/d)",
+      "arbeitszeitVollzeit": true,
+      "eintrittszeitraum": {
+        "von": "2026-07-09"
+      },
+      "verguetungsangabe": "JAHRESGEHALT",
+      "artDerVerguetung": "GEHALTSSPANNE",
+      "gehaltsspanneVon": 34000,
+      "gehaltsspanneBis": 52000,
+      "vertragsdauer": "UNBEFRISTET",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Musterstadt",
+            "region": "BAYERN",
+            "land": "DEUTSCHLAND"
+          },
+          "breite": 50,
+          "laenge": 10
+        }
+      ],
+      "veroeffentlichungszeitraum": {
+        "von": "2026-07-09"
+      },
+      "datumErsteVeroeffentlichung": "2026-07-09",
+      "aenderungsdatum": "2026-07-09T09:08:15.658",
+      "hauptberuf": "Fachinformatiker/in - Systemintegration",
+      "firma": "Beispiel Firma C",
+      "referenznummer": "10001-0000000003-S",
+      "entfernung": 1,
+      "alleBerufe": ["Fachinformatiker/in - Systemintegration"]
+    },
+    {
+      "stellenangebotsart": "AUSBILDUNG",
+      "ausbildungsart": "AUSBILDUNG",
+      "stellenangebotsTitel": "Auszubildende/r zum/zur Bankkaufmann/frau für den Raum Musterstadt (m/w/d)",
+      "quereinstiegGeeignet": false,
+      "arbeitszeitSchichtNachtWochenende": false,
+      "arbeitszeitTeilzeitAbend": false,
+      "arbeitszeitTeilzeitNachmittag": false,
+      "arbeitszeitTeilzeitVormittag": false,
+      "arbeitszeitTeilzeitFlexibel": false,
+      "arbeitszeitVollzeit": true,
+      "eintrittszeitraum": {
+        "von": "2027-09-01"
+      },
+      "verguetungsangabe": "KEINE_ANGABEN",
+      "vertragsdauer": "KEINE_ANGABE",
+      "istGeringfuegigeBeschaeftigung": false,
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Musterstadt",
+            "region": "BAYERN",
+            "land": "DEUTSCHLAND"
+          },
+          "breite": 50,
+          "laenge": 10
+        }
+      ],
+      "homeofficemoeglich": false,
+      "veroeffentlichungszeitraum": {
+        "von": "2026-07-09"
+      },
+      "datumErsteVeroeffentlichung": "2026-07-09",
+      "aenderungsdatum": "2026-07-09T08:22:05.107",
+      "externeURL": "https://jobs.example.invalid/ad/4",
+      "hauptberuf": "Bankkaufmann/-frau",
+      "firma": "Beispiel Firma D",
+      "referenznummer": "18024-0000000004-S",
+      "entfernung": 1,
+      "alleBerufe": ["Bankkaufmann/-frau"]
+    },
+    {
+      "stellenangebotsart": "ARBEIT",
+      "stellenangebotsTitel": "Kundenberater - Versicherungsvertrieb (m/w/d) in Musterstadt",
+      "quereinstiegGeeignet": false,
+      "arbeitszeitSchichtNachtWochenende": false,
+      "arbeitszeitTeilzeitAbend": false,
+      "arbeitszeitTeilzeitNachmittag": false,
+      "arbeitszeitTeilzeitVormittag": false,
+      "arbeitszeitTeilzeitFlexibel": false,
+      "arbeitszeitVollzeit": true,
+      "eintrittszeitraum": {
+        "von": "2026-08-01"
+      },
+      "verguetungsangabe": "KEINE_ANGABEN",
+      "vertragsdauer": "KEINE_ANGABE",
+      "istGeringfuegigeBeschaeftigung": false,
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Musterstadt",
+            "region": "BAYERN",
+            "land": "DEUTSCHLAND"
+          },
+          "breite": 50,
+          "laenge": 10
+        }
+      ],
+      "homeofficemoeglich": false,
+      "veroeffentlichungszeitraum": {
+        "von": "2026-07-09"
+      },
+      "datumErsteVeroeffentlichung": "2026-07-09",
+      "aenderungsdatum": "2026-07-09T08:05:45.535",
+      "externeURL": "https://jobs.example.invalid/ad/5",
+      "hauptberuf": "Versicherungskaufmann/-frau",
+      "firma": "Beispiel Firma D",
+      "referenznummer": "18024-0000000005-S",
+      "entfernung": 1,
+      "alleBerufe": ["Versicherungskaufmann/-frau"]
+    }
+  ],
+  "maxErgebnisse": 4885,
+  "page": 1,
+  "size": 5
+}
