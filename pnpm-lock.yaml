@@ -73,12 +73,18 @@ importers:
       '@job-portal/discovery':
         specifier: workspace:*
         version: link:../../packages/discovery
+      '@job-portal/mail':
+        specifier: workspace:*
+        version: link:../../packages/mail
       '@job-portal/matching':
         specifier: workspace:*
         version: link:../../packages/matching
       '@job-portal/migrations':
         specifier: workspace:*
         version: link:../../packages/migrations
+      '@job-portal/notifications':
+        specifier: workspace:*
+        version: link:../../packages/notifications
       '@job-portal/pipeline':
         specifier: workspace:*
         version: link:../../packages/pipeline
@@ -121,6 +127,9 @@ importers:
       '@job-portal/discovery':
         specifier: workspace:*
         version: link:../../packages/discovery
+      '@job-portal/mail':
+        specifier: workspace:*
+        version: link:../../packages/mail
       '@job-portal/matching':
         specifier: workspace:*
         version: link:../../packages/matching
@@ -256,6 +265,37 @@ importers:
         specifier: 0.31.11
         version: 0.31.11
 
+  packages/mail:
+    dependencies:
+      '@job-portal/ai':
+        specifier: workspace:*
+        version: link:../ai
+      '@job-portal/db':
+        specifier: workspace:*
+        version: link:../db
+      '@job-portal/discovery':
+        specifier: workspace:*
+        version: link:../discovery
+      '@job-portal/review':
+        specifier: workspace:*
+        version: link:../review
+      '@job-portal/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@job-portal/tracker':
+        specifier: workspace:*
+        version: link:../tracker
+      drizzle-orm:
+        specifier: 0.45.4
+        version: 0.45.4(postgres@4.1.1)
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      drizzle-kit:
+        specifier: 0.31.11
+        version: 0.31.11
+
   packages/matching:
     dependencies:
       '@job-portal/ai':
@@ -295,6 +335,9 @@ importers:
       '@job-portal/discovery':
         specifier: workspace:*
         version: link:../discovery
+      '@job-portal/mail':
+        specifier: workspace:*
+        version: link:../mail
       '@job-portal/matching':
         specifier: workspace:*
         version: link:../matching

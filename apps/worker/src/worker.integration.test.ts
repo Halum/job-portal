@@ -191,6 +191,33 @@ describe('worker against real Postgres and Redis', () => {
     expect(await statusOf()).toBe('failed');
   });
 
+  it('schedules the mail poll beside the sources, runs it, and removes it when unset', async () => {
+    let polls = 0;
+    worker = await startWorker({
+      redisUrl: redis.getConnectionUrl(),
+      pipeline,
+      userId: USER,
+      sources: [],
+      mail: {
+        intervalMinutes: 10,
+        run: () => {
+          polls += 1;
+          return Promise.resolve();
+        },
+      },
+      logger,
+    });
+    await eventually(() => Promise.resolve(polls > 0 ? true : undefined));
+    const queue = new Queue('pipeline', { connection: new Redis(redis.getConnectionUrl()) });
+    expect((await queue.getJobSchedulers()).map((s) => [s.key, s.every])).toEqual([
+      ['mail', 600_000],
+    ]);
+    await worker.close();
+    worker = await start([]);
+    expect(await queue.getJobSchedulers()).toEqual([]);
+    await queue.close();
+  });
+
   it('fails fast when Redis is unreachable', async () => {
     await expect(
       startWorker({

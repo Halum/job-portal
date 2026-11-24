@@ -25,7 +25,7 @@ Terms name things in code, database, tests and issues. Source of truth: the spec
 - **Run**: one execution of the Pipeline for one Source, with its counts and errors.
 - **Digest**: the notification message listing Jobs that newly gained a Target tag in a Run.
 - **Review item**: a question the system cannot settle alone (ai_merge, ai_fit_rejection, mail_match) that waits for the user's decision.
-- **Failure type**: a key naming one thing that can fail (a source, a board, an AI runner and error class, the webhook); an alert goes out once when it starts failing and once when it recovers.
+- **Failure type**: a key naming one thing that can fail (a source, a board, an AI runner and error class, the webhook, `gmail_token`); an alert goes out once when it starts failing and once when it recovers.
 - **Tag override**: a stored mark that tags a Job for a Target whatever its score, written when the user disagrees with an AI fit rejection.
 - **Survived**: a Review item the user confirmed, meaning the AI's call held up.
 - **AI fit rejection**: a Review item raised when a Job's fit score for a Target lands below the threshold; disagreeing with it tags the Job with that Target (a tag override).
@@ -34,6 +34,9 @@ Terms name things in code, database, tests and issues. Source of truth: the spec
 - **Furthest stage**: the highest of Applied, Screening, Interview, Offer, Accepted a Job has reached; it only moves forward except by undo.
 - **Timeline event**: one recorded state change (from, to, actor, evidence, time), the only write path for any state change.
 - **Gone cold**: the status the daily check gives an Applied, Screening, Interview or Offer application whose last Timeline event (any actor, notes not counted) is N or more calendar days old in the user's timezone. N is the Global default `goneColdDays`; null disables the check.
+- **Reply candidate**: a Job that an incoming Gmail mail may belong to, narrowed in code by sender domain, company name or ATS sender (not Matching's Candidate); `strong` only when the sender's domain is, or sits under, the domain of a posting host that is the company's own (named after the company, never a job board or ATS).
+- **Unmatched mail**: a job-like Gmail mail that matched no Job (or whose answer was unusable), stored and listed by `list_unmatched_mails` so nothing is dropped silently.
+- **mail_match**: the Review item for a Gmail mail the AI could not place with confidence; confirming applies the mail to the Job the AI picked, or to the `jobId` the user names among the item's possible Jobs; disagreeing records only the decision.
 - **Processed-mail ledger**: the record of Gmail message ids already handled, keyed by user id and message id, so a mail is never applied twice.
 - **Merge check**: a stored answer "not the same job" for a pair of Jobs, so the AI is not asked about that pair again.
 - **Fold**: what a confirmed AI merge does to the Job that does not survive: its Postings move to the surviving Job (the one with an application, else the older), and its row stays hidden with `merged_into`, keeping its keys as aliases.

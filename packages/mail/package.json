@@ -1,0 +1,26 @@
+{
+  "name": "@job-portal/mail",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "scripts": {
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@job-portal/ai": "workspace:*",
+    "@job-portal/db": "workspace:*",
+    "@job-portal/discovery": "workspace:*",
+    "@job-portal/review": "workspace:*",
+    "@job-portal/shared": "workspace:*",
+    "@job-portal/tracker": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "drizzle-kit": "0.31.11"
+  }
+}

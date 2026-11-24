@@ -23,6 +23,8 @@ export default defineConfig({
         'apps/worker/src/boards.ts',
         // Schema files hold declarative table definitions only; the integration tests exercise them.
         'packages/*/src/schema.ts',
+        // A fake Gmail server for tests of this and other packages.
+        'packages/mail/src/testing.ts',
       ],
       thresholds: { statements: 80, lines: 80, functions: 80, branches: 70 },
     },

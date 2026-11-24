@@ -282,4 +282,36 @@ describe('tracker against real Postgres', () => {
       expect(final.applicationStatus).toBe(current.application);
     }
   });
+
+  it("runs inside the caller's transaction when given one: both commit or both roll back", async () => {
+    const job = await newJob();
+    await apply(job);
+    const boom = new Error('caller failed');
+    await expect(
+      handle.db.transaction(async (tx) => {
+        await tracker.setApplicationStatus(
+          USER,
+          job,
+          { to: 'screening', actor: 'gmail', timezone: TZ },
+          tx,
+        );
+        await tracker.addNote(USER, job, 'rolled back note', tx);
+        throw boom;
+      }),
+    ).rejects.toBe(boom);
+    expect((await state(job)).applicationStatus).toBe('applied');
+    expect((await tracker.getTimeline(USER, job)).notes).toEqual([]);
+
+    await handle.db.transaction(async (tx) => {
+      await tracker.setApplicationStatus(
+        USER,
+        job,
+        { to: 'screening', actor: 'gmail', timezone: TZ },
+        tx,
+      );
+      await tracker.addNote(USER, job, 'kept note', tx);
+    });
+    expect((await state(job)).applicationStatus).toBe('screening');
+    expect((await tracker.getTimeline(USER, job)).notes.map((x) => x.text)).toEqual(['kept note']);
+  });
 });

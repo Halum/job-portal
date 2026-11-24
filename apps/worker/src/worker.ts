@@ -26,6 +26,8 @@ export interface WorkerOptions {
   userId: string;
   sources: ScheduledSource[];
   goneCold?: ScheduledCheck;
+  /** The Gmail poll (run never throws for a Gmail, AI or token failure); null or unset means it is not scheduled. */
+  mail?: ScheduledCheck | null;
   logger: Logger;
   connectTimeoutMs?: number;
 }
@@ -33,6 +35,8 @@ export interface WorkerOptions {
 const QUEUE = 'pipeline';
 /** Scheduler id and job name of the Gone cold check; a Source id is never this. */
 const GONE_COLD = 'gone-cold';
+/** Scheduler id and job name of the mail poll; a Source id is never this. */
+const MAIL_JOB = 'mail';
 
 /**
  * Marks stale runs failed, then schedules one BullMQ Job Scheduler per source (scheduler id =
@@ -45,6 +49,7 @@ export async function startWorker({
   userId,
   sources,
   goneCold,
+  mail = null,
   logger,
   connectTimeoutMs = 10_000,
 }: WorkerOptions): Promise<WorkerHandle> {
@@ -67,6 +72,7 @@ export async function startWorker({
 
     const wanted = new Set(sources.map((s) => s.sourceId));
     if (goneCold) wanted.add(GONE_COLD);
+    if (mail) wanted.add(MAIL_JOB);
     for (const scheduler of await queue.getJobSchedulers()) {
       if (!wanted.has(scheduler.key)) await queue.removeJobScheduler(scheduler.key);
     }
@@ -86,9 +92,21 @@ export async function startWorker({
       );
     }
 
+    if (mail) {
+      await queue.upsertJobScheduler(
+        MAIL_JOB,
+        { every: mail.intervalMinutes * 60_000 },
+        { name: MAIL_JOB },
+      );
+    }
+
     worker = new Worker(
       QUEUE,
       async (job) => {
+        if (job.name === MAIL_JOB) {
+          await mail?.run();
+          return;
+        }
         if (job.name === GONE_COLD) {
           const moved = goneCold ? await goneCold.run() : 0;
           logger.info({ moved }, 'gone cold check done');

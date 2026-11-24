@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { and, asc, eq, gt, sql } from 'drizzle-orm';
-import type { Db } from '@job-portal/db';
+import type { Db, DbTx } from '@job-portal/db';
 import { items, type ReviewKind, type ReviewStatus, type ReviewSubject } from './schema';
 
 export {
@@ -35,8 +35,8 @@ export interface NewReviewItem {
   model: string;
 }
 
-/** What an applier may use: the transaction that records the decision. */
-export type ReviewTx = Pick<Db, 'insert' | 'select' | 'update' | 'delete'>;
+/** What an applier may use: the transaction that records the decision (Mail passes it on to the Tracker). */
+export type ReviewTx = DbTx;
 
 /** Applies a decision in the module that created the item; it runs inside the decision's transaction. */
 export type ReviewApplier = (
@@ -56,7 +56,7 @@ export interface KindModelCount {
 
 export class ReviewError extends Error {
   constructor(
-    readonly code: 'not_found' | 'already_decided' | 'unsupported_kind',
+    readonly code: 'not_found' | 'already_decided' | 'unsupported_kind' | 'invalid_argument',
     message: string,
   ) {
     super(message);
