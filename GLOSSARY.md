@@ -33,7 +33,7 @@ Terms name things in code, database, tests and issues. Source of truth: the spec
 - **Application status**: where an application stands: Applied, Screening, Interview, Offer, Accepted, Declined, Rejected, Withdrawn or Gone cold.
 - **Furthest stage**: the highest of Applied, Screening, Interview, Offer, Accepted a Job has reached; it only moves forward except by undo.
 - **Timeline event**: one recorded state change (from, to, actor, evidence, time), the only write path for any state change.
-- **Gone cold**: the status the daily check gives an application with no state-changing or Gmail event for N days.
+- **Gone cold**: the status the daily check gives an Applied, Screening, Interview or Offer application whose last Timeline event (any actor, notes not counted) is N or more calendar days old in the user's timezone. N is the Global default `goneColdDays`; null disables the check.
 - **Unmatched mail**: a job-like Gmail mail that matched no Job (or whose answer was unusable), stored and listed by `list_unmatched_mails` so nothing is dropped silently.
 - **mail_match**: the Review item for a Gmail mail the AI could not place with confidence; confirming applies the mail to the Job the AI picked, disagreeing records only the decision.
 - **Processed-mail ledger**: the record of Gmail message ids already handled, keyed by user id and message id, so a mail is never applied twice.

@@ -19,11 +19,19 @@ export interface MailSchedule {
   poll: () => Promise<unknown>;
 }
 
+/** A check that runs on its own schedule next to the sources, such as the daily Gone cold check. */
+export interface ScheduledCheck {
+  /** Integer of at least 1; validated by loadConfig. */
+  intervalMinutes: number;
+  run: () => Promise<unknown>;
+}
+
 export interface WorkerOptions {
   redisUrl: string;
   pipeline: Pipeline;
   userId: string;
   sources: ScheduledSource[];
+  goneCold?: ScheduledCheck;
   /** The Gmail poll; null or unset means it is not scheduled. */
   mail?: MailSchedule | null;
   logger: Logger;
@@ -31,7 +39,9 @@ export interface WorkerOptions {
 }
 
 const QUEUE = 'pipeline';
-/** The scheduler id and job name of the mail poll; a Source id is never this. */
+/** Scheduler id and job name of the Gone cold check; a Source id is never this. */
+const GONE_COLD = 'gone-cold';
+/** Scheduler id and job name of the mail poll; a Source id is never this. */
 const MAIL_JOB = 'mail';
 
 /**
@@ -44,6 +54,7 @@ export async function startWorker({
   pipeline,
   userId,
   sources,
+  goneCold,
   mail = null,
   logger,
   connectTimeoutMs = 10_000,
@@ -66,6 +77,7 @@ export async function startWorker({
     if (stale > 0) logger.warn({ stale }, 'marked runs left running as failed');
 
     const wanted = new Set(sources.map((s) => s.sourceId));
+    if (goneCold) wanted.add(GONE_COLD);
     if (mail) wanted.add(MAIL_JOB);
     for (const scheduler of await queue.getJobSchedulers()) {
       if (!wanted.has(scheduler.key)) await queue.removeJobScheduler(scheduler.key);
@@ -75,6 +87,14 @@ export async function startWorker({
         sourceId,
         { every: intervalMinutes * 60_000 },
         { name: sourceId },
+      );
+    }
+
+    if (goneCold) {
+      await queue.upsertJobScheduler(
+        GONE_COLD,
+        { every: goneCold.intervalMinutes * 60_000 },
+        { name: GONE_COLD },
       );
     }
 
@@ -91,6 +111,11 @@ export async function startWorker({
       async (job) => {
         if (job.name === MAIL_JOB) {
           await mail?.poll();
+          return;
+        }
+        if (job.name === GONE_COLD) {
+          const moved = goneCold ? await goneCold.run() : 0;
+          logger.info({ moved }, 'gone cold check done');
           return;
         }
         const run = await pipeline.execute(userId, job.name);

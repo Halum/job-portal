@@ -86,6 +86,11 @@ const envSchema = z
     // Most mail AI calls one poll makes. A throughput limit, not a spend cap: the rest waits for the next poll.
     AI_MAIL_MAX_CALLS_PER_RUN: z.coerce.number().int().min(1).default(20),
     ALERT_THRESHOLD: z.coerce.number().int().min(0).max(100).default(70),
+    // How often the Gone cold check runs, in minutes (default daily). The check itself is idempotent.
+    GONE_COLD_INTERVAL_MINUTES: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(1).default(1440),
+    ),
     // Digest and failure alerts go through the n8n webhook into a Telegram topic. Both are secrets or
     // private ids, from env only, with no default: unset means nothing is sent.
     NOTIFY_WEBHOOK_URL: z.preprocess(emptyToUndefined, httpUrl.optional()),
@@ -154,6 +159,8 @@ export interface Config {
     lever: IntervalConfig | null;
     ashby: IntervalConfig | null;
   };
+  /** Minutes between Gone cold checks, an integer of at least 1. */
+  goneColdIntervalMinutes: number;
   /** Default prerank_top_n, an integer of at least 1. */
   prerankTopN: number;
   /** Requests per second to each ATS host, a positive number. */
@@ -237,6 +244,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       lever: interval(e.LEVER_INTERVAL_MINUTES),
       ashby: interval(e.ASHBY_INTERVAL_MINUTES),
     },
+    goneColdIntervalMinutes: e.GONE_COLD_INTERVAL_MINUTES,
     prerankTopN: e.PRERANK_TOP_N,
     boardRequestsPerSecond: e.BOARD_REQUESTS_PER_SECOND,
     ai: aiConfig(e),

@@ -17,6 +17,7 @@ import { createPipeline } from '@job-portal/pipeline';
 import { createReview } from '@job-portal/review';
 import { createTracker } from '@job-portal/tracker';
 import { createLogger } from '@job-portal/shared';
+import { createGoneColdCheck } from './gone-cold';
 import { buildNotifications } from './notifications';
 import { buildSources } from './sources';
 import { startWorker } from './worker';
@@ -128,12 +129,23 @@ const pipeline = createPipeline(db, discovery, {
   ...(config.ai ? { aiRunnerName: config.ai.runner } : {}),
 });
 
+// The daily Gone cold check: Tracker moves silent applications, Notifications sends one short line each.
+const goneCold = createGoneColdCheck({
+  tracker,
+  matching,
+  discovery,
+  notifications,
+  user,
+  log: logger,
+});
+
 const worker = await startWorker({
   redisUrl: config.redisUrl,
   pipeline,
   userId: user.id,
   sources: scheduled,
   mail: mailSchedule,
+  goneCold: { intervalMinutes: config.goneColdIntervalMinutes, run: goneCold.run },
   logger,
 });
 

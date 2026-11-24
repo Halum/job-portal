@@ -62,8 +62,10 @@ describe('resolveCriteria', () => {
   });
 
   it('leaves everything unset when nothing is set anywhere', () => {
+    // goneColdDays is a Global default only: it is not part of what a Target resolves to.
+    const { goneColdDays: _unused, ...unset } = emptyCriteria();
     expect(resolveCriteria(emptyCriteria(), emptyCriteria())).toEqual({
-      ...emptyCriteria(),
+      ...unset,
       exclusionWords: [],
       blockedCompanies: [],
     });
@@ -86,6 +88,9 @@ describe('applyPatch and the zod rules', () => {
   it.each([
     ['prerankTopN', 0],
     ['prerankTopN', 1.5],
+    ['goneColdDays', 0],
+    ['goneColdDays', -1],
+    ['goneColdDays', 1.5],
     ['radiusKm', -1],
     ['salaryFloor', -5],
     ['alertThreshold', 101],
@@ -93,6 +98,13 @@ describe('applyPatch and the zod rules', () => {
   ])('rejects %s = %j', (key, value) => {
     expect(criteriaPatchSchema.safeParse({ [key]: value }).success).toBe(false);
     expect(() => applyPatch(emptyCriteria(), { [key]: value })).toThrow();
+  });
+
+  it('accepts goneColdDays of 1 or more and null, which disables the Gone cold check', () => {
+    expect(criteriaPatchSchema.safeParse({ goneColdDays: 1 }).success).toBe(true);
+    expect(criteriaPatchSchema.safeParse({ goneColdDays: 14 }).success).toBe(true);
+    expect(criteriaPatchSchema.safeParse({ goneColdDays: null }).success).toBe(true);
+    expect(emptyCriteria().goneColdDays).toBeNull();
   });
 
   it('accepts prerankTopN of at least 1 and rejects blank words', () => {
