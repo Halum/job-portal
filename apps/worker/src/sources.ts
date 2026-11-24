@@ -26,6 +26,8 @@ export function buildSources(
     /** The rate-limited fetch every ATS board request goes through (shared through Redis). */
     fetch: typeof fetch;
     userId: string;
+    /** Replaces the network for the Bundesagentur and bambase requests (tests and dry runs). */
+    directFetch?: typeof fetch;
   },
 ): { sources: Source[]; scheduled: ScheduledSource[] } {
   const sources: Source[] = [];
@@ -36,12 +38,13 @@ export function buildSources(
       createBundesagenturSource({
         queries: async () =>
           (await deps.matching.searchQueries(deps.userId)).map(bundesagenturQuery),
+        ...(deps.directFetch ? { fetch: deps.directFetch } : {}),
       }),
     );
     scheduled.push({ sourceId: BUNDESAGENTUR, intervalMinutes: bundesagentur.intervalMinutes });
   }
   if (bambase) {
-    sources.push(createBambaseSource());
+    sources.push(createBambaseSource(deps.directFetch ? { fetch: deps.directFetch } : {}));
     scheduled.push({ sourceId: BAMBASE, intervalMinutes: bambase.intervalMinutes });
   }
   // Company boards: only marked boards of the Board directory (narrowed by the Watchlist) are fetched.

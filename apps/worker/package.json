@@ -26,6 +26,7 @@
     "@modelcontextprotocol/sdk": "1.32.2"
   },
   "scripts": {
+    "smoke": "tsx --env-file-if-exists=.env src/smoke.ts",
     "boards:import": "tsx --env-file-if-exists=.env src/boards.ts import",
     "boards:mark": "tsx --env-file-if-exists=.env src/boards.ts mark"
   }
