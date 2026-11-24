@@ -13,6 +13,8 @@ export interface Run {
   prerankPassed: number;
   scored: number;
   tagged: number;
+  /** Review items raised in this run for scores below the threshold. */
+  aiRejections: number;
   aiCalls: number;
   /** null when no call reported a cost. */
   aiCostUsd: number | null;
@@ -45,6 +47,7 @@ const columns = {
   prerankPassed: runs.prerankPassed,
   scored: runs.scored,
   tagged: runs.tagged,
+  aiRejections: runs.aiRejections,
   aiCalls: runs.aiCalls,
   aiCostUsd: runs.aiCostUsd,
   errors: runs.errors,
@@ -119,6 +122,7 @@ export function createPipeline(
           | 'prerankPassed'
           | 'scored'
           | 'tagged'
+          | 'aiRejections'
           | 'aiCalls'
           | 'aiCostUsd'
           | 'errors'
@@ -162,6 +166,7 @@ export function createPipeline(
           prerankPassed,
           scored: ai.scored,
           tagged: ai.tagged,
+          aiRejections: ai.rejections,
           aiCalls: ai.calls,
           aiCostUsd: ai.costUsd,
           errors,
@@ -174,6 +179,7 @@ export function createPipeline(
           prerankPassed: 0,
           scored: 0,
           tagged: 0,
+          aiRejections: 0,
           aiCalls: 0,
           aiCostUsd: null,
           errors: [err instanceof Error ? err.message : String(err)],

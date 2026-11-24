@@ -13,6 +13,7 @@
     "@job-portal/matching": "workspace:*",
     "@job-portal/migrations": "workspace:*",
     "@job-portal/pipeline": "workspace:*",
+    "@job-portal/review": "workspace:*",
     "@job-portal/shared": "workspace:*",
     "bullmq": "6.7.10",
     "ioredis": "5.11.1"

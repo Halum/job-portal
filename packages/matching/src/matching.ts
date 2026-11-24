@@ -1,6 +1,20 @@
-import { and, asc, eq, gte, inArray, lt, notExists, notInArray, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  notExists,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { AiError, isRunnerWide, type Ai } from '@job-portal/ai';
 import type { Db } from '@job-portal/db';
+import { fitRejectionSubject, type Review, type ReviewDecision } from '@job-portal/review';
 import {
   applyPatch,
   criteriaSchema,
@@ -19,7 +33,7 @@ import {
   parseAssessment,
   type LanguageRequirement,
 } from './scoring';
-import { candidates, globalDefaults, scores, targets } from './schema';
+import { candidates, globalDefaults, scores, tagOverrides, targets } from './schema';
 
 export interface TargetView {
   id: string;
@@ -57,6 +71,8 @@ export interface MatchingDeps {
   defaultPrerankTopN?: number;
   /** Scores the prerank survivors; without it `score` does nothing. */
   ai?: Pick<Ai, 'run'>;
+  /** Receives an item for each score below the threshold; without it nothing is raised. */
+  review?: Pick<Review, 'create'>;
   /** Used when neither the Target nor the Global defaults set alertThreshold. */
   defaultAlertThreshold?: number;
   /**
@@ -73,6 +89,8 @@ export interface ScoreResult {
   scored: number;
   /** Of those, the ones at or above the alert threshold (the Job is tagged with the Target). */
   tagged: number;
+  /** Review items raised for scores below the threshold (not counting ones that already existed). */
+  rejections: number;
   /** AI calls made, failed ones included. */
   calls: number;
   /** Sum of the costs the runner reported; null when no call reported one (unknown, not 0). */
@@ -85,6 +103,7 @@ export interface ScoreResult {
 export const emptyScoreResult = (): ScoreResult => ({
   scored: 0,
   tagged: 0,
+  rejections: 0,
   calls: 0,
   costUsd: null,
   errors: [],
@@ -129,6 +148,17 @@ export interface Matching {
    */
   score: (userId: string) => Promise<ScoreResult>;
   /**
+   * Applies a decided ai_fit_rejection item inside the decision's transaction: a disagreement tags the Job
+   * with the Target (a stored override, so the tag survives threshold edits), a confirmation changes nothing.
+   * Idempotent. Throws when the subject is not a Job and Target pair.
+   */
+  applyFitRejection: (
+    tx: Pick<Db, 'insert' | 'select'>,
+    userId: string,
+    subject: Record<string, string>,
+    decision: ReviewDecision,
+  ) => Promise<void>;
+  /**
    * The Job's score and tag for each Target it is a candidate for. The tag is derived on every read: a
    * score at or above the threshold the Target resolves to now, so editing a threshold retags without a new call.
    */
@@ -155,6 +185,7 @@ export function createMatching(
     hasApplication,
     defaultPrerankTopN = DEFAULT_TOP_N,
     ai,
+    review,
     defaultAlertThreshold = DEFAULT_ALERT_THRESHOLD,
     maxCallsPerPass = DEFAULT_MAX_CALLS_PER_PASS,
     places,
@@ -364,7 +395,12 @@ export function createMatching(
           .where(and(eq(targets.id, targetId), eq(targets.userId, userId)));
         if (!t) return [];
         const threshold = thresholdOf(await getGlobals(userId), read(t.criteria));
-        conditions.push(tagged ? gte(scores.score, threshold) : lt(scores.score, threshold));
+        // A Job with a tag override (the user disagreed with its rejection) is tagged whatever its score.
+        conditions.push(
+          tagged
+            ? or(gte(scores.score, threshold), isNotNull(tagOverrides.id))
+            : and(lt(scores.score, threshold), isNull(tagOverrides.id)),
+        );
       }
       const rows =
         conditions.length === 0
@@ -376,23 +412,39 @@ export function createMatching(
                 scores,
                 and(eq(scores.targetId, candidates.targetId), eq(scores.jobId, candidates.jobId)),
               )
+              .leftJoin(
+                tagOverrides,
+                and(
+                  eq(tagOverrides.userId, candidates.userId),
+                  eq(tagOverrides.targetId, candidates.targetId),
+                  eq(tagOverrides.jobId, candidates.jobId),
+                ),
+              )
               .where(and(where, ...conditions));
       return rows.map((r) => r.jobId);
     },
 
     async listScores(userId, jobId) {
       const rows = await db
-        .select({ c: candidates, t: targets, s: scores })
+        .select({ c: candidates, t: targets, s: scores, o: tagOverrides.id })
         .from(candidates)
         .innerJoin(targets, eq(targets.id, candidates.targetId))
         .leftJoin(
           scores,
           and(eq(scores.targetId, candidates.targetId), eq(scores.jobId, candidates.jobId)),
         )
+        .leftJoin(
+          tagOverrides,
+          and(
+            eq(tagOverrides.userId, candidates.userId),
+            eq(tagOverrides.targetId, candidates.targetId),
+            eq(tagOverrides.jobId, candidates.jobId),
+          ),
+        )
         .where(and(eq(candidates.userId, userId), eq(candidates.jobId, jobId)))
         .orderBy(asc(targets.name));
       const globals = await getGlobals(userId);
-      return rows.map(({ c, t, s }) => ({
+      return rows.map(({ c, t, s, o }) => ({
         targetId: c.targetId,
         targetName: t.name,
         prerankScore: c.prerankScore,
@@ -402,8 +454,20 @@ export function createMatching(
         redFlags: s?.redFlags ?? [],
         languages: s?.languages ?? [],
         languageMet: s?.languageMet ?? null,
-        tagged: s !== null && s.score >= thresholdOf(globals, read(t.criteria)),
+        tagged: o !== null || (s !== null && s.score >= thresholdOf(globals, read(t.criteria))),
       }));
+    },
+
+    async applyFitRejection(tx, userId, subject, decision) {
+      const { jobId, targetId } = fitRejectionSubject.parse(subject);
+      if (decision === 'confirm') return;
+      // The subject comes from the user's own item, but the module that writes an override checks it.
+      const [owned] = await tx
+        .select({ id: targets.id })
+        .from(targets)
+        .where(and(eq(targets.id, targetId), eq(targets.userId, userId)));
+      if (!owned) throw new Error("the Target of this item is not the user's");
+      await tx.insert(tagOverrides).values({ userId, targetId, jobId }).onConflictDoNothing();
     },
 
     async score(userId) {
@@ -507,7 +571,21 @@ export function createMatching(
               .onConflictDoNothing();
             result.scored += 1;
             // Only the score is stored: the tag is derived when read (see listScores). This count is the run's.
-            if (score >= thresholdOf(globals, targetCriteria)) result.tagged += 1;
+            if (score >= thresholdOf(globals, targetCriteria)) {
+              result.tagged += 1;
+            } else if (review) {
+              // Same transaction as the score: a crash cannot leave a rejected pair without its item.
+              const item = await review.create(
+                userId,
+                {
+                  kind: 'ai_fit_rejection',
+                  subject: { jobId: picked.jobId, targetId: picked.targetId },
+                  model: assessed.model,
+                },
+                tx,
+              );
+              if (item.created) result.rejections += 1;
+            }
             return 'scored';
           },
         );

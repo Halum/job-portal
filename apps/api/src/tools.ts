@@ -10,8 +10,10 @@ import {
 import type { AiLog } from '@job-portal/ai';
 import { criteriaPatchSchema, criteriaSchema, type Matching } from '@job-portal/matching';
 import { RUN_STATUSES, type Pipeline } from '@job-portal/pipeline';
+import type { Review } from '@job-portal/review';
 import type { Logger } from '@job-portal/shared';
 import { registerBoardTools, type BoardToolDeps } from './board-tools';
+import { registerReviewTools } from './review-tools';
 import {
   ACTORS,
   APPLICATION_STATUSES,
@@ -28,6 +30,7 @@ export interface ToolDeps {
   /** The AI call log, for the totals in get_run_history. */
   aiLog: Pick<AiLog, 'totals'>;
   boards: BoardToolDeps;
+  review: Review;
   tracker: Tracker;
   logger: Logger;
 }
@@ -119,6 +122,9 @@ const runSchema = z.object({
   prerankPassed: z.number().describe('Job and Target pairs that passed the filters and prerank'),
   scored: z.number().describe('Job and Target pairs that got an AI fit score in this run'),
   tagged: z.number().describe('Of those, the pairs at or above the alert threshold'),
+  aiRejections: z
+    .number()
+    .describe('Review items raised in this run for scores below the threshold'),
   aiCalls: z.number(),
   aiCostUsd: z
     .number()
@@ -208,9 +214,10 @@ async function refusable<T>(
 export function registerTools(
   mcp: McpServer,
   user: User,
-  { discovery, matching, pipeline, tracker, aiLog, boards, logger }: ToolDeps,
+  { discovery, matching, pipeline, tracker, aiLog, boards, review, logger }: ToolDeps,
 ): void {
   registerBoardTools(mcp, user, boards, logger);
+  registerReviewTools(mcp, user, { review, discovery, matching, logger });
 
   mcp.registerTool(
     'whoami',
@@ -548,7 +555,7 @@ export function registerTools(
     'get_run_history',
     {
       description:
-        'List recent Runs, newest first: source, status, counts (fetched, new postings, prerank passed, scored, tagged, AI calls, AI cost in US dollars) and errors, plus aiTotals: every AI call ever logged for the user (calls, failures, tokens, cost where reported).',
+        'List recent Runs, newest first: source, status, counts (fetched, new postings, prerank passed, scored, tagged, AI rejections, AI calls, AI cost in US dollars) and errors, plus aiTotals: every AI call ever logged for the user (calls, failures, tokens, cost where reported).',
       inputSchema: { limit: z.number().int().min(1).max(100).optional() },
       outputSchema: {
         runs: z.array(runSchema),

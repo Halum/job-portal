@@ -16,6 +16,7 @@
     "@job-portal/matching": "workspace:*",
     "@job-portal/migrations": "workspace:*",
     "@job-portal/pipeline": "workspace:*",
+    "@job-portal/review": "workspace:*",
     "@job-portal/shared": "workspace:*",
     "@job-portal/tracker": "workspace:*",
     "@modelcontextprotocol/sdk": "1.32.2",

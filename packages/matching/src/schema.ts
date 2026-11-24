@@ -62,6 +62,29 @@ export const candidates = matchingSchema.table(
   ],
 );
 
+/**
+ * A Job the user rescued from an AI fit rejection (decided "disagree"): it counts as tagged for the Target
+ * whatever the score. Written only by Matching when it applies a Review decision.
+ */
+export const tagOverrides = matchingSchema.table(
+  'tag_overrides',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull(),
+    targetId: uuid('target_id')
+      .notNull()
+      .references(() => targets.id),
+    jobId: uuid('job_id').notNull(),
+    /** When the Job gained its tag, for a digest that lists what is new. */
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // No user id in the key: a Target belongs to one user, so (target, job) is already per user.
+    unique('tag_overrides_target_job').on(t.targetId, t.jobId),
+    index('tag_overrides_user_idx').on(t.userId, t.createdAt),
+  ],
+);
+
 /** The AI fit score of one Job against one Target. A pair with no row here is unscored. */
 export const scores = matchingSchema.table(
   'scores',

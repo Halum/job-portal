@@ -75,6 +75,8 @@ export function createAiLog(db: Db): AiLog {
 
 export interface AiOutput<T> {
   value: T;
+  /** The model that answered, as the runner reports it. */
+  model: string;
   /** What the call cost where the runner reports it; null when unknown. */
   costUsd: number | null;
 }
@@ -132,7 +134,7 @@ export function createAi(log: AiLog, runner: AiRunner): Ai {
         throw new AiError('bad_output', 'the answer did not match the expected shape');
       }
       await log.record(userId, { ...usage, outcome: 'ok', errorClass: null });
-      return { value, costUsd: result.costUsd };
+      return { value, model: result.model, costUsd: result.costUsd };
     },
   };
 }
