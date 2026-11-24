@@ -101,8 +101,7 @@ const isAts = (domain: string): boolean =>
 
 /** The name part of a domain (the label before the top level), or null for a generic one. */
 function brand(domain: string): string | null {
-  const labels = domain.split('.');
-  const label = labels.length >= 2 ? labels[labels.length - 2] : undefined;
+  const label = ownedDomain(domain).split('.')[0];
   return label && !GENERIC.has(label) ? norm(label) : null;
 }
 
@@ -133,12 +132,15 @@ export function narrow(mail: MailText, jobs: ReplyCandidate[]): NarrowedCandidat
       senderBrand.length >= MIN_KEY &&
       ((key !== null && (key.includes(senderBrand) || senderBrand.includes(key))) ||
         job.hosts.some((h) => !isAts(h) && brand(h) === senderBrand));
-    // Strong (what may apply without a human) is stricter than a fit: the sender's domain is, or sits under, a
-    // domain the Job's own non-ATS posting host belongs to. A lookalike domain or an ATS sender is never strong.
+    // Strong (what may apply without a human) is stricter than a fit: a posting host that is the company's own
+    // (its name is the company name, as careers.acme.example is for Acme; a job board or a source host such as
+    // linkedin.com or arbeitsagentur.de never is), with the sender's domain on or under that host's domain. An
+    // allow-list, because a list of job boards is never complete. A lookalike or an ATS sender is never strong.
     const strong =
       !ats &&
       domain !== null &&
-      job.hosts.some((h) => !isAts(h) && withinDomain(domain, ownedDomain(h)));
+      key !== null &&
+      job.hosts.some((h) => !isAts(h) && brand(h) === key && withinDomain(domain, ownedDomain(h)));
     return byName || byDomain ? [{ job, strong, score: Number(byName) + Number(byDomain) }] : [];
   });
   if (scored.length === 0 && ats) {

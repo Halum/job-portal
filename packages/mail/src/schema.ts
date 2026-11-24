@@ -3,6 +3,7 @@ import { MAIL_KINDS, type MailKind } from './classify';
 import {
   check,
   index,
+  integer,
   jsonb,
   pgSchema,
   primaryKey,
@@ -22,6 +23,8 @@ export const OUTCOMES = [
   'unmatched',
   'review',
   'disagreed',
+  /** A mail Gmail never served after repeated reads: kept in the ledger so it cannot hold the cursor back. */
+  'failed',
 ] as const;
 export type Outcome = (typeof OUTCOMES)[number];
 
@@ -47,6 +50,17 @@ export const processed = mailSchema.table(
       sql`${t.outcome} in (${sql.raw(OUTCOMES.map((o) => `'${o}'`).join(', '))})`,
     ),
   ],
+);
+
+/** How often reading one message failed, so a mail Gmail never serves is given up on instead of blocking the cursor. */
+export const readFailures = mailSchema.table(
+  'read_failures',
+  {
+    userId: uuid('user_id').notNull(),
+    messageId: text('message_id').notNull(),
+    failures: integer('failures').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.messageId] })],
 );
 
 /** Job-like mails that matched no Job, kept so nothing is dropped silently. */

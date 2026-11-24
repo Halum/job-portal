@@ -83,7 +83,9 @@ function dkimDomain(headers: { name: string; value: string }[] | undefined): str
   const own = headers?.find((h) => h.name.toLowerCase() === 'authentication-results')?.value;
   // ponytail: trusts the topmost header to be Gmail's; a header an outside sender plants sits below it.
   if (!own) return null;
-  const [id, ...clauses] = own.split(/;(?=(?:[^"]*"[^"]*")*[^"]*$)/);
+  // Quoted strings (with escapes) and comments are text an outside sender can shape: drop them before splitting.
+  const plain = own.replace(/"(?:\\.|[^"\\])*"/g, '""').replace(/\((?:\\.|[^()\\])*\)/g, ' ');
+  const [id, ...clauses] = plain.split(';');
   if (!/^\s*mx\.google\.com\s*$/i.test(id ?? '')) return null;
   for (const clause of clauses) {
     if (!/^\s*dkim=pass\b/i.test(clause)) continue;

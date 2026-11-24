@@ -632,6 +632,51 @@ describe('Mail against real Postgres, a fake Gmail API and a scripted AI runner'
     expect(await Promise.all(jobs.map((j) => status(j)))).toEqual(Array(5).fill('screening'));
   });
 
+  it('gives up on a mail Gmail never serves after three polls, so the cursor moves again', async () => {
+    const job = await applied('Poisonco');
+    const good = await applied('Goodco');
+    reset([
+      mail('bad1', 'Poisonco', { receivedAt: new Date(Date.now() - 60_000) }),
+      mail('good1', 'Goodco'),
+    ]);
+    say('good1', verdict('screening', good));
+    fake.failIds = ['bad1'];
+    const mailer = make();
+    for (let i = 0; i < 2; i += 1) await mailer.poll(USER);
+    expect(await ledger('bad1')).toBeUndefined();
+    await mailer.poll(USER);
+    expect(await ledger('bad1')).toBe('failed');
+    expect(await status(job)).toBe('applied');
+    expect(await status(good)).toBe('screening');
+    // The next poll lists nothing new to retry and the cursor can move.
+    fake.requests.length = 0;
+    expect(await mailer.poll(USER)).toMatchObject({ status: 'done', seen: 0 });
+  });
+
+  it('sends a mail from a job board that holds the Job to Review, however well DKIM passes', async () => {
+    const job = await applied('Boardfirma');
+    const { jobId } = await discovery.addJob(USER, {
+      title: 'On a board',
+      company: 'Onboardco',
+      url: 'https://www.linkedin.example/jobs/1',
+    });
+    await tracker.setApplicationStatus(USER, jobId, {
+      to: 'applied',
+      actor: 'user',
+      timezone: 'UTC',
+    });
+    reset([
+      mail('m1', 'Onboardco', {
+        from: 'Member <jobs@linkedin.example>',
+        body: 'Marker m1 Onboardco we regret to inform you.',
+      }),
+    ]);
+    say('m1', verdict('rejection', jobId));
+    expect(await make().poll(USER)).toMatchObject({ applied: 0, review: 1 });
+    expect(await status(jobId)).toBe('applied');
+    expect(await status(job)).toBe('applied');
+  });
+
   it('a poll that lost its lease does not clear the lease of the worker that took it over', async () => {
     const job = await applied('Leaseco');
     reset([mail('m1', 'Leaseco')]);

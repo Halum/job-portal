@@ -125,12 +125,28 @@ describe('Gmail client against a fake Gmail API', () => {
       mail('forged-quote', {
         authResults: 'mx.google.com; spf=pass smtp.mailfrom="x; dkim=pass header.d=victim.example"',
       }),
+      mail('forged-escape', {
+        authResults:
+          'mx.google.com; spf=pass smtp.mailfrom="x\\";dkim=pass header.d=victim.example"@attacker.example',
+      }),
+      mail('forged-comment', {
+        authResults:
+          'mx.google.com; spf=pass (x; dkim=pass header.d=victim.example) smtp.mailfrom=a',
+      }),
       mail('by-i', { authResults: 'mx.google.com; dkim=pass header.i=@signer.example' }),
     ]);
     const gmail = client(fake);
     expect((await gmail.get('pass')).dkimDomain).toBe('example.invalid');
     expect((await gmail.get('by-i')).dkimDomain).toBe('signer.example');
-    for (const id of ['fail', 'none', 'planted', 'forged-spf', 'forged-quote']) {
+    for (const id of [
+      'fail',
+      'none',
+      'planted',
+      'forged-spf',
+      'forged-quote',
+      'forged-escape',
+      'forged-comment',
+    ]) {
       expect((await gmail.get(id)).dkimDomain).toBeNull();
     }
   });

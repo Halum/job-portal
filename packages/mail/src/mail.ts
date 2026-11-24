@@ -17,7 +17,7 @@ import {
   type MailText,
   type ReplyCandidate,
 } from './text';
-import { cursors, matches, processed, unmatched, type Outcome } from './schema';
+import { cursors, matches, processed, readFailures, unmatched, type Outcome } from './schema';
 
 /** What Mail needs from Notifications; the module itself satisfies it. */
 export interface Notify {
@@ -133,6 +133,8 @@ const GMAIL_TOKEN = 'gmail_token';
 /** Renewed before every mail, so it only runs out when one mail takes this long. */
 const LEASE = sql`now() + interval '10 minutes'`;
 const DEFAULT_LIMIT = 50;
+/** Reads of one message that may fail before the mail is given up on. */
+const MAX_READ_FAILURES = 3;
 const hostOf = (url: string): string[] => {
   try {
     return [new URL(url).hostname.toLowerCase()];
@@ -393,6 +395,25 @@ export function createMail(db: Db, deps: MailDeps): Mail {
       log.warn({ err }, `Gmail ${what} failed; the poll goes on and retries it next time`);
       run.complete = false;
     };
+    /** Counts a failed read; after MAX_READ_FAILURES the mail gets a 'failed' ledger row so it stops holding the cursor. */
+    async function giveUpOnBadMail(userId: string, messageId: string): Promise<boolean> {
+      const [row] = await db
+        .insert(readFailures)
+        .values({ userId, messageId, failures: 1 })
+        .onConflictDoUpdate({
+          target: [readFailures.userId, readFailures.messageId],
+          set: { failures: sql`${readFailures.failures} + 1` },
+        })
+        .returning({ failures: readFailures.failures });
+      if ((row?.failures ?? 0) < MAX_READ_FAILURES) return false;
+      log.warn(
+        { messageId },
+        'Gmail never served this mail: given up, it is kept in the ledger as failed',
+      );
+      await db.transaction((tx) => claim(tx, userId, messageId, 'failed'));
+      return true;
+    }
+
     try {
       // List every id of the window first (ids are cheap): when the page cap cuts a list, the next list starts
       // below the oldest id seen, known ones included, so a backlog is walked to its end whatever the ledger holds.
@@ -415,21 +436,25 @@ export function createMail(db: Db, deps: MailDeps): Mail {
         }
         for (const id of page.ids) listed.add(id);
         if (!page.truncated) break;
-        const last = page.ids[page.ids.length - 1];
-        if (last === undefined) break;
-        try {
-          const next = new Date((await client.get(last)).receivedAt.getTime() + 1000);
-          if (before !== undefined && next >= before) {
-            // ponytail: more than a list of mails in one second cannot be walked further; retried next poll.
-            log.warn('the Gmail window cannot be walked further: set GMAIL_START_DATE later');
-            run.complete = false;
+        // The oldest id that can be read gives the next bound; one Gmail never serves is passed over for the
+        // next older-looking one, so a poison mail cannot stop the walk.
+        let next: Date | null = null;
+        for (const id of [...page.ids].reverse()) {
+          try {
+            next = new Date((await client.get(id)).receivedAt.getTime() + 1000);
             break;
+          } catch (err) {
+            if (err instanceof GmailAuthError) throw err;
+            log.warn({ err }, 'Gmail read failed while walking the window; trying the next id');
           }
-          before = next;
-        } catch (err) {
-          failed('read', err);
+        }
+        if (next === null || (before !== undefined && next >= before)) {
+          // ponytail: more than a list of mails in one second cannot be walked further; retried next poll.
+          log.warn('the Gmail window cannot be walked further: set GMAIL_START_DATE later');
+          run.complete = false;
           break;
         }
+        before = next;
       }
       const ids = [...listed];
       const known = ids.length
@@ -453,7 +478,9 @@ export function createMail(db: Db, deps: MailDeps): Mail {
         try {
           m = await client.get(id);
         } catch (err) {
-          failed('read', err);
+          if (err instanceof GmailAuthError) throw err;
+          log.warn({ err }, 'Gmail read failed; the poll goes on and retries it next time');
+          if (!(await giveUpOnBadMail(userId, id))) run.complete = false;
           continue;
         }
         await handle(m);

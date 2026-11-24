@@ -123,6 +123,18 @@ describe('narrow strong flag', () => {
     ).toEqual([expect.objectContaining({ id: '9', strong: false })]);
   });
 
+  it('is weak for a job board or source host, whoever posts there', () => {
+    const board = [
+      job('7', 'Beispiel Firma', ['www.linkedin.example', 'www.arbeitsagentur.example']),
+    ];
+    expect(narrow(mail('jobs@linkedin.example', 'Hi', 'Beispiel Firma'), board)[0]?.strong).toBe(
+      false,
+    );
+    expect(narrow(mail('x@arbeitsagentur.example', 'Hi', 'Beispiel Firma'), board)[0]?.strong).toBe(
+      false,
+    );
+  });
+
   it('does not treat a country second level as a company domain', () => {
     const co = [job('5', 'Beispiel Firma', ['careers.beispiel-firma.co.uk'])];
     expect(narrow(mail('hr@beispiel-firma.co.uk', 'Hi'), co)[0]?.strong).toBe(true);
