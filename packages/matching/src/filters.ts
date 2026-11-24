@@ -22,7 +22,7 @@ export interface FilterOutcome {
 // a separator or bracket ("Berlin (Remote)", "Engineer - Remote", "Remote, Germany"), or as "fully
 // remote" or "remote-first". "Remote Sensing Engineer" and "not remote" are therefore not remote.
 const REMOTE_WORD =
-  /(?:^|[([)\-–—|,/:]\s*|\b(?:fully|full|100%)\s+)remote(?=\s*(?:$|[)\]\-–—|,/:]))|\bremote[\s-]first\b/i;
+  /(?:^|[([)\-\u2013\u2014|,/:]\s*|\b(?:fully|full|100%)\s+)remote(?=\s*(?:$|[)\]\-\u2013\u2014|,/:]))|\bremote[\s-]first\b/i;
 const HOME_OFFICE =
   /(?<!\b(?:kein|keine|ohne|no|not)\s)\b(?:home[\s-]?office|mobiles?\s+arbeiten)\b/i;
 

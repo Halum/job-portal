@@ -12,21 +12,21 @@ const base = (over: Partial<Criteria>): Criteria => ({ ...emptyCriteria(), ...ov
 
 describe('resolveCriteria', () => {
   it('lets a set Target field replace the Global default and an unset one fall back', () => {
-    const globals = base({ keywords: ['koch'], locations: ['Bamberg'], radiusKm: 25 });
-    const target = base({ keywords: ['kellner'] });
+    const globals = base({ keywords: ['alpha'], locations: ['Köln'], radiusKm: 7 });
+    const target = base({ keywords: ['beta'] });
     const r = resolveCriteria(globals, target);
-    expect(r.keywords).toEqual(['kellner']);
-    expect(r.locations).toEqual(['Bamberg']);
-    expect(r.radiusKm).toBe(25);
+    expect(r.keywords).toEqual(['beta']);
+    expect(r.locations).toEqual(['Köln']);
+    expect(r.radiusKm).toBe(7);
   });
 
   it('treats 0, false and an empty list on a Target as set, not as unset', () => {
     const globals = base({
-      radiusKm: 25,
+      radiusKm: 7,
       alertThreshold: 80,
       salaryFloor: 15000,
       remoteAllowed: true,
-      keywords: ['koch'],
+      keywords: ['alpha'],
     });
     const target = base({
       radiusKm: 0,
@@ -54,10 +54,10 @@ describe('resolveCriteria', () => {
   });
 
   it('unions exclusion words and blocked companies, ignoring case and keeping the first spelling', () => {
-    const globals = base({ exclusionWords: ['Pflege', 'Kurier'], blockedCompanies: ['Acme'] });
-    const target = base({ exclusionWords: ['pflege', 'Zeitarbeit'], blockedCompanies: null });
+    const globals = base({ exclusionWords: ['Spam', 'Kurier'], blockedCompanies: ['Acme'] });
+    const target = base({ exclusionWords: ['spam', 'Zeitarbeit'], blockedCompanies: null });
     const r = resolveCriteria(globals, target);
-    expect(r.exclusionWords).toEqual(['Pflege', 'Kurier', 'Zeitarbeit']);
+    expect(r.exclusionWords).toEqual(['Spam', 'Kurier', 'Zeitarbeit']);
     expect(r.blockedCompanies).toEqual(['Acme']);
   });
 
@@ -72,7 +72,7 @@ describe('resolveCriteria', () => {
 
 describe('applyPatch and the zod rules', () => {
   it('changes only the keys given and clears a key given as null', () => {
-    const start = base({ keywords: ['koch'], radiusKm: 25 });
+    const start = base({ keywords: ['alpha'], radiusKm: 7 });
     const next = applyPatch(start, { radiusKm: null, salaryFloor: 0 });
     expect(next).toEqual({ ...start, radiusKm: null, salaryFloor: 0 });
   });

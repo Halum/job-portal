@@ -68,6 +68,8 @@ export interface Matching {
 }
 
 const DEFAULT_TOP_N = 20;
+/** Most search requests one fetch makes (keywords x places over all active Targets). */
+export const MAX_QUERIES = 50;
 
 const read = (stored: unknown): Criteria =>
   criteriaSchema.parse({ ...emptyCriteria(), ...(stored as object) });
@@ -153,6 +155,26 @@ export function createMatching(
       .onConflictDoNothing();
   };
 
+  /**
+   * Jobs stored before an edit never reach `run` again, so an edited Target is matched over all of them
+   * and its candidates replaced. The caller holds the Target's row lock and runs this in its transaction.
+   */
+  const rematch = async (
+    tx: Pick<Db, 'insert' | 'delete'>,
+    userId: string,
+    globals: Criteria,
+    target: typeof targets.$inferSelect,
+  ): Promise<void> => {
+    await tx.delete(candidates).where(eq(candidates.targetId, target.id));
+    if (target.paused) return;
+    await insertCandidates(
+      tx,
+      userId,
+      target.id,
+      topFor(view(globals, target).resolved, await matchable(userId)),
+    );
+  };
+
   return {
     async run(userId, jobIds) {
       if (jobIds.length === 0) return { prerankPassed: 0 };
@@ -207,16 +229,7 @@ export function createMatching(
           .where(eq(targets.id, row.id))
           .returning();
         if (!saved) throw new Error('target update returned no row');
-        // Jobs stored before this edit never reach `run` again, so the Target is matched over all of them
-        // here, under the same row lock, and its candidates replaced in this transaction.
-        await tx.delete(candidates).where(eq(candidates.targetId, saved.id));
-        if (!saved.paused) {
-          const top = topFor(
-            view(await getGlobals(userId), saved).resolved,
-            await matchable(userId),
-          );
-          await insertCandidates(tx, userId, saved.id, top);
-        }
+        await rematch(tx, userId, await getGlobals(userId), saved);
         return saved;
       });
       return view(await getGlobals(userId), updated);
@@ -240,6 +253,15 @@ export function createMatching(
           .update(globalDefaults)
           .set({ criteria: next, updatedAt: new Date() })
           .where(eq(globalDefaults.userId, userId));
+        // Targets inherit from the defaults, so each one is matched again under its own row lock.
+        // (upsertTarget locks only its Target row and reads the defaults without a lock, so no lock cycle.)
+        const rows = await tx
+          .select()
+          .from(targets)
+          .where(and(eq(targets.userId, userId), eq(targets.paused, false)))
+          .orderBy(asc(targets.name))
+          .for('update');
+        for (const t of rows) await rematch(tx, userId, next, t);
         return next;
       });
     },
@@ -269,7 +291,8 @@ export function createMatching(
           }
         }
       }
-      return [...seen.values()];
+      // ponytail: first MAX_QUERIES in Target name order; a fair split per Target if someone needs more than that.
+      return [...seen.values()].slice(0, MAX_QUERIES);
     },
   };
 }

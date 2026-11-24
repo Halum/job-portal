@@ -3,19 +3,19 @@ import { createPlaceTable, distanceKm, germanPlaces, normalizeName } from './pla
 
 const tiny = createPlaceTable(
   [
-    '96047\tBamberg\t49.8917\t10.8864',
-    '96049\tBamberg\t49.9000\t10.9000',
-    '90402\tNürnberg\t49.4539\t11.0775',
+    '50667\tKöln\t49.8917\t10.8864',
+    '50668\tKöln\t49.9000\t10.9000',
+    '40213\tDüsseldorf\t49.4539\t11.0775',
   ].join('\n'),
 );
 
 describe('place table', () => {
   it('resolves a name, a postcode and a name inside free text', () => {
-    expect(tiny.resolve('Bamberg')?.name).toBe('Bamberg');
-    expect(tiny.resolve('96047')?.name).toBe('Bamberg');
-    expect(tiny.resolve('96047 Irgendwo')?.name).toBe('Bamberg');
-    expect(tiny.resolve('Nürnberg, Mittelfranken')?.name).toBe('Nürnberg');
-    expect(tiny.resolve('Nuernberg')?.key).toBe(tiny.resolve('Nürnberg')?.key);
+    expect(tiny.resolve('Köln')?.name).toBe('Köln');
+    expect(tiny.resolve('50667')?.name).toBe('Köln');
+    expect(tiny.resolve('50667 Irgendwo')?.name).toBe('Köln');
+    expect(tiny.resolve('Düsseldorf, Rheinland')?.name).toBe('Düsseldorf');
+    expect(tiny.resolve('Duesseldorf')?.key).toBe(tiny.resolve('Düsseldorf')?.key);
   });
 
   it('returns null for an unknown place and for blank text', () => {
@@ -25,7 +25,7 @@ describe('place table', () => {
   });
 
   it('averages the coordinates of a name listed under several postcodes', () => {
-    const p = tiny.resolve('Bamberg');
+    const p = tiny.resolve('Köln');
     expect(p?.lat).toBeCloseTo((49.8917 + 49.9) / 2, 4);
   });
 
@@ -53,15 +53,15 @@ describe('distanceKm', () => {
 describe('bundled GeoNames table', () => {
   it('knows big German cities and their distances', () => {
     const t = germanPlaces();
-    const bamberg = t.resolve('Bamberg');
-    const nuernberg = t.resolve('Nürnberg');
+    const koeln = t.resolve('Köln');
+    const duesseldorf = t.resolve('Düsseldorf');
     const berlin = t.resolve('Berlin');
-    expect(bamberg && nuernberg && berlin).toBeTruthy();
-    if (!bamberg || !nuernberg || !berlin) return;
-    expect(distanceKm(bamberg, nuernberg)).toBeGreaterThan(40);
-    expect(distanceKm(bamberg, nuernberg)).toBeLessThan(60);
-    expect(distanceKm(bamberg, berlin)).toBeGreaterThan(300);
-    expect(distanceKm(bamberg, berlin)).toBeLessThan(380);
-    expect(t.resolve('96047')?.name).toBe('Bamberg');
+    expect(koeln && duesseldorf && berlin).toBeTruthy();
+    if (!koeln || !duesseldorf || !berlin) return;
+    expect(distanceKm(koeln, duesseldorf)).toBeGreaterThan(25);
+    expect(distanceKm(koeln, duesseldorf)).toBeLessThan(45);
+    expect(distanceKm(koeln, berlin)).toBeGreaterThan(450);
+    expect(distanceKm(koeln, berlin)).toBeLessThan(500);
+    expect(t.resolve('50667')?.name).toBe('Köln');
   });
 });

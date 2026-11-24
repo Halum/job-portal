@@ -463,20 +463,20 @@ describe('MCP endpoint over real HTTP', () => {
 
     it('upserts a Target by name, patches it, and shows what it resolves to', async () => {
       await call('update_global_defaults', {
-        criteria: { exclusionWords: ['Pflege'], radiusKm: 25, alertThreshold: 70 },
+        criteria: { exclusionWords: ['Spam'], radiusKm: 7, alertThreshold: 70 },
       });
       const made = (
         await call('upsert_target', {
           name: 'odd minijob',
-          criteria: { keywords: ['koch'], exclusionWords: ['Zeitarbeit'], alertThreshold: 0 },
+          criteria: { keywords: ['alpha'], exclusionWords: ['Zeitarbeit'], alertThreshold: 0 },
         })
       ).structuredContent as { target: TargetOut };
       expect(made.target.paused).toBe(false);
-      expect(made.target.criteria).toMatchObject({ keywords: ['koch'], radiusKm: null });
+      expect(made.target.criteria).toMatchObject({ keywords: ['alpha'], radiusKm: null });
       expect(made.target.resolved).toMatchObject({
-        radiusKm: 25,
+        radiusKm: 7,
         alertThreshold: 0,
-        exclusionWords: ['Pflege', 'Zeitarbeit'],
+        exclusionWords: ['Spam', 'Zeitarbeit'],
       });
 
       const patched = (
@@ -496,7 +496,7 @@ describe('MCP endpoint over real HTTP', () => {
       const defaults = (await call('get_global_defaults', {})).structuredContent as {
         defaults: Record<string, unknown>;
       };
-      expect(defaults.defaults).toMatchObject({ radiusKm: 25, exclusionWords: ['Pflege'] });
+      expect(defaults.defaults).toMatchObject({ radiusKm: 7, exclusionWords: ['Spam'] });
     });
 
     it('refuses values the zero rules forbid with a tool error', async () => {
@@ -548,8 +548,9 @@ describe('MCP endpoint over real HTTP', () => {
     });
 
     it("user B cannot read or edit user A's Targets", async () => {
-      const made = (await call('upsert_target', { name: 'mine', criteria: { keywords: ['koch'] } }))
-        .structuredContent as { target: TargetOut };
+      const made = (
+        await call('upsert_target', { name: 'mine', criteria: { keywords: ['alpha'] } })
+      ).structuredContent as { target: TargetOut };
       const other = await createUserB();
       const asB = async (name: string, args: Record<string, unknown>) => {
         const client = new Client({ name: 'b', version: '0.0.0' });
@@ -576,7 +577,7 @@ describe('MCP endpoint over real HTTP', () => {
       expect(edited.target.id).not.toBe(made.target.id);
       const again = (await call('list_targets', {})).structuredContent as { targets: TargetOut[] };
       expect(again.targets.find((t) => t.id === made.target.id)?.criteria.keywords).toEqual([
-        'koch',
+        'alpha',
       ]);
     });
 

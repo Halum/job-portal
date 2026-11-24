@@ -68,7 +68,7 @@ describe('Bundesagentur source to MCP list_jobs', () => {
     // Placeholder search: "Musterstadt" is not in the place table, so the radius cannot be checked.
     await matching.upsertTarget(user.id, {
       name: 'odd minijob',
-      criteria: { keywords: ['koch'], locations: ['Musterstadt'], radiusKm: 25 },
+      criteria: { keywords: ['koch'], locations: ['Musterstadt'], radiusKm: 7 },
     });
     const tracker = createTracker(handle.db, discovery);
     const pipeline = createPipeline(handle.db, discovery, { matching });
@@ -153,7 +153,7 @@ describe('Bundesagentur source to MCP list_jobs', () => {
     expect([params.get('was'), params.get('wo'), params.get('umkreis')]).toEqual([
       'koch',
       'Musterstadt',
-      '25',
+      '7',
     ]);
 
     // list_jobs by Target returns the one Job that passed, flagged candidate only for that Target.

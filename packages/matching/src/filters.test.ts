@@ -5,17 +5,17 @@ import { createPlaceTable } from './places';
 
 const places = createPlaceTable(
   [
-    '96047\tBamberg\t49.8917\t10.8864',
-    '90402\tNürnberg\t49.4539\t11.0775',
+    '50667\tKöln\t49.8917\t10.8864',
+    '40213\tDüsseldorf\t49.4539\t11.0775',
     '10115\tBerlin\t52.5323\t13.3846',
   ].join('\n'),
 );
 
 const job = (over: Partial<MatchableJob> = {}): MatchableJob => ({
   id: 'j1',
-  title: 'Koch (m/w/d)',
+  title: 'Alpha (m/w/d)',
   company: 'Beispiel Firma',
-  location: 'Bamberg',
+  location: 'Köln',
   raw: {},
   recency: new Date('2026-01-01'),
   ...over,
@@ -30,8 +30,7 @@ describe('hardFilter', () => {
 
   it('drops a job with an exclusion word in title, company or location, ignoring case', () => {
     expect(
-      hardFilter(job({ title: 'Pflege Helfer' }), crit({ exclusionWords: ['pflege'] }), places)
-        .pass,
+      hardFilter(job({ title: 'Spam Helfer' }), crit({ exclusionWords: ['spam'] }), places).pass,
     ).toBe(false);
     expect(
       hardFilter(
@@ -40,7 +39,7 @@ describe('hardFilter', () => {
         places,
       ).pass,
     ).toBe(false);
-    expect(hardFilter(job(), crit({ exclusionWords: ['pflege'] }), places).pass).toBe(true);
+    expect(hardFilter(job(), crit({ exclusionWords: ['spam'] }), places).pass).toBe(true);
   });
 
   it('drops a blocked company', () => {
@@ -53,22 +52,22 @@ describe('hardFilter', () => {
   });
 
   it('radius 0 means the same city only', () => {
-    const c = crit({ locations: ['Bamberg'], radiusKm: 0 });
-    expect(hardFilter(job({ location: 'Bamberg' }), c, places).pass).toBe(true);
-    expect(hardFilter(job({ location: '96047 Bamberg' }), c, places).pass).toBe(true);
-    expect(hardFilter(job({ location: 'Nürnberg' }), c, places).pass).toBe(false);
+    const c = crit({ locations: ['Köln'], radiusKm: 0 });
+    expect(hardFilter(job({ location: 'Köln' }), c, places).pass).toBe(true);
+    expect(hardFilter(job({ location: '50667 Köln' }), c, places).pass).toBe(true);
+    expect(hardFilter(job({ location: 'Düsseldorf' }), c, places).pass).toBe(false);
   });
 
   it('keeps jobs inside the radius and drops those outside', () => {
-    const near = crit({ locations: ['Bamberg'], radiusKm: 60 });
-    const far = crit({ locations: ['Bamberg'], radiusKm: 30 });
-    expect(hardFilter(job({ location: 'Nürnberg' }), near, places).pass).toBe(true);
-    expect(hardFilter(job({ location: 'Nürnberg' }), far, places).pass).toBe(false);
+    const near = crit({ locations: ['Köln'], radiusKm: 60 });
+    const far = crit({ locations: ['Köln'], radiusKm: 30 });
+    expect(hardFilter(job({ location: 'Düsseldorf' }), near, places).pass).toBe(true);
+    expect(hardFilter(job({ location: 'Düsseldorf' }), far, places).pass).toBe(false);
     expect(hardFilter(job({ location: 'Berlin' }), near, places).pass).toBe(false);
   });
 
   it('passes an unknown place with the unknown-location flag instead of dropping it', () => {
-    const c = crit({ locations: ['Bamberg'], radiusKm: 10 });
+    const c = crit({ locations: ['Köln'], radiusKm: 10 });
     expect(hardFilter(job({ location: 'Musterstadt' }), c, places)).toEqual({
       pass: true,
       unknownLocation: true,
@@ -86,14 +85,14 @@ describe('hardFilter', () => {
 
   it('does not check places when locations or radius are unset', () => {
     expect(
-      hardFilter(job({ location: 'Berlin' }), crit({ locations: ['Bamberg'] }), places).pass,
+      hardFilter(job({ location: 'Berlin' }), crit({ locations: ['Köln'] }), places).pass,
     ).toBe(true);
     expect(hardFilter(job({ location: 'Berlin' }), crit({ radiusKm: 5 }), places).pass).toBe(true);
   });
 
   it('lets remote postings past the radius unless the Target refuses remote', () => {
     const remote = job({ title: 'Webentwickler (Remote)', location: 'Berlin' });
-    const base = { locations: ['Bamberg'], radiusKm: 10 };
+    const base = { locations: ['Köln'], radiusKm: 10 };
     expect(hardFilter(remote, crit({ ...base, remoteAllowed: true }), places)).toEqual({
       pass: true,
       unknownLocation: false,
@@ -109,12 +108,12 @@ describe('hardFilter', () => {
 describe('prerankScore and prerank', () => {
   it('counts a title hit 3, a hit elsewhere in the payload 1, each keyword once', () => {
     const j = job({
-      title: 'Koch in Vollzeit',
-      raw: { beruf: { name: 'Küchenhilfe' }, tags: ['Gastro'] },
+      title: 'Alpha in Vollzeit',
+      raw: { beruf: { name: 'Küchenhilfe' }, tags: ['Gamma'] },
     });
-    expect(prerankScore(j, ['koch'])).toBe(3);
-    expect(prerankScore(j, ['gastro'])).toBe(1);
-    expect(prerankScore(j, ['koch', 'gastro', 'KOCH', 'nichts'])).toBe(4);
+    expect(prerankScore(j, ['alpha'])).toBe(3);
+    expect(prerankScore(j, ['gamma'])).toBe(1);
+    expect(prerankScore(j, ['alpha', 'gamma', 'KOCH', 'nichts'])).toBe(4);
     expect(prerankScore(j, [])).toBe(0);
     expect(prerankScore(j, ['  '])).toBe(0);
   });
@@ -169,9 +168,9 @@ describe('hardFilter remote detection', () => {
   const isRemote = (j: MatchableJob): boolean => !hardFilter(j, refuse, places).pass;
 
   it('does not read remote into other phrases', () => {
-    expect(isRemote(job({ title: 'Remote Sensing Engineer', location: 'Bamberg' }))).toBe(false);
-    expect(isRemote(job({ title: 'Engineer, not remote', location: 'Bamberg' }))).toBe(false);
-    expect(isRemote(job({ title: 'Engineer', location: 'Bamberg (kein Homeoffice)' }))).toBe(false);
+    expect(isRemote(job({ title: 'Remote Sensing Engineer', location: 'Köln' }))).toBe(false);
+    expect(isRemote(job({ title: 'Engineer, not remote', location: 'Köln' }))).toBe(false);
+    expect(isRemote(job({ title: 'Engineer', location: 'Köln (kein Homeoffice)' }))).toBe(false);
   });
 
   it('reads remote from the place, the work type fields and the title phrases sources use', () => {

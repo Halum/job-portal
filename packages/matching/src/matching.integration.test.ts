@@ -1,16 +1,22 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
-import { createMatching, matchingMigrations, type MatchableJob, type Matching } from './index';
+import {
+  createMatching,
+  matchingMigrations,
+  MAX_QUERIES,
+  type MatchableJob,
+  type Matching,
+} from './index';
 
 const USER = '00000000-0000-4000-8000-000000000001';
 const OTHER = '00000000-0000-4000-8000-000000000002';
 
 const job = (id: string, over: Partial<MatchableJob> = {}): MatchableJob => ({
   id,
-  title: 'Koch (m/w/d)',
+  title: 'Alpha (m/w/d)',
   company: 'Beispiel Firma',
-  location: 'Bamberg',
+  location: 'Köln',
   raw: {},
   recency: new Date('2026-01-01'),
   ...over,
@@ -43,12 +49,12 @@ describe('matching against real Postgres', () => {
   });
 
   it('keeps Target names unique per user and updates in place', async () => {
-    const a = await matching.upsertTarget(USER, { name: 'one', criteria: { keywords: ['koch'] } });
+    const a = await matching.upsertTarget(USER, { name: 'one', criteria: { keywords: ['alpha'] } });
     const again = await matching.upsertTarget(USER, { name: 'one', criteria: { radiusKm: 0 } });
     const other = await matching.upsertTarget(OTHER, { name: 'one' });
     expect(again.id).toBe(a.id);
     expect(other.id).not.toBe(a.id);
-    expect(again.criteria).toMatchObject({ keywords: ['koch'], radiusKm: 0 });
+    expect(again.criteria).toMatchObject({ keywords: ['alpha'], radiusKm: 0 });
     expect((await matching.listTargets(USER)).map((t) => t.name)).toEqual(['one']);
     expect(await matching.listTargets(OTHER)).toHaveLength(1);
   });
@@ -57,15 +63,15 @@ describe('matching against real Postgres', () => {
     await matching.upsertTarget(USER, { name: 'race' });
     await Promise.all([
       matching.upsertTarget(USER, { name: 'race', criteria: { keywords: ['a'] } }),
-      matching.upsertTarget(USER, { name: 'race', criteria: { locations: ['Bamberg'] } }),
+      matching.upsertTarget(USER, { name: 'race', criteria: { locations: ['Köln'] } }),
       matching.upsertTarget(USER, { name: 'race', criteria: { radiusKm: 5 } }),
     ]);
     const race = (await matching.listTargets(USER)).find((t) => t.name === 'race');
-    expect(race?.criteria).toMatchObject({ keywords: ['a'], locations: ['Bamberg'], radiusKm: 5 });
+    expect(race?.criteria).toMatchObject({ keywords: ['a'], locations: ['Köln'], radiusKm: 5 });
   });
 
   it('stores Global defaults per user, a patch keeps the other fields, null clears', async () => {
-    await matching.updateGlobalDefaults(USER, { exclusionWords: ['Pflege'], alertThreshold: 0 });
+    await matching.updateGlobalDefaults(USER, { exclusionWords: ['Spam'], alertThreshold: 0 });
     const next = await matching.updateGlobalDefaults(USER, {
       salaryFloor: 0,
       exclusionWords: null,
@@ -78,23 +84,23 @@ describe('matching against real Postgres', () => {
   describe('a run over Jobs', () => {
     beforeAll(async () => {
       await matching.updateGlobalDefaults(USER, {
-        exclusionWords: ['Pflege'],
+        exclusionWords: ['Spam'],
         blockedCompanies: ['Blockiert'],
         keywords: null,
         alertThreshold: null,
       });
       await matching.upsertTarget(USER, {
         name: 'cooks',
-        criteria: { keywords: ['koch'], locations: ['Bamberg'], radiusKm: 20, prerankTopN: 3 },
+        criteria: { keywords: ['alpha'], locations: ['Köln'], radiusKm: 20, prerankTopN: 3 },
       });
       await matching.upsertTarget(USER, {
         name: 'anything nearby',
-        criteria: { keywords: [], locations: ['Bamberg'], radiusKm: 0 },
+        criteria: { keywords: [], locations: ['Köln'], radiusKm: 0 },
       });
       await matching.upsertTarget(USER, {
         name: 'paused',
         paused: true,
-        criteria: { keywords: ['koch'] },
+        criteria: { keywords: ['alpha'] },
       });
       await matching.upsertTarget(USER, { name: 'race', paused: true }); // out of the way
       await matching.upsertTarget(USER, { name: 'one', paused: true });
@@ -109,11 +115,11 @@ describe('matching against real Postgres', () => {
     it('applies hard filters and the prerank per Target, and records unknown places', async () => {
       jobs = [
         job(J(1)),
-        job(J(2), { title: 'Koch Pflege' }), // global exclusion word
+        job(J(2), { title: 'Alpha Spam' }), // global exclusion word
         job(J(3), { company: 'Blockiert GmbH' }), // global blocked company
         job(J(4), { location: 'Berlin' }), // outside the radius
         job(J(5), { location: 'Musterstadt' }), // unknown place: passes, flagged
-        job(J(6), { title: 'Kellner' }), // no keyword hit
+        job(J(6), { title: 'Beta' }), // no keyword hit
         job(J(7), { title: 'Webentwickler remote', location: 'Berlin' }), // remote skips the radius
       ];
       const result = await matching.run(
@@ -122,7 +128,7 @@ describe('matching against real Postgres', () => {
       );
 
       const cooks = (await matching.listJobIds(USER, { targetId: await target('cooks') })).sort();
-      // Only titles/payload with "koch" pass: J1 and J5 (J7 and J6 have no keyword).
+      // Only titles/payload with "alpha" pass: J1 and J5 (J7 and J6 have no keyword).
       expect(cooks).toEqual([J(1), J(5)]);
       const nearby = (
         await matching.listJobIds(USER, { targetId: await target('anything nearby') })
@@ -167,26 +173,56 @@ describe('matching against real Postgres', () => {
   describe('searchQueries', () => {
     it('gives one search per keyword and location of each active Target and skips empty ones', async () => {
       const user = '00000000-0000-4000-8000-0000000000aa';
-      await matching.updateGlobalDefaults(user, { radiusKm: 25, locations: ['Bamberg'] });
-      await matching.upsertTarget(user, { name: 'a', criteria: { keywords: ['koch', 'kellner'] } });
+      await matching.updateGlobalDefaults(user, { radiusKm: 7, locations: ['Köln'] });
+      await matching.upsertTarget(user, { name: 'a', criteria: { keywords: ['alpha', 'beta'] } });
       await matching.upsertTarget(user, {
         name: 'b',
-        criteria: { keywords: ['koch'], radiusKm: 0 },
+        criteria: { keywords: ['alpha'], radiusKm: 0 },
       });
       await matching.upsertTarget(user, { name: 'c', paused: true, criteria: { keywords: ['x'] } });
       expect(await matching.searchQueries(user)).toEqual([
-        { was: 'koch', wo: 'Bamberg', umkreis: 25 },
-        { was: 'kellner', wo: 'Bamberg', umkreis: 25 },
-        { was: 'koch', wo: 'Bamberg', umkreis: 0 },
+        { was: 'alpha', wo: 'Köln', umkreis: 7 },
+        { was: 'beta', wo: 'Köln', umkreis: 7 },
+        { was: 'alpha', wo: 'Köln', umkreis: 0 },
       ]);
 
       await matching.updateGlobalDefaults(user, { locations: null, radiusKm: null });
       await matching.upsertTarget(user, { name: 'd', criteria: {} });
-      expect(await matching.searchQueries(user)).toEqual([{ was: 'koch' }, { was: 'kellner' }]);
+      expect(await matching.searchQueries(user)).toEqual([{ was: 'alpha' }, { was: 'beta' }]);
     });
 
     it('is empty for a user with no Targets', async () => {
       expect(await matching.searchQueries('00000000-0000-4000-8000-0000000000bb')).toEqual([]);
+    });
+  });
+
+  describe('Global defaults edit', () => {
+    const GD = '00000000-0000-4000-8000-0000000000dd';
+
+    it('rematches Targets that inherit: a new default exclusion word drops the Job', async () => {
+      jobs = [job(J(80), { title: 'Alpha Spam' }), job(J(81), { title: 'Alpha Plain' })];
+      const made = await matching.upsertTarget(GD, {
+        name: 'inherits',
+        criteria: { keywords: ['alpha'] },
+      });
+      const ids = () => matching.listJobIds(GD, { targetId: made.id });
+      expect((await ids()).sort()).toEqual([J(80), J(81)]);
+      await matching.updateGlobalDefaults(GD, { exclusionWords: ['spam'] });
+      expect(await ids()).toEqual([J(81)]);
+    });
+  });
+
+  describe('searchQueries cap', () => {
+    it('returns at most MAX_QUERIES searches', async () => {
+      const u = '00000000-0000-4000-8000-0000000000ee';
+      await matching.upsertTarget(u, {
+        name: 'many',
+        criteria: {
+          keywords: Array.from({ length: 50 }, (_, i) => `w${String(i)}`),
+          locations: ['Köln', 'Berlin'],
+        },
+      });
+      expect(await matching.searchQueries(u)).toHaveLength(MAX_QUERIES);
     });
   });
 

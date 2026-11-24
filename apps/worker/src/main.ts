@@ -3,23 +3,13 @@ import { createBoardDirectory } from '@job-portal/boards';
 import { loadConfig } from '@job-portal/config';
 import { createDb, runMigrationsWithLock } from '@job-portal/db';
 import { createMatching } from '@job-portal/matching';
-import {
-  BAMBASE,
-  BUNDESAGENTUR,
-  bundesagenturQuery,
-  ATS_IDS,
-  createAtsSource,
-  createBambaseSource,
-  createBundesagenturSource,
-  createDiscovery,
-  createRateLimitedFetch,
-  type Source,
-} from '@job-portal/discovery';
+import { createDiscovery } from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
 import { createPipeline } from '@job-portal/pipeline';
 import { createTracker } from '@job-portal/tracker';
 import { createLogger } from '@job-portal/shared';
-import { startWorker, type ScheduledSource } from './worker';
+import { buildSources } from './sources';
+import { startWorker } from './worker';
 
 const config = loadConfig();
 const logger = createLogger({ level: config.logLevel, name: 'worker' });
@@ -40,33 +30,10 @@ const matching = createMatching(db, {
   defaultPrerankTopN: config.prerankTopN,
 });
 
-const sources: Source[] = [];
-const scheduled: ScheduledSource[] = [];
-const { bundesagentur, bambase } = config.sources;
-if (bundesagentur) {
-  sources.push(
-    createBundesagenturSource({
-      queries: async () => (await matching.searchQueries(user.id)).map(bundesagenturQuery),
-    }),
-  );
-  scheduled.push({ sourceId: BUNDESAGENTUR, intervalMinutes: bundesagentur.intervalMinutes });
-}
-if (bambase) {
-  sources.push(createBambaseSource());
-  scheduled.push({ sourceId: BAMBASE, intervalMinutes: bambase.intervalMinutes });
-}
-const discovery = createDiscovery(db, sources);
-// Company boards: only marked boards of the Board directory are fetched, at a bounded rate per ATS host.
 const directory = createBoardDirectory(db);
-const limitedFetch = createRateLimitedFetch(config.boardRequestsPerSecond);
-for (const ats of ATS_IDS) {
-  const source = config.sources[ats];
-  if (!source) continue;
-  sources.push(
-    createAtsSource(ats, { listBoards: () => directory.listMarked(ats), fetch: limitedFetch }),
-  );
-  scheduled.push({ sourceId: ats, intervalMinutes: source.intervalMinutes });
-}
+const { sources, scheduled } = buildSources(config, { matching, directory, userId: user.id });
+// Discovery snapshots its Sources, so it is created only now, with every one of them in the list.
+const discovery = createDiscovery(db, sources);
 const tracker = createTracker(db, discovery);
 const pipeline = createPipeline(db, discovery, { matching });
 

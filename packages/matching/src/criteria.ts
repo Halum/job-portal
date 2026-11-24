@@ -15,17 +15,17 @@ export const criteriaSchema = z.object({
   /** Places (city names or postcodes) jobs should be near. */
   locations: words,
   /** Kilometres around each location; 0 means the same city only. */
-  radiusKm: z.number().int().min(0).nullable(),
+  radiusKm: z.number().int().min(0).max(500).nullable(),
   /** False drops remote postings, true lets them past the location check, null does not care. */
   remoteAllowed: z.boolean().nullable(),
   /** 0 means no floor. */
-  salaryFloor: z.number().int().min(0).nullable(),
+  salaryFloor: z.number().int().min(0).max(10_000_000).nullable(),
   /** Used by AI scoring; 0 lets everything through. */
   alertThreshold: z.number().int().min(0).max(100).nullable(),
   /** What the user can speak, for the AI fit score, for example "de:A2". */
   languageAbility: words,
-  /** Integer of at least 1. */
-  prerankTopN: z.number().int().min(1).nullable(),
+  /** Integer from 1 to 200. */
+  prerankTopN: z.number().int().min(1).max(200).nullable(),
 });
 
 export type Criteria = z.infer<typeof criteriaSchema>;

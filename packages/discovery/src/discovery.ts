@@ -413,7 +413,6 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
     ) {
       if (jobIds && jobIds.length === 0) return { jobs: [], nextCursor: null };
       const size = Math.min(Math.max(limit, 1), MAX_LIMIT);
-      if (jobIds && jobIds.length === 0) return { jobs: [], nextCursor: null };
       const rows = await db
         .select()
         .from(jobs)
@@ -421,10 +420,10 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
           and(
             eq(jobs.userId, userId),
             cursor ? gt(jobs.id, cursor) : undefined,
-            // ponytail: every candidate id is a bind parameter (Postgres ceiling about 65k); upgrade:
-            // page the candidates first and pass one page of ids.
             discoveredSince ? gte(jobs.createdAt, discoveredSince) : undefined,
             discoveryState ? eq(jobs.discoveryState, discoveryState) : undefined,
+            // ponytail: every candidate id is a bind parameter (Postgres ceiling about 65k); upgrade:
+            // page the candidates first and pass one page of ids.
             jobIds ? inArray(jobs.id, jobIds) : undefined,
           ),
         )

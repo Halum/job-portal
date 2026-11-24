@@ -32,7 +32,7 @@ function fakeFetch(
 describe('bundesagentur source', () => {
   it('normalizes every recorded result, using referenznummer as the source posting id', async () => {
     const { fetch, calls } = fakeFetch(200, fixture);
-    const source = createBundesagenturSource({ query: 'wo=Musterstadt&umkreis=25', fetch });
+    const source = createBundesagenturSource({ query: 'wo=Musterstadt&umkreis=7', fetch });
 
     const { postings, errors } = await source.fetch();
 
@@ -52,7 +52,7 @@ describe('bundesagentur source', () => {
     expect(calls[0]?.signal).toBe(true); // outbound requests carry a timeout
     expect(calls[0]?.key).toBe('jobboerse-jobsuche');
     expect(new URL(calls[0]?.url ?? '').searchParams.get('wo')).toBe('Musterstadt');
-    expect(new URL(calls[0]?.url ?? '').searchParams.get('umkreis')).toBe('25');
+    expect(new URL(calls[0]?.url ?? '').searchParams.get('umkreis')).toBe('7');
   });
 
   it('passes only known query parameters to the API', async () => {
@@ -175,8 +175,8 @@ describe('bundesagentur source', () => {
 
     it('builds the query string from Matching parameters', () => {
       expect(bundesagenturQuery({})).toBe('');
-      expect(bundesagenturQuery({ was: 'Koch & Küche', wo: '96047', umkreis: 25 })).toBe(
-        'was=Koch+%26+K%C3%BCche&wo=96047&umkreis=25',
+      expect(bundesagenturQuery({ was: 'Alpha & Küche', wo: '50667', umkreis: 7 })).toBe(
+        'was=Alpha+%26+K%C3%BCche&wo=50667&umkreis=7',
       );
     });
   });
