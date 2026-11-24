@@ -48,13 +48,13 @@ Terms name things in code, database, tests and issues. Source of truth: the spec
 - **Master cover letter**: the one cover letter file the user uploads that shows how they write letters.
 - **Career bank**: the user's global resume and cover letter material, broken into Work experiences, Experience points, Resume entries, the Cover letter outline, Cover letter paragraphs, the Writing style profile and contact details.
 - **Work experience**: one role at one organisation, with its dates and place.
-- **Experience point**: one achievement line inside a Work experience, tagged with the skills it shows.
+- **Experience point**: one achievement line inside a Work experience, labelled with the skills it shows.
 - **Resume entry**: one education, skill, language or certificate item in the Career bank.
 - **Cover letter outline**: the user's own cover letter sections, in their order.
-- **Cover letter paragraph**: one paragraph for a section of the Cover letter outline, tagged by theme or skill.
+- **Cover letter paragraph**: one paragraph for a section of the Cover letter outline, labelled with its themes and skills.
 - **Writing style profile**: how the user writes: tone, sentence length, words used and avoided, salutation and sign-off.
 - **Target career bank**: one Target's view of the Career bank: everything inherited, changed only by Career bank overrides.
-- **Career bank override**: a change one Target makes to its Target career bank: hide an item, replace its text, or add a Target-only item.
+- **Career bank override**: a change one Target makes to its Target career bank: hide an item, replace it, or add a Target-only item.
 - **Career bank revision**: one recorded change to a Career bank item, with old text, new text and reason; a delete is a revision that hides the item.
 - **Requirement gap**: something a posting asks for that no Experience point covers.
 - **Enrichment question**: a question asked while preparing an application to close a Requirement gap; a confirmed answer goes into the Career bank.
