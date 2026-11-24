@@ -71,14 +71,16 @@ export interface Tracker {
     actor: Actor,
     evidence?: string,
   ) => Promise<JobTracking>;
+  /** Pass the caller's transaction to make the change part of it (the Mail ledger row commits with it). */
   setApplicationStatus: (
     userId: string,
     jobId: string,
     change: ApplicationChange,
+    tx?: DbTx,
   ) => Promise<JobTracking>;
   /** Reverts the last state-changing event as a new event; refused if that event is itself an undo. */
   undoLastChange: (userId: string, jobId: string, actor: Actor) => Promise<JobTracking>;
-  addNote: (userId: string, jobId: string, text: string) => Promise<Note>;
+  addNote: (userId: string, jobId: string, text: string, tx?: Pick<Db, 'insert'>) => Promise<Note>;
   getTimeline: (
     userId: string,
     jobId: string,
@@ -178,6 +180,9 @@ export function createTracker(
     return { ...view(row), discoveryState: newDiscoveryState ?? discoveryState };
   }
 
+  const inTx = <T>(outer: DbTx | undefined, fn: (tx: DbTx) => Promise<T>): Promise<T> =>
+    outer ? fn(outer) : db.transaction(fn);
+
   const refuse = (reason: string | null): void => {
     if (reason) throw new TrackerError(reason);
   };
@@ -230,8 +235,8 @@ export function createTracker(
         );
       }),
 
-    setApplicationStatus: (userId, jobId, change) =>
-      db.transaction(async (tx) => {
+    setApplicationStatus: (userId, jobId, change, outer) =>
+      inTx(outer, async (tx) => {
         if (change.to !== 'applied' && (change.appliedOn ?? change.applyBy) !== undefined) {
           throw new TrackerError('appliedOn and applyBy go with Applied only');
         }
@@ -297,8 +302,8 @@ export function createTracker(
             });
       }),
 
-    async addNote(userId, jobId, text) {
-      const [note] = await db.insert(notes).values({ userId, jobId, text }).returning();
+    async addNote(userId, jobId, text, tx = db) {
+      const [note] = await tx.insert(notes).values({ userId, jobId, text }).returning();
       if (!note) throw new Error('note insert returned no row');
       return { id: note.id, text: note.text, createdAt: note.createdAt };
     },
