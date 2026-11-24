@@ -5,8 +5,8 @@ export interface MailText {
   body: string;
 }
 
-/** A Job the mail may belong to, reduced to what narrowing needs. */
-export interface CandidateJob {
+/** A Job a reply may belong to (not a Matching Candidate), reduced to what narrowing needs. */
+export interface ReplyCandidate {
   id: string;
   title: string;
   company: string | null;
@@ -93,8 +93,14 @@ const companyKey = (company: string | null): string | null => {
 
 const displayName = (from: string): string => from.replace(/<[^>]*>/g, ' ');
 
-/** Jobs the mail may belong to: by sender domain, company name in the text, and ATS senders. */
-export function narrow(mail: MailText, jobs: CandidateJob[]): CandidateJob[] {
+/** A reply candidate with whether the sender's own domain fits it (not only a name in the text). */
+export type NarrowedCandidate = ReplyCandidate & { strong: boolean };
+
+/**
+ * Jobs the mail may belong to: by sender domain, company name in the text, and ATS senders. `strong` marks the
+ * ones the sender's domain (or an ATS sender) backs; a name in text anyone can write is weak.
+ */
+export function narrow(mail: MailText, jobs: ReplyCandidate[]): NarrowedCandidate[] {
   const domain = senderDomain(mail.from);
   const ats = domain !== null && isAts(domain);
   const senderBrand = domain === null || ats ? null : brand(domain);
@@ -107,14 +113,20 @@ export function narrow(mail: MailText, jobs: CandidateJob[]): CandidateJob[] {
       senderBrand.length >= MIN_KEY &&
       ((key !== null && (key.includes(senderBrand) || senderBrand.includes(key))) ||
         job.hosts.some((h) => !isAts(h) && brand(h) === senderBrand));
-    return byName || byDomain ? [{ job, score: Number(byName) + Number(byDomain) }] : [];
+    // An ATS sender says nothing of the company in its address, so a name in its text is what ties it to a Job.
+    const strong = byDomain || (ats && byName);
+    return byName || byDomain ? [{ job, strong, score: Number(byName) + Number(byDomain) }] : [];
   });
   if (scored.length === 0 && ats) {
-    return jobs.filter((j) => j.hosts.some(isAts)).slice(0, MAX_CANDIDATES);
+    // Any Job posted on that ATS: too loose to trust on its own.
+    return jobs
+      .filter((j) => j.hosts.some(isAts))
+      .slice(0, MAX_CANDIDATES)
+      .map((job) => ({ ...job, strong: false }));
   }
   return scored
     .sort((a, b) => b.score - a.score)
-    .map((s) => s.job)
+    .map((s) => ({ ...s.job, strong: s.strong }))
     .slice(0, MAX_CANDIDATES);
 }
 

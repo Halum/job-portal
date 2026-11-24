@@ -10,13 +10,20 @@ export interface FakeMail {
   receivedAt: Date;
   /** A part with a file name, which the reader must skip. */
   attachment?: string;
+  /**
+   * The Authentication-Results header Gmail adds: a string is used as it is, null means none. By default Gmail
+   * reports dmarc=pass for the domain of From.
+   */
+  authResults?: string | null;
 }
 
 export interface FakeGmail {
   fetch: typeof fetch;
   mails: FakeMail[];
-  /** How the token endpoint answers: ok, an invalid_grant 400, or a 503. */
-  tokenMode: 'ok' | 'invalid_grant' | 'unavailable';
+  /** How the token endpoint answers: ok, an invalid_grant 400, any other 400, or a 503. */
+  tokenMode: 'ok' | 'invalid_grant' | 'bad_request' | 'unavailable';
+  /** When set, the Gmail API answers every request with this status and Google-style error reason. */
+  apiError: { status: number; reason: string } | null;
   /** When true the API answers 401 to every request, whatever the token. */
   rejectAccessTokens: boolean;
   /** Every request as "METHOD url". */
@@ -29,7 +36,13 @@ export interface FakeGmail {
 const b64 = (s: string): string => Buffer.from(s, 'utf8').toString('base64url');
 
 const payload = (m: FakeMail): object => {
+  const domain = /@([a-z0-9.-]+)/i.exec(m.from)?.[1]?.toLowerCase() ?? 'unknown.invalid';
+  const auth =
+    m.authResults === undefined
+      ? `mx.google.com; dkim=pass header.i=@${domain}; spf=pass; dmarc=pass (p=NONE) header.from=${domain}`
+      : m.authResults;
   const headers = [
+    ...(auth === null ? [] : [{ name: 'Authentication-Results', value: auth }]),
     { name: 'From', value: m.from },
     { name: 'Subject', value: m.subject },
   ];
@@ -55,6 +68,7 @@ export function createFakeGmail(mails: FakeMail[] = []): FakeGmail {
   const fake: FakeGmail = {
     mails,
     tokenMode: 'ok',
+    apiError: null,
     rejectAccessTokens: false,
     requests: [],
     fetched: [],
@@ -68,6 +82,9 @@ export function createFakeGmail(mails: FakeMail[] = []): FakeGmail {
         if (fake.tokenMode === 'invalid_grant') {
           return Promise.resolve(Response.json({ error: 'invalid_grant' }, { status: 400 }));
         }
+        if (fake.tokenMode === 'bad_request') {
+          return Promise.resolve(Response.json({ error: 'invalid_request' }, { status: 400 }));
+        }
         if (fake.tokenMode === 'unavailable')
           return Promise.resolve(new Response('', { status: 503 }));
         fake.tokensIssued += 1;
@@ -78,6 +95,14 @@ export function createFakeGmail(mails: FakeMail[] = []): FakeGmail {
       const auth = new Headers(init?.headers).get('authorization') ?? '';
       if (fake.rejectAccessTokens || !auth.startsWith('Bearer token-')) {
         return Promise.resolve(new Response('', { status: 401 }));
+      }
+      if (fake.apiError) {
+        return Promise.resolve(
+          Response.json(
+            { error: { errors: [{ reason: fake.apiError.reason }] } },
+            { status: fake.apiError.status },
+          ),
+        );
       }
       const single = /\/messages\/([^/]+)$/.exec(url.pathname);
       if (single?.[1]) {
@@ -94,7 +119,12 @@ export function createFakeGmail(mails: FakeMail[] = []): FakeGmail {
       }
       const after = /after:(\d+)/.exec(url.searchParams.get('q') ?? '');
       const since = after?.[1] ? Number(after[1]) * 1000 : 0;
-      const all = fake.mails.filter((m) => m.receivedAt.getTime() >= since);
+      const until =
+        Number(/before:(\d+)/.exec(url.searchParams.get('q') ?? '')?.[1] ?? Infinity) * 1000;
+      // Gmail lists newest first.
+      const all = fake.mails
+        .filter((m) => m.receivedAt.getTime() >= since && m.receivedAt.getTime() < until)
+        .sort((a, b) => b.receivedAt.getTime() - a.receivedAt.getTime());
       const start = Number(url.searchParams.get('pageToken') ?? '0');
       const page = all.slice(start, start + 2);
       return Promise.resolve(

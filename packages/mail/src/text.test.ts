@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { cleanBody, isJobLike, narrow, senderDomain, type CandidateJob } from './text';
+import { cleanBody, isJobLike, narrow, senderDomain, type ReplyCandidate } from './text';
 
-const job = (id: string, company: string | null, hosts: string[] = []): CandidateJob => ({
+const job = (id: string, company: string | null, hosts: string[] = []): ReplyCandidate => ({
   id,
   title: 'Role',
   company,
@@ -75,6 +75,29 @@ describe('narrow', () => {
   it('returns nothing when nothing fits, and ignores too-short company names', () => {
     expect(narrow(mail('x@unrelated.example', 'Hello'), jobs)).toEqual([]);
     expect(narrow(mail('x@ab.example', 'ab ab'), [job('9', 'AB')])).toEqual([]);
+  });
+});
+
+describe('narrow strong flag', () => {
+  const jobs = [
+    job('1', 'Beispiel Firma GmbH', ['careers.beispiel-firma.example']),
+    job('3', null, ['boards.greenhouse.io']),
+  ];
+  const mail = (from: string, subject: string, body = '') => ({ from, subject, body });
+
+  it('is strong for a sender domain that fits the Job, and weak for a name in the text only', () => {
+    expect(narrow(mail('hr@beispiel-firma.example', 'Hi'), jobs)).toEqual([
+      expect.objectContaining({ id: '1', strong: true }),
+    ]);
+    expect(narrow(mail('x@gmail.example', 'Hi', 'I write about Beispiel Firma'), jobs)).toEqual([
+      expect.objectContaining({ id: '1', strong: false }),
+    ]);
+  });
+
+  it('is strong for an ATS sender, which says the company only in its text', () => {
+    expect(
+      narrow(mail('no-reply@us.greenhouse-mail.io', 'Update', 'Beispiel Firma'), jobs),
+    ).toEqual([expect.objectContaining({ id: '1', strong: true })]);
   });
 });
 

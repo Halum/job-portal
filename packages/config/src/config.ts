@@ -111,24 +111,16 @@ const envSchema = z
     if (e.AI_RUNNER === 'openrouter')
       (['OPENROUTER_API_KEY', 'OPENROUTER_MODEL'] as const).forEach(need);
     if (e.AI_RUNNER === 'claude') need('CLAUDE_MODEL');
-    // The three Gmail secrets only make sense together.
-    const gmailSecrets = ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN'] as const;
-    if (gmailSecrets.some((k) => e[k] !== undefined)) {
-      for (const k of gmailSecrets)
+    // Settings that only make sense together: when one is set the others are required.
+    const together = (keys: readonly (keyof typeof e)[]): void => {
+      const set = keys.find((k) => e[k] !== undefined);
+      if (set === undefined) return;
+      for (const k of keys)
         if (e[k] === undefined)
-          ctx.addIssue({
-            code: 'custom',
-            path: [k],
-            message: 'required when another GMAIL_ secret is set',
-          });
-    }
-    // The webhook URL and the topic id only make sense together.
-    for (const [set, missing] of [
-      ['NOTIFY_WEBHOOK_URL', 'NOTIFY_TOPIC_ID'],
-      ['NOTIFY_TOPIC_ID', 'NOTIFY_WEBHOOK_URL'],
-    ] as const)
-      if (e[set] !== undefined && e[missing] === undefined)
-        ctx.addIssue({ code: 'custom', path: [missing], message: `required when ${set} is set` });
+          ctx.addIssue({ code: 'custom', path: [k], message: `required when ${set} is set` });
+    };
+    together(['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN']);
+    together(['NOTIFY_WEBHOOK_URL', 'NOTIFY_TOPIC_ID']);
   });
 
 export interface IntervalConfig {

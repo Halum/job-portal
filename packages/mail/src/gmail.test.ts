@@ -13,6 +13,7 @@ const mail = (id: string, over: Partial<FakeMail> = {}): FakeMail => ({
 const client = (
   fake: ReturnType<typeof createFakeGmail>,
   now = () => new Date('2026-11-24T00:00:00Z'),
+  maxPages?: number,
 ) =>
   createGmailClient({
     clientId: 'client-id-placeholder',
@@ -20,6 +21,7 @@ const client = (
     refreshToken: 'refresh-token-placeholder',
     fetch: fake.fetch,
     now,
+    ...(maxPages === undefined ? {} : { maxPages }),
   });
 
 describe('Gmail client against a fake Gmail API', () => {
@@ -31,12 +33,17 @@ describe('Gmail client against a fake Gmail API', () => {
       mail('d'),
     ]);
     const gmail = client(fake);
-    const ids = await gmail.listIds(new Date('2026-11-10T00:00:00Z'));
-    expect(ids).toEqual(['b', 'c', 'd']);
+    const listed = await gmail.listIds(new Date('2026-11-10T00:00:00Z'));
+    expect(listed).toEqual({
+      ids: expect.arrayContaining(['b', 'c', 'd']) as string[],
+      truncated: false,
+    });
+    expect(listed.ids).toHaveLength(3);
     expect(fake.requests.filter((r) => r.includes('/messages?'))).toHaveLength(2);
     expect(await gmail.get('b')).toEqual({
       id: 'b',
       from: 'Hiring <hr@example.invalid>',
+      authenticatedDomain: 'example.invalid',
       subject: 'Subject b',
       text: 'Body b',
       receivedAt: new Date('2026-11-20T10:00:00Z'),
@@ -90,5 +97,53 @@ describe('Gmail client against a fake Gmail API', () => {
     expect((err as Error).message).not.toMatch(/placeholder/);
     const missing = createFakeGmail();
     await expect(client(missing).get('nope')).rejects.toBeInstanceOf(GmailError);
+  });
+
+  it('says when the page cap cut the list, and a before bound reaches the older mail', async () => {
+    const at = (day: number) => new Date(`2026-11-${String(day).padStart(2, '0')}T10:00:00Z`);
+    const fake = createFakeGmail([
+      mail('a', { receivedAt: at(1) }),
+      mail('b', { receivedAt: at(2) }),
+      mail('c', { receivedAt: at(3) }),
+    ]);
+    const gmail = client(fake, undefined, 1);
+    expect(await gmail.listIds(new Date(0))).toEqual({ ids: ['c', 'b'], truncated: true });
+    expect(await gmail.listIds(new Date(0), at(2))).toEqual({ ids: ['a'], truncated: false });
+  });
+
+  it('reports the domain Gmail authenticated for From, and none for a failed or missing check', async () => {
+    const fake = createFakeGmail([
+      mail('pass'),
+      mail('fail', { authResults: 'mx.google.com; dmarc=fail header.from=example.invalid' }),
+      mail('none', { authResults: null }),
+      mail('planted', { authResults: 'evil.example; dmarc=pass header.from=example.invalid' }),
+    ]);
+    const gmail = client(fake);
+    expect((await gmail.get('pass')).authenticatedDomain).toBe('example.invalid');
+    for (const id of ['fail', 'none', 'planted']) {
+      expect((await gmail.get(id)).authenticatedDomain).toBeNull();
+    }
+  });
+
+  it('treats a lost permission as an auth error and a quota or odd 400 as an outage', async () => {
+    const forbidden = createFakeGmail();
+    forbidden.apiError = { status: 403, reason: 'insufficientPermissions' };
+    await expect(client(forbidden).listIds(new Date(0))).rejects.toBeInstanceOf(GmailAuthError);
+
+    const quota = createFakeGmail();
+    quota.apiError = { status: 403, reason: 'rateLimitExceeded' };
+    const err = await client(quota)
+      .listIds(new Date(0))
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GmailError);
+    expect(err).not.toBeInstanceOf(GmailAuthError);
+
+    const odd = createFakeGmail();
+    odd.tokenMode = 'bad_request';
+    const err2 = await client(odd)
+      .listIds(new Date(0))
+      .catch((e: unknown) => e);
+    expect(err2).toBeInstanceOf(GmailError);
+    expect(err2).not.toBeInstanceOf(GmailAuthError);
   });
 });

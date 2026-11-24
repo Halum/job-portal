@@ -87,7 +87,7 @@ export interface Tracker {
   ) => Promise<JobTracking>;
   /** Reverts the last state-changing event as a new event; refused if that event is itself an undo. */
   undoLastChange: (userId: string, jobId: string, actor: Actor) => Promise<JobTracking>;
-  addNote: (userId: string, jobId: string, text: string, tx?: Pick<Db, 'insert'>) => Promise<Note>;
+  addNote: (userId: string, jobId: string, text: string, tx?: DbTx) => Promise<Note>;
   /**
    * The Gone cold check: moves every Applied, Screening, Interview or Offer Job whose last Timeline event
    * (any actor, undo included, notes not) is N or more calendar days old in the user's timezone to Gone cold,
@@ -382,8 +382,8 @@ export function createTracker(
       return moves;
     },
 
-    async addNote(userId, jobId, text, tx = db) {
-      const [note] = await tx.insert(notes).values({ userId, jobId, text }).returning();
+    async addNote(userId, jobId, text, tx) {
+      const [note] = await (tx ?? db).insert(notes).values({ userId, jobId, text }).returning();
       if (!note) throw new Error('note insert returned no row');
       return { id: note.id, text: note.text, createdAt: note.createdAt };
     },

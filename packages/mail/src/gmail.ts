@@ -4,8 +4,7 @@ const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me/messages';
 const TIMEOUT_MS = 15_000;
 const PAGE_SIZE = 100;
-/** ponytail: at most this many list pages per poll (2000 mails); the cursor catches up on later polls. */
-const MAX_PAGES = 20;
+const DEFAULT_MAX_PAGES = 20;
 /** The access token is renewed this long before it expires. */
 const EXPIRY_MARGIN_MS = 60_000;
 
@@ -21,6 +20,11 @@ export class GmailError extends Error {
 export interface GmailMessage {
   id: string;
   from: string;
+  /**
+   * The domain Gmail itself authenticated for the From address (its own Authentication-Results header says
+   * dmarc=pass for that header.from), or null. Nothing else in a mail proves who sent it.
+   */
+  authenticatedDomain: string | null;
   subject: string;
   /** The text body (plain, else html turned to text); attachments are never read. */
   text: string;
@@ -28,8 +32,11 @@ export interface GmailMessage {
 }
 
 export interface GmailClient {
-  /** Ids of mail received at or after the instant, newest first, apart from sent mail and drafts. */
-  listIds: (after: Date) => Promise<string[]>;
+  /**
+   * Ids of mail received at or after `after` and before `before`, newest first, apart from sent mail and
+   * drafts. `truncated` is true when the page cap cut the list: older mail of the window is still unlisted.
+   */
+  listIds: (after: Date, before?: Date) => Promise<{ ids: string[]; truncated: boolean }>;
   get: (id: string) => Promise<GmailMessage>;
 }
 
@@ -39,6 +46,8 @@ export interface GmailOptions {
   refreshToken: string;
   fetch?: typeof fetch;
   now?: () => Date;
+  /** List pages (100 ids each) read per call. Default 20. */
+  maxPages?: number;
 }
 
 interface Part {
@@ -64,6 +73,16 @@ const partSchema: z.ZodType<Part> = z.lazy(() =>
   }),
 );
 const messageSchema = z.object({ id: z.string(), internalDate: z.string(), payload: partSchema });
+
+/** Gmail's own verdict (it writes the topmost Authentication-Results header): dmarc=pass and for which domain. */
+function authenticatedDomain(
+  headers: { name: string; value: string }[] | undefined,
+): string | null {
+  const own = headers?.find((h) => h.name.toLowerCase() === 'authentication-results')?.value;
+  // ponytail: trusts the topmost header to be Gmail's; a header an outside sender plants sits below it.
+  if (!own || !/^\s*mx\.google\.com\b/i.test(own) || !/\bdmarc=pass\b/i.test(own)) return null;
+  return /header\.from=([a-z0-9.-]+)/i.exec(own)?.[1]?.toLowerCase() ?? null;
+}
 
 const decode = (data: string): string => Buffer.from(data, 'base64url').toString('utf8');
 
@@ -103,6 +122,7 @@ export function createGmailClient({
   refreshToken,
   fetch: fetchImpl = fetch,
   now = () => new Date(),
+  maxPages = DEFAULT_MAX_PAGES,
 }: GmailOptions): GmailClient {
   let token: { value: string; expiresAt: number } | null = null;
 
@@ -131,9 +151,22 @@ export function createGmailClient({
         refresh_token: refreshToken,
       }),
     });
-    if (res.status === 400 || res.status === 401) {
+    // 400 invalid_grant and invalid_client mean the refresh token or the app is refused; any other 400 is not.
+    const refusal =
+      res.status === 400
+        ? await res
+            .clone()
+            .json()
+            .catch(() => null)
+        : null;
+    const refused =
+      res.status === 401 ||
+      (typeof refusal === 'object' &&
+        refusal !== null &&
+        'error' in refusal &&
+        ['invalid_grant', 'invalid_client', 'unauthorized_client'].includes(String(refusal.error)));
+    if (refused)
       throw new GmailAuthError('Google refused the refresh token or the app credentials');
-    }
     if (!res.ok) throw new GmailError(`token endpoint answered ${String(res.status)}`);
     const parsed = tokenSchema.safeParse(await res.json().catch(() => null));
     if (!parsed.success) throw new GmailError('token endpoint answered an unexpected body');
@@ -142,6 +175,15 @@ export function createGmailClient({
       expiresAt: now().getTime() + parsed.data.expires_in * 1000 - EXPIRY_MARGIN_MS,
     };
     return token.value;
+  }
+
+  /** A 403 for a rate or daily limit is an outage, not a lost permission. */
+  async function isQuota(res: Response): Promise<boolean> {
+    const body: unknown = await res
+      .clone()
+      .json()
+      .catch(() => null);
+    return /ratelimit|dailylimit|quota/i.test(JSON.stringify(body));
   }
 
   /** GET with the access token; one 401 renews the token and retries, a second one is an auth error. */
@@ -153,6 +195,10 @@ export function createGmailClient({
         if (attempt >= 2) throw new GmailAuthError('Gmail kept refusing the access token');
         continue;
       }
+      if (res.status === 403 && !(await isQuota(res))) {
+        // Insufficient scope or access revoked: signing in again is the fix.
+        throw new GmailAuthError('Gmail refused access to the inbox');
+      }
       if (!res.ok) throw new GmailError(`Gmail answered ${String(res.status)}`);
       return res.json().catch(() => {
         throw new GmailError('Gmail answered a body that is not JSON');
@@ -161,20 +207,21 @@ export function createGmailClient({
   }
 
   return {
-    async listIds(after) {
-      const q = `after:${String(Math.floor(after.getTime() / 1000))} -in:sent -in:drafts -in:spam`;
+    async listIds(after, before) {
+      const bound = before ? ` before:${String(Math.floor(before.getTime() / 1000))}` : '';
+      const q = `after:${String(Math.floor(after.getTime() / 1000))}${bound} -in:sent -in:drafts -in:spam`;
       const ids: string[] = [];
       let pageToken: string | undefined;
-      for (let page = 0; page < MAX_PAGES; page += 1) {
+      for (let page = 0; page < maxPages; page += 1) {
         const params = new URLSearchParams({ q, maxResults: String(PAGE_SIZE) });
         if (pageToken) params.set('pageToken', pageToken);
         const parsed = listSchema.safeParse(await api(`${API}?${params.toString()}`));
         if (!parsed.success) throw new GmailError('Gmail listed mail in an unexpected shape');
         ids.push(...(parsed.data.messages ?? []).map((m) => m.id));
         pageToken = parsed.data.nextPageToken;
-        if (pageToken === undefined) break;
+        if (pageToken === undefined) return { ids, truncated: false };
       }
-      return ids;
+      return { ids, truncated: true };
     },
 
     async get(id) {
@@ -190,6 +237,7 @@ export function createGmailClient({
       return {
         id: parsed.data.id,
         from: header('from'),
+        authenticatedDomain: authenticatedDomain(payload.headers),
         subject: header('subject'),
         text: plain ?? (html === null ? '' : htmlToText(html)),
         receivedAt: new Date(Number(parsed.data.internalDate)),

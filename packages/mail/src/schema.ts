@@ -1,4 +1,5 @@
 import { sql } from 'drizzle-orm';
+import { MAIL_KINDS, type MailKind } from './classify';
 import {
   check,
   index,
@@ -14,7 +15,14 @@ import {
 /** Each module owns one Postgres schema; no other module queries it. */
 export const mailSchema = pgSchema('mail');
 
-export const OUTCOMES = ['applied', 'noted', 'ignored', 'unmatched', 'review'] as const;
+export const OUTCOMES = [
+  'applied',
+  'noted',
+  'ignored',
+  'unmatched',
+  'review',
+  'disagreed',
+] as const;
 export type Outcome = (typeof OUTCOMES)[number];
 
 /**
@@ -64,16 +72,23 @@ export const matches = mailSchema.table(
   {
     userId: uuid('user_id').notNull(),
     messageId: text('message_id').notNull(),
-    kind: text('kind').notNull(),
-    /** The Job the AI picked with low confidence; confirming the item applies the mail to it. */
+    kind: text('kind').$type<MailKind>().notNull(),
+    /** The Job the AI picked; confirming the item without a Job applies the mail to it. */
     suggestedJobId: uuid('suggested_job_id').notNull(),
-    candidateJobIds: jsonb('candidate_job_ids').$type<string[]>().notNull(),
+    /** The Jobs narrowing left, any of which the user may pick instead. */
+    possibleJobIds: jsonb('possible_job_ids').$type<string[]>().notNull(),
     summary: text('summary').notNull(),
     fromAddress: text('from_address').notNull(),
     subject: text('subject').notNull(),
     receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
   },
-  (t) => [primaryKey({ columns: [t.userId, t.messageId] })],
+  (t) => [
+    primaryKey({ columns: [t.userId, t.messageId] }),
+    check(
+      'matches_kind',
+      sql`${t.kind} in (${sql.raw(MAIL_KINDS.map((k) => `'${k}'`).join(', '))})`,
+    ),
+  ],
 );
 
 /** Where the poll resumes, and the lease that keeps two workers from polling one inbox at once. */
@@ -83,6 +98,8 @@ export const cursors = mailSchema.table(
     userId: uuid('user_id').primaryKey(),
     since: timestamp('since', { withTimezone: true }).notNull(),
     leasedUntil: timestamp('leased_until', { withTimezone: true }),
+    /** Who holds the lease: only that poll renews or releases it. */
+    leaseToken: uuid('lease_token'),
   },
   (t) => [index('cursors_lease_idx').on(t.leasedUntil)],
 );

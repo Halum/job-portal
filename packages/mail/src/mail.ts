@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { and, asc, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { AiError, isRunnerWide, type Ai } from '@job-portal/ai';
 import type { Db, DbTx } from '@job-portal/db';
@@ -7,7 +8,14 @@ import type { Logger } from '@job-portal/shared';
 import { TrackerError, type ApplicationStatus, type Tracker } from '@job-portal/tracker';
 import { buildPrompt, parseClassification, type MailKind } from './classify';
 import { GmailAuthError, GmailError, type GmailClient, type GmailMessage } from './gmail';
-import { cleanBody, isJobLike, narrow, type CandidateJob, type MailText } from './text';
+import {
+  cleanBody,
+  isJobLike,
+  narrow,
+  senderDomain,
+  type MailText,
+  type ReplyCandidate,
+} from './text';
 import { cursors, matches, processed, unmatched, type Outcome } from './schema';
 
 /** What Mail needs from Notifications; the module itself satisfies it. */
@@ -58,9 +66,16 @@ export interface MatchDetail {
   summary: string;
   from: string;
   subject: string;
+  /** The Job the AI picked. */
   suggestedJobId: string;
-  candidateJobIds: string[];
+  /** The Jobs narrowing left; the user may pick any of them instead. */
+  possibleJobIds: string[];
   receivedAt: Date;
+}
+
+/** A decision the mail_match item refuses, such as a Job that is not one of its possible Jobs. */
+export class MailMatchError extends Error {
+  override name = 'MailMatchError';
 }
 
 export interface Mail {
@@ -78,15 +93,16 @@ export interface Mail {
   /** The mail behind a mail_match Review item; null when there is none. */
   getMatch: (userId: string, messageId: string) => Promise<MatchDetail | null>;
   /**
-   * The applier of mail_match items, run inside the Review decision's transaction. Confirm applies the mail
-   * to the Job the AI picked; disagree changes nothing. Returns the Telegram line to send after the commit,
-   * or null.
+   * The applier of mail_match items, run inside the Review decision's transaction. Confirm applies the mail to
+   * `jobId` (one of the item's possible Jobs, else MailMatchError) or, without one, to the Job the AI picked;
+   * disagree changes nothing. Returns the Telegram line to send after the commit, or null.
    */
   applyMatch: (
     tx: DbTx,
     userId: string,
     subject: ReviewSubject,
     decision: 'confirm' | 'disagree',
+    jobId?: string,
   ) => Promise<string | null>;
 }
 
@@ -103,7 +119,7 @@ const LABEL: Partial<Record<ApplicationStatus, string>> = {
   offer: 'Offer',
 };
 /** Any application status but Accepted, Declined and Withdrawn can still get mail. */
-const CANDIDATE_STATUSES: ApplicationStatus[] = [
+const REPLY_STATUSES: ApplicationStatus[] = [
   'applied',
   'screening',
   'interview',
@@ -113,6 +129,7 @@ const CANDIDATE_STATUSES: ApplicationStatus[] = [
 ];
 const FEATURE = 'mail_classify';
 const GMAIL_TOKEN = 'gmail_token';
+/** Renewed before every mail, so it only runs out when one mail takes this long. */
 const LEASE = sql`now() + interval '10 minutes'`;
 const DEFAULT_LIMIT = 50;
 const hostOf = (url: string): string[] => {
@@ -195,12 +212,12 @@ export function createMail(db: Db, deps: MailDeps): Mail {
     return `${LABEL[to] ?? to}: ${what}`;
   }
 
-  async function candidates(userId: string): Promise<CandidateJob[]> {
+  async function replyCandidates(userId: string): Promise<ReplyCandidate[]> {
     const ids = new Set<string>();
-    for (const applicationStatus of CANDIDATE_STATUSES) {
+    for (const applicationStatus of REPLY_STATUSES) {
       for (const id of await tracker.findJobIds(userId, { applicationStatus })) ids.add(id);
     }
-    const out: CandidateJob[] = [];
+    const out: ReplyCandidate[] = [];
     for (const id of ids) {
       // Discovery hides a Job an AI merge folded into another.
       const job = await discovery.getJob(userId, id);
@@ -215,15 +232,16 @@ export function createMail(db: Db, deps: MailDeps): Mail {
     return out;
   }
 
-  /** The inbox lease: one poll per user at a time. Returns the cursor, or null when another worker holds it. */
-  async function acquire(userId: string): Promise<{ since: Date } | null> {
+  /** The inbox lease: one poll per user at a time. Returns the cursor and the lease token, or null when another worker holds it. */
+  async function acquire(userId: string): Promise<{ since: Date; token: string } | null> {
     await db
       .insert(cursors)
       .values({ userId, since: deps.startDate ?? new Date() })
       .onConflictDoNothing();
+    const token = randomUUID();
     const [row] = await db
       .update(cursors)
-      .set({ leasedUntil: LEASE })
+      .set({ leasedUntil: LEASE, leaseToken: token })
       .where(
         and(
           eq(cursors.userId, userId),
@@ -231,12 +249,22 @@ export function createMail(db: Db, deps: MailDeps): Mail {
         ),
       )
       .returning({ since: cursors.since });
-    return row ?? null;
+    return row ? { since: row.since, token } : null;
+  }
+
+  /** Extends the lease of this poll; false when another worker took it over after it ran out. */
+  async function renew(userId: string, token: string): Promise<boolean> {
+    const rows = await db
+      .update(cursors)
+      .set({ leasedUntil: LEASE })
+      .where(and(eq(cursors.userId, userId), eq(cursors.leaseToken, token)))
+      .returning({ userId: cursors.userId });
+    return rows.length > 0;
   }
 
   async function pass(
     userId: string,
-    since: Date,
+    { since, token }: { since: Date; token: string },
     client: GmailClient,
     runner: Ai,
   ): Promise<PollOutcome> {
@@ -244,7 +272,7 @@ export function createMail(db: Db, deps: MailDeps): Mail {
     const lines: string[] = [];
     const [clock] = await db.execute<{ t: Date }>(sql`select now() as t`);
     const startedAt = new Date(clock?.t ?? Date.now());
-    let pool: CandidateJob[] | null = null;
+    let pool: ReplyCandidate[] | null = null;
     // Set from inside handle(); an object so the control flow keeps seeing it can change.
     const run = { complete: true };
 
@@ -272,7 +300,7 @@ export function createMail(db: Db, deps: MailDeps): Mail {
 
     async function handle(m: GmailMessage): Promise<void> {
       const text: MailText = { from: m.from, subject: m.subject, body: cleanBody(m.text) };
-      pool ??= await candidates(userId);
+      pool ??= await replyCandidates(userId);
       const narrowed = narrow(text, pool);
       if (narrowed.length === 0) {
         if (isJobLike(text)) out.unmatched += Number(await keep(m, text, 'unmatched', ''));
@@ -299,11 +327,21 @@ export function createMail(db: Db, deps: MailDeps): Mail {
         throw err;
       }
       const { kind, jobId, confidence, summary } = answer.value;
+      // The code decides what is clear, never the model: exactly one Job left after narrowing, backed by the
+      // sender's own domain, from a sender Gmail authenticated (dmarc pass for that domain), and picked with
+      // high confidence. Anyone can write a company name or claim "high" in a mail; everything else with a
+      // picked Job is the user's decision.
+      const [only] = narrowed;
+      const trusted =
+        narrowed.length === 1 &&
+        only?.strong === true &&
+        m.authenticatedDomain !== null &&
+        m.authenticatedDomain === senderDomain(m.from);
       if (kind === 'other') {
         out.ignored += Number(await keep(m, text, 'ignored', summary));
       } else if (jobId === null) {
         out.unmatched += Number(await keep(m, text, 'unmatched', summary));
-      } else if (confidence === 'high') {
+      } else if (confidence === 'high' && trusted && only.id === jobId) {
         const result = await db.transaction(async (tx) => {
           if (!(await claim(tx, userId, m.id, 'applied', jobId))) return null;
           const r = await applyToJob(tx, userId, jobId, kind, m.id, summary);
@@ -328,7 +366,7 @@ export function createMail(db: Db, deps: MailDeps): Mail {
             messageId: m.id,
             kind,
             suggestedJobId: jobId,
-            candidateJobIds: ids,
+            possibleJobIds: ids,
             summary,
             fromAddress: text.from,
             subject: text.subject,
@@ -346,23 +384,48 @@ export function createMail(db: Db, deps: MailDeps): Mail {
     }
 
     try {
-      const listed = await client.listIds(since);
-      // The token works: close the failure type if it was open.
-      await notify?.setFailure(userId, GMAIL_TOKEN, false).catch((err: unknown) => {
-        log.warn({ err }, 'could not close the gmail_token failure');
-      });
-      const known = listed.length
-        ? await db
-            .select({ id: processed.messageId })
-            .from(processed)
-            .where(and(eq(processed.userId, userId), inArray(processed.messageId, listed)))
-        : [];
-      const handled = new Set(known.map((r) => r.id));
-      const fresh = listed.filter((id) => !handled.has(id));
-      out.seen = fresh.length;
-      for (const id of fresh) {
-        await handle(await client.get(id));
-        if (!run.complete) break;
+      let before: Date | undefined;
+      for (let first = true; ; first = false) {
+        const { ids: listed, truncated } = await client.listIds(since, before);
+        // The token works: close the failure type if it was open.
+        if (first) {
+          await notify?.setFailure(userId, GMAIL_TOKEN, false).catch((err: unknown) => {
+            log.warn({ err }, 'could not close the gmail_token failure');
+          });
+        }
+        const known = listed.length
+          ? await db
+              .select({ id: processed.messageId })
+              .from(processed)
+              .where(and(eq(processed.userId, userId), inArray(processed.messageId, listed)))
+          : [];
+        const handled = new Set(known.map((r) => r.id));
+        // Gmail lists newest first; the oldest mail goes first, so a Screening reply is applied before the
+        // Interview that followed it.
+        const fresh = listed.filter((id) => !handled.has(id)).reverse();
+        out.seen += fresh.length;
+        let oldest: Date | null = null;
+        for (const id of fresh) {
+          if (!(await renew(userId, token))) {
+            log.warn('mail poll lost its lease to another worker and stops');
+            run.complete = false;
+            break;
+          }
+          const m = await client.get(id);
+          if (oldest === null || m.receivedAt < oldest) oldest = m.receivedAt;
+          await handle(m);
+          if (!run.complete) break;
+        }
+        if (!run.complete || !truncated) break;
+        if (oldest === null) {
+          // ponytail: a window the page cap cuts and that holds nothing new cannot be walked further.
+          log.warn('the Gmail window is larger than the page cap: set GMAIL_START_DATE later');
+          run.complete = false;
+          break;
+        }
+        // The list was cut: older mail of the window is still unread, so look again below what this batch
+        // reached (ponytail: a truncated backlog is read newest window first, oldest first within a window).
+        before = new Date(oldest.getTime() + 1000);
       }
       if (run.complete) {
         // Held an hour behind so a mail that reached the inbox late is still listed; the ledger skips the rest.
@@ -371,7 +434,7 @@ export function createMail(db: Db, deps: MailDeps): Mail {
           .set({
             since: sql`greatest(${cursors.since}, ${startedAt.toISOString()}::timestamptz - interval '1 hour')`,
           })
-          .where(eq(cursors.userId, userId));
+          .where(and(eq(cursors.userId, userId), eq(cursors.leaseToken, token)));
       }
     } catch (err) {
       if (err instanceof GmailAuthError) {
@@ -406,9 +469,13 @@ export function createMail(db: Db, deps: MailDeps): Mail {
       const lease = await acquire(userId);
       if (!lease) return zero('busy');
       try {
-        return await pass(userId, lease.since, gmail, ai);
+        return await pass(userId, lease, gmail, ai);
       } finally {
-        await db.update(cursors).set({ leasedUntil: null }).where(eq(cursors.userId, userId));
+        // Only this poll's own lease: one that ran out and was taken over belongs to another worker now.
+        await db
+          .update(cursors)
+          .set({ leasedUntil: null, leaseToken: null })
+          .where(and(eq(cursors.userId, userId), eq(cursors.leaseToken, lease.token)));
       }
     },
 
@@ -447,35 +514,41 @@ export function createMail(db: Db, deps: MailDeps): Mail {
       return row
         ? {
             messageId,
-            kind: row.kind as MailKind,
+            kind: row.kind,
             summary: row.summary,
             from: row.fromAddress,
             subject: row.subject,
             suggestedJobId: row.suggestedJobId,
-            candidateJobIds: row.candidateJobIds,
+            possibleJobIds: row.possibleJobIds,
             receivedAt: row.receivedAt,
           }
         : null;
     },
 
-    async applyMatch(tx, userId, subject, decision) {
-      const messageId = subject.messageId;
+    async applyMatch(tx, userId, subject, decision, jobId) {
+      const messageId = subject.messageId ?? '';
       const [row] = await tx
         .select()
         .from(matches)
-        .where(and(eq(matches.userId, userId), eq(matches.messageId, messageId ?? '')))
+        .where(and(eq(matches.userId, userId), eq(matches.messageId, messageId)))
         .for('update');
       if (!row) throw new Error('mail_match item without its mail');
-      if (decision === 'disagree') return null;
-      const r = await applyToJob(
-        tx,
-        userId,
-        row.suggestedJobId,
-        row.kind as MailKind,
-        row.messageId,
-        row.summary,
-      );
-      return r.outcome === 'applied' ? lineFor(userId, row.suggestedJobId, r.to) : null;
+      const settle = (outcome: Outcome, job: string | null): Promise<unknown> =>
+        tx
+          .update(processed)
+          .set({ outcome, jobId: job })
+          .where(and(eq(processed.userId, userId), eq(processed.messageId, messageId)));
+      if (decision === 'disagree') {
+        await settle('disagreed', null);
+        return null;
+      }
+      const target = jobId ?? row.suggestedJobId;
+      if (!row.possibleJobIds.includes(target)) {
+        throw new MailMatchError('that Job is not one of the Jobs this mail could belong to');
+      }
+      const r = await applyToJob(tx, userId, target, row.kind, row.messageId, row.summary);
+      await settle(r.outcome, target);
+      return r.outcome === 'applied' ? lineFor(userId, target, r.to) : null;
     },
   };
 }

@@ -21,6 +21,15 @@ describe('buildPrompt', () => {
   });
 });
 
+describe('buildPrompt privacy', () => {
+  it('sends the sender domain but never the name or address of the sender', () => {
+    const p = buildPrompt({ ...mail, from: 'Pat Placeholder <pat@mail.beispiel.example>' }, jobs);
+    expect(p).toContain('mail.beispiel.example');
+    expect(p).not.toContain('Pat Placeholder');
+    expect(p).not.toContain('pat@');
+  });
+});
+
 describe('parseClassification', () => {
   const ids = ['j1', 'j2'];
   it('reads kind, a candidate Job id, confidence and the summary, also inside a code fence', () => {

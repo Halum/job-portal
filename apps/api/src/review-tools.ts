@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { User } from '@job-portal/accounts';
 import type { AiMerge, Discovery, PostingView } from '@job-portal/discovery';
-import type { Mail, Notify } from '@job-portal/mail';
+import { MailMatchError, type Mail, type Notify } from '@job-portal/mail';
 import type { Matching } from '@job-portal/matching';
 import {
   REVIEW_KINDS,
@@ -63,7 +63,9 @@ const itemOut = z.object({
       suggestedJobId: z
         .string()
         .describe('The Job the AI picked; confirming applies the mail to it.'),
-      candidateJobIds: z.array(z.string()),
+      possibleJobIds: z
+        .array(z.string())
+        .describe('The Jobs the mail could belong to; decide_review may pick any of them.'),
     })
     .nullable()
     .describe('The mail behind a mail_match item; null otherwise.'),
@@ -122,7 +124,7 @@ export function registerReviewTools(
       // The suggested Job first, then the other candidates.
       const ids = [
         match.suggestedJobId,
-        ...match.candidateJobIds.filter((id) => id !== match.suggestedJobId),
+        ...match.possibleJobIds.filter((id) => id !== match.suggestedJobId),
       ];
       const found = await Promise.all(ids.map((id) => discovery.getJob(user.id, id)));
       return {
@@ -134,7 +136,7 @@ export function registerReviewTools(
           summary: match.summary,
           kind: match.kind,
           suggestedJobId: match.suggestedJobId,
-          candidateJobIds: match.candidateJobIds,
+          possibleJobIds: match.possibleJobIds,
         },
       };
     }
@@ -159,7 +161,10 @@ export function registerReviewTools(
 
   // The module that created an item applies its decision. A kind without an applier is refused.
   // A mail_match decision may produce a Telegram line, collected here and sent after the commit.
-  const appliersFor = (lines: string[]): Partial<Record<ReviewKind, ReviewApplier>> => ({
+  const appliersFor = (
+    lines: string[],
+    jobId: string | undefined,
+  ): Partial<Record<ReviewKind, ReviewApplier>> => ({
     ai_fit_rejection: (item, tx, decision) =>
       matching.applyFitRejection(tx, user.id, item.subject, decision),
     ...(aiMerge
@@ -168,7 +173,7 @@ export function registerReviewTools(
     ...(mail
       ? {
           mail_match: async (item, tx, decision) => {
-            const line = await mail.applyMatch(tx, user.id, item.subject, decision);
+            const line = await mail.applyMatch(tx, user.id, item.subject, decision, jobId);
             if (line !== null) lines.push(line);
           },
         }
@@ -202,13 +207,22 @@ export function registerReviewTools(
     {
       description:
         'Decide a pending Review item. confirm: you agree with the AI (an AI fit rejection stays untagged; an AI merge merges the two Jobs into one with all postings, keeping the one that has an application, else the older; refused with the reason while both have an application, either is dismissed or expired, or a split or earlier disagreement bars the pair). disagree: you do not; for an AI fit rejection the Job is tagged with that Target at once, for an AI merge the two Jobs are never proposed for merging again. An item can be decided once.',
-      inputSchema: { id: z.uuid(), decision: z.enum(['confirm', 'disagree']) },
+      inputSchema: {
+        id: z.uuid(),
+        decision: z.enum(['confirm', 'disagree']),
+        jobId: z
+          .uuid()
+          .optional()
+          .describe(
+            'mail_match, confirm only: apply the mail to this Job, one of the item possibleJobIds, instead of the one the AI picked. A mail_match confirm applies the mail through the Timeline and posts a Telegram line; disagree records only your decision.',
+          ),
+      },
       outputSchema: { item: itemOut },
     },
-    async ({ id, decision }) => {
+    async ({ id, decision, jobId }) => {
       try {
         const lines: string[] = [];
-        const appliers = appliersFor(lines);
+        const appliers = appliersFor(lines, jobId);
         const done = await review.decide(user.id, id, decision, (item, tx, d) => {
           const apply = appliers[item.kind];
           if (!apply) {
@@ -216,6 +230,9 @@ export function registerReviewTools(
               'unsupported_kind',
               `Review items of kind ${item.kind} cannot be decided yet`,
             );
+          }
+          if (jobId !== undefined && item.kind !== 'mail_match') {
+            throw new ReviewError('unsupported_kind', 'jobId applies to mail_match items only');
           }
           return apply(item, tx, d);
         });
@@ -226,7 +243,8 @@ export function registerReviewTools(
         }
         return ok({ item: await describe(done) });
       } catch (err) {
-        if (err instanceof ReviewError) return refusal(err.message);
+        if (err instanceof ReviewError || err instanceof MailMatchError)
+          return refusal(err.message);
         logger.error({ err }, 'decide_review failed');
         return refusal('decide_review failed');
       }

@@ -32,7 +32,7 @@ interface ReviewItemOut {
     summary: string;
     kind: string;
     suggestedJobId: string;
-    candidateJobIds: string[];
+    possibleJobIds: string[];
   } | null;
 }
 
@@ -206,7 +206,21 @@ describe('Gmail replies over MCP', () => {
     });
     expect(item?.postings.map((p) => p.url)).toEqual(['https://jobs.example.invalid/cook']);
 
-    const decided = await call('decide_review', { id: item?.id, decision: 'confirm' });
+    expect(item?.mail?.possibleJobIds).toEqual([item?.mail?.suggestedJobId]);
+    // A Job that is not one of the possible Jobs is refused and the item stays pending.
+    const refused = await call('decide_review', {
+      id: item?.id,
+      decision: 'confirm',
+      jobId: '00000000-0000-4000-8000-0000000000ff',
+    });
+    expect(refused.isError).toBe(true);
+    const stillPending = await call('list_reviews', { kind: 'mail_match' });
+    expect((stillPending.out as { items: unknown[] }).items).toHaveLength(1);
+    const decided = await call('decide_review', {
+      id: item?.id,
+      decision: 'confirm',
+      jobId: item?.mail?.suggestedJobId,
+    });
     expect(decided.isError).toBe(false);
     expect(lines).toEqual([expect.stringContaining('Interview: Cook at Beispiel Firma GmbH')]);
     const job = await call('get_job', { jobId: item?.mail?.suggestedJobId });

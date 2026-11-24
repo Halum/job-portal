@@ -3,7 +3,8 @@ CREATE SCHEMA "mail";
 CREATE TABLE "mail"."cursors" (
 	"user_id" uuid PRIMARY KEY NOT NULL,
 	"since" timestamp with time zone NOT NULL,
-	"leased_until" timestamp with time zone
+	"leased_until" timestamp with time zone,
+	"lease_token" uuid
 );
 --> statement-breakpoint
 CREATE TABLE "mail"."matches" (
@@ -11,12 +12,13 @@ CREATE TABLE "mail"."matches" (
 	"message_id" text NOT NULL,
 	"kind" text NOT NULL,
 	"suggested_job_id" uuid NOT NULL,
-	"candidate_job_ids" jsonb NOT NULL,
+	"possible_job_ids" jsonb NOT NULL,
 	"summary" text NOT NULL,
 	"from_address" text NOT NULL,
 	"subject" text NOT NULL,
 	"received_at" timestamp with time zone NOT NULL,
-	CONSTRAINT "matches_user_id_message_id_pk" PRIMARY KEY("user_id","message_id")
+	CONSTRAINT "matches_user_id_message_id_pk" PRIMARY KEY("user_id","message_id"),
+	CONSTRAINT "matches_kind" CHECK ("mail"."matches"."kind" in ('rejection', 'screening', 'interview', 'offer', 'acknowledgement', 'other'))
 );
 --> statement-breakpoint
 CREATE TABLE "mail"."processed" (
@@ -26,7 +28,7 @@ CREATE TABLE "mail"."processed" (
 	"job_id" uuid,
 	"processed_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "processed_user_id_message_id_pk" PRIMARY KEY("user_id","message_id"),
-	CONSTRAINT "processed_outcome" CHECK ("mail"."processed"."outcome" in ('applied', 'noted', 'ignored', 'unmatched', 'review'))
+	CONSTRAINT "processed_outcome" CHECK ("mail"."processed"."outcome" in ('applied', 'noted', 'ignored', 'unmatched', 'review', 'disagreed'))
 );
 --> statement-breakpoint
 CREATE TABLE "mail"."unmatched" (

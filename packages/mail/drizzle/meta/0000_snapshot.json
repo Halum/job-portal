@@ -1,5 +1,5 @@
 {
-  "id": "1116ce06-d023-4aab-bc5b-ff2d0d3d3c60",
+  "id": "cd793710-a53b-42ef-ab19-260ca8bfd6ab",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -23,6 +23,12 @@
         "leased_until": {
           "name": "leased_until",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_token": {
+          "name": "lease_token",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": false
         }
@@ -79,8 +85,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "candidate_job_ids": {
-          "name": "candidate_job_ids",
+        "possible_job_ids": {
+          "name": "possible_job_ids",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
@@ -123,7 +129,12 @@
       },
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "matches_kind": {
+          "name": "matches_kind",
+          "value": "\"mail\".\"matches\".\"kind\" in ('rejection', 'screening', 'interview', 'offer', 'acknowledgement', 'other')"
+        }
+      },
       "isRLSEnabled": false
     },
     "mail.processed": {
@@ -178,7 +189,7 @@
       "checkConstraints": {
         "processed_outcome": {
           "name": "processed_outcome",
-          "value": "\"mail\".\"processed\".\"outcome\" in ('applied', 'noted', 'ignored', 'unmatched', 'review')"
+          "value": "\"mail\".\"processed\".\"outcome\" in ('applied', 'noted', 'ignored', 'unmatched', 'review', 'disagreed')"
         }
       },
       "isRLSEnabled": false

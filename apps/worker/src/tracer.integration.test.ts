@@ -351,7 +351,7 @@ describe('Bundesagentur source to MCP list_jobs', () => {
     gmail.mails.push(
       {
         id: 'reply-1',
-        from: 'Hiring <hr@example.invalid>',
+        from: 'Hiring <hr@beispielfirmab.example>',
         subject: 'Invitation',
         body: 'Dear applicant, Beispiel Firma B would like to invite you for a talk.',
         receivedAt: new Date(),
