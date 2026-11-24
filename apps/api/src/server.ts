@@ -19,9 +19,18 @@ function buildMcpServer(user: User): McpServer {
   return mcp;
 }
 
+const MAX_BODY_BYTES = 1024 * 1024;
+
+class BodyTooLargeError extends Error {}
+
 async function readJson(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY_BYTES) throw new BodyTooLargeError();
+    chunks.push(chunk as Buffer);
+  }
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
 }
 
@@ -53,8 +62,8 @@ export function createApiServer(accounts: Accounts, logger: Logger): Server {
       let body: unknown;
       try {
         body = await readJson(req);
-      } catch {
-        reply(res, 400);
+      } catch (err) {
+        reply(res, err instanceof BodyTooLargeError ? 413 : 400, { Connection: 'close' });
         return;
       }
       const mcp = buildMcpServer(user);

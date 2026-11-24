@@ -98,4 +98,13 @@ describe('MCP endpoint over real HTTP', () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it('answers 413 to a body over 1 MB', async () => {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ padding: 'x'.repeat(1024 * 1024 + 1) }),
+    });
+    expect(res.status).toBe(413);
+  });
 });
