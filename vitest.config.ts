@@ -21,6 +21,8 @@ export default defineConfig({
         // Thin process entrypoints: wiring only, covered by the integration test through the code they call.
         '**/main.ts',
         'apps/worker/src/boards.ts',
+        // The manual live smoke run: never run by tests or CI; its refusal rule is tested in smoke-guard.test.ts.
+        'apps/worker/src/smoke.ts',
         // Schema files hold declarative table definitions only; the integration tests exercise them.
         'packages/*/src/schema.ts',
         // A fake Gmail server for tests of this and other packages.

@@ -19,6 +19,7 @@
     "prepare": "sh scripts/prepare-hooks.sh",
     "db:generate": "pnpm -r db:generate",
     "dev:api": "tsx watch --env-file-if-exists=.env apps/api/src/main.ts",
+    "smoke": "pnpm --filter @job-portal/worker smoke",
     "dev:worker": "tsx watch --env-file-if-exists=.env apps/worker/src/main.ts"
   },
   "devDependencies": {
