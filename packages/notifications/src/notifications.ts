@@ -91,6 +91,7 @@ interface DigestPayload {
 }
 
 const WEBHOOK_KEY = 'webhook';
+const MESSAGE_REFUSALS = new Set([400, 413, 422]);
 const REQUEST_TIMEOUT_MS = 10_000;
 /** Telegram caps a message at 4096 characters; every digest message stays under this. */
 const MAX_TEXT = 3900;
@@ -202,9 +203,9 @@ export function createNotifications(
     });
     if (res.ok) return;
     const reason = `webhook answered ${String(res.status)}`;
-    // A 4xx (not a timeout or a rate limit) is about this message: retrying cannot help.
-    if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429)
-      throw new Refused(reason);
+    // Only these are about this message (bad body, too large, unprocessable): retrying cannot help. Any
+    // other 4xx (404 workflow off, 401 or 403 auth) is the webhook itself being unusable, so it counts as down.
+    if (MESSAGE_REFUSALS.has(res.status)) throw new Refused(reason);
     throw new Error(reason);
   };
 

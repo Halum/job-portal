@@ -183,7 +183,7 @@ describe('notifications against real Postgres and a fake webhook', () => {
     expect(digests()[1]?.text).not.toContain('Role 01');
   });
 
-  it('skips a Job that is gone or no longer active, and lists it later if it comes back', async () => {
+  it('skips a Job that is gone or not active at this look-up, and lists one that turns up at a later look-up', async () => {
     const user = newUser();
     jobs.set(J(1), null);
     jobs.set(J(2), { title: 'Dismissed role', company: null, links: [], active: false });
@@ -415,5 +415,23 @@ describe('notifications against real Postgres and a fake webhook', () => {
     // Stored: the watermark moves on, so the next run looks only at newer scores.
     await make().afterRun(user, { since: new Date(), ...NONE });
     expect((sinces[2] ?? first).getTime()).toBeGreaterThan(first.getTime());
+  });
+
+  it('treats a webhook-level 4xx (workflow off, bad auth) as the webhook being down: the type opens and the pass stops', async () => {
+    const user = newUser();
+    statuses = [404];
+    tags = [tag(1)];
+    const result = await make().afterRun(user, { since, ...NONE });
+    expect(result).toMatchObject({ digestSent: false, alertsSent: 0, unsent: 2 });
+    // The digest was tried with retries, and the failure alert behind it was not tried.
+    expect(received.filter((m) => m.kind === 'failed-request')).toHaveLength(3);
+
+    statuses = [200];
+    await make().afterRun(user, { since, ...NONE });
+    expect(alerts().map((a) => a.text.toLowerCase())).toEqual([
+      expect.stringContaining('failing'),
+      expect.stringContaining('recovered'),
+    ]);
+    expect(digests()).toHaveLength(1);
   });
 });
