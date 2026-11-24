@@ -26,6 +26,11 @@ export const criteriaSchema = z.object({
   languageAbility: words,
   /** Integer from 1 to 200. */
   prerankTopN: z.number().int().min(1).max(200).nullable(),
+  /**
+   * Days without a status change before an application goes Gone cold; null disables the check. A Global
+   * default only: the Tracker's check reads it from the defaults, so on a Target it has no effect.
+   */
+  goneColdDays: z.number().int().min(1).nullable(),
 });
 
 export type Criteria = z.infer<typeof criteriaSchema>;
@@ -45,6 +50,7 @@ export const emptyCriteria = (): Criteria => ({
   alertThreshold: null,
   languageAbility: null,
   prerankTopN: null,
+  goneColdDays: null,
 });
 
 export function applyPatch(base: Criteria, patch: CriteriaPatch): Criteria {
@@ -87,6 +93,7 @@ export function resolveCriteria(globals: Criteria, target: Criteria): ResolvedCr
     alertThreshold: pick('alertThreshold'),
     languageAbility: pick('languageAbility'),
     prerankTopN: pick('prerankTopN'),
+    goneColdDays: pick('goneColdDays'),
     exclusionWords: union(globals.exclusionWords, target.exclusionWords),
     blockedCompanies: union(globals.blockedCompanies, target.blockedCompanies),
   };

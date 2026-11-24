@@ -37,8 +37,12 @@ describe('gone cold against real Postgres and a controlled clock', () => {
     clock = new Date(iso);
   };
   const newJob = async (user = USER): Promise<string> =>
-    (await discovery.addJob(user, { title: 'Koch', url: `https://t.example.invalid/${String(++n)}` }))
-      .jobId;
+    (
+      await discovery.addJob(user, {
+        title: 'Koch',
+        url: `https://t.example.invalid/${String(++n)}`,
+      })
+    ).jobId;
   const status = async (jobId: string, user = USER): Promise<string | null> =>
     (await tracker.getStates(user, [jobId])).get(jobId)?.applicationStatus ?? null;
   const apply = (jobId: string, user = USER) =>
@@ -84,7 +88,11 @@ describe('gone cold against real Postgres and a controlled clock', () => {
     await tracker.addNote(USER, noted, 'called the office');
     const moved = await appliedAt('2026-04-01T10:00:00Z');
     at('2026-04-11T10:00:00Z');
-    await tracker.setApplicationStatus(USER, moved, { to: 'screening', actor: 'gmail', timezone: TZ });
+    await tracker.setApplicationStatus(USER, moved, {
+      to: 'screening',
+      actor: 'gmail',
+      timezone: TZ,
+    });
 
     at('2026-04-15T10:00:00Z');
     expect((await run()).map((m) => m.jobId)).toEqual([noted]);
@@ -105,7 +113,11 @@ describe('gone cold against real Postgres and a controlled clock', () => {
 
   it('touches only open applications of this user: final statuses, no application, other users stay', async () => {
     const rejected = await appliedAt('2026-07-01T10:00:00Z');
-    await tracker.setApplicationStatus(USER, rejected, { to: 'rejected', actor: 'gmail', timezone: TZ });
+    await tracker.setApplicationStatus(USER, rejected, {
+      to: 'rejected',
+      actor: 'gmail',
+      timezone: TZ,
+    });
     const none = await newJob();
     const theirs = await appliedAt('2026-07-01T10:00:00Z', OTHER);
     const offer = await appliedAt('2026-07-01T10:00:00Z');

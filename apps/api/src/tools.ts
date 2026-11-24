@@ -545,7 +545,7 @@ export function registerTools(
     'update_global_defaults',
     {
       description:
-        'Change the Global defaults. Only the keys you pass change; null clears a field.',
+        'Change the Global defaults. Only the keys you pass change; null clears a field. goneColdDays (integer of at least 1, null disables) is the number of days without a status change after which an application goes Gone cold; it only applies here, not on a Target.',
       inputSchema: { criteria: criteriaPatchSchema },
       outputSchema: { defaults: criteriaSchema },
     },

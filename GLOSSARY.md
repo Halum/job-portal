@@ -33,7 +33,7 @@ Terms name things in code, database, tests and issues. Source of truth: the spec
 - **Application status**: where an application stands: Applied, Screening, Interview, Offer, Accepted, Declined, Rejected, Withdrawn or Gone cold.
 - **Furthest stage**: the highest of Applied, Screening, Interview, Offer, Accepted a Job has reached; it only moves forward except by undo.
 - **Timeline event**: one recorded state change (from, to, actor, evidence, time), the only write path for any state change.
-- **Gone cold**: the status the daily check gives an application with no state-changing or Gmail event for N days.
+- **Gone cold**: the status the daily check gives an Applied, Screening, Interview or Offer application whose last Timeline event (any actor, notes not counted) is N or more calendar days old in the user's timezone. N is the Global default `goneColdDays`; null disables the check.
 - **Processed-mail ledger**: the record of Gmail message ids already handled, keyed by user id and message id, so a mail is never applied twice.
 - **Merge check**: a stored answer "not the same job" for a pair of Jobs, so the AI is not asked about that pair again.
 - **Fold**: what a confirmed AI merge does to the Job that does not survive: its Postings move to the surviving Job (the one with an application, else the older), and its row stays hidden with `merged_into`, keeping its keys as aliases.

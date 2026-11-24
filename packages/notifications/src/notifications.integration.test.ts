@@ -440,7 +440,9 @@ describe('notifications against real Postgres and a fake webhook', () => {
     statuses = [200];
     await make().afterRun(user, { since, ...NONE });
     await make().afterRun(user, { since, ...NONE });
-    expect(received.filter((m) => m.kind === 'line').map((m) => m.text)).toEqual(['Gone cold: Role C']);
+    expect(received.filter((m) => m.kind === 'line').map((m) => m.text)).toEqual([
+      'Gone cold: Role C',
+    ]);
   });
 
   it('treats a webhook-level 4xx (workflow off, bad auth) as the webhook being down: the type opens and the pass stops', async () => {

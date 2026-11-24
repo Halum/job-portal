@@ -127,6 +127,36 @@ describe('worker against real Postgres and Redis', () => {
     await queue.close();
   });
 
+  it('schedules the Gone cold check next to the sources and runs it on a tick', async () => {
+    let runs = 0;
+    worker = await startWorker({
+      redisUrl: redis.getConnectionUrl(),
+      pipeline,
+      userId: USER,
+      sources: [bambase],
+      goneCold: {
+        intervalMinutes: 1440,
+        run: () => {
+          runs += 1;
+          return Promise.resolve(0);
+        },
+      },
+      logger,
+    });
+    await eventually(() => Promise.resolve(runs > 0 ? runs : undefined));
+    const queue = new Queue('pipeline', { connection: new Redis(redis.getConnectionUrl()) });
+    expect((await queue.getJobSchedulers()).map((s) => [s.key, s.every]).sort()).toEqual([
+      ['bambase', 300_000],
+      ['gone-cold', 86_400_000],
+    ]);
+    await queue.close();
+    await worker.close();
+    worker = await start([]);
+    const after = new Queue('pipeline', { connection: new Redis(redis.getConnectionUrl()) });
+    expect(await after.getJobSchedulers()).toEqual([]);
+    await after.close();
+  });
+
   it('removes the scheduler of a source that is no longer configured', async () => {
     await (await start()).close();
     worker = await start([]);
