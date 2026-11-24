@@ -18,6 +18,7 @@ import {
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import { createDiscovery, createRedisLimit } from '@job-portal/discovery';
 import { createMatching } from '@job-portal/matching';
+import { createDocuments } from '@job-portal/documents';
 import { allMigrations } from '@job-portal/migrations';
 import { createPipeline } from '@job-portal/pipeline';
 import { createTracker } from '@job-portal/tracker';
@@ -89,6 +90,7 @@ describe('Watchlist and add_board over MCP (recorded ATS responses, real Postgre
     const logger = createLogger({ level: 'info', destination: { write: (l) => logged.push(l) } });
     const discovery = createDiscovery(handle.db, []);
     server = createApiServer({
+      documents: createDocuments(handle.db),
       review: createReview(handle.db),
       accounts,
       discovery,

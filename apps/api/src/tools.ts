@@ -12,9 +12,11 @@ import type { AiLog } from '@job-portal/ai';
 import { criteriaPatchSchema, criteriaSchema, type Matching } from '@job-portal/matching';
 import { RUN_STATUSES, type Pipeline } from '@job-portal/pipeline';
 import type { Mail, Notify } from '@job-portal/mail';
+import type { Documents } from '@job-portal/documents';
 import type { Review } from '@job-portal/review';
 import type { Logger } from '@job-portal/shared';
 import { registerBoardTools, type BoardToolDeps } from './board-tools';
+import { registerDocumentsTools } from './documents-tools';
 import { registerMailTools } from './mail-tools';
 import { registerReviewTools } from './review-tools';
 import {
@@ -34,6 +36,7 @@ export interface ToolDeps {
   aiLog: Pick<AiLog, 'totals'>;
   boards: BoardToolDeps;
   review: Review;
+  documents: Documents;
   /** Applies decided ai_merge items; without it they cannot be decided. */
   aiMerge?: Pick<AiMerge, 'apply'>;
   /** The mail behind list_unmatched_mails and mail_match decisions; without it neither works. */
@@ -234,6 +237,7 @@ export function registerTools(
     tracker,
     aiLog,
     boards,
+    documents,
     review,
     aiMerge,
     mail,
@@ -242,6 +246,7 @@ export function registerTools(
   }: ToolDeps,
 ): void {
   registerBoardTools(mcp, user, boards, logger);
+  registerDocumentsTools(mcp, user, documents, logger);
   registerReviewTools(mcp, user, { review, discovery, matching, aiMerge, mail, notify, logger });
   if (mail) registerMailTools(mcp, user, mail);
 

@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Accounts, User } from '@job-portal/accounts';
+import { handleFileRoute, isFilePath } from './file-routes';
 import { registerTools, type ToolDeps } from './tools';
 
 function buildMcpServer(user: User, deps: ToolDeps): McpServer {
@@ -38,16 +39,22 @@ export interface ApiDeps extends ToolDeps {
 }
 
 export function createApiServer({ accounts, ...tools }: ApiDeps): Server {
-  const { logger } = tools;
+  const { logger, documents } = tools;
   return createServer((req, res) => {
     void (async () => {
-      if (req.url !== '/mcp') {
+      const url = new URL(req.url ?? '/', 'http://localhost');
+      const isFile = isFilePath(url.pathname);
+      if (url.pathname !== '/mcp' && !isFile) {
         reply(res, 404);
         return;
       }
       const user = await accounts.authenticate(req.headers.authorization);
       if (!user) {
         reply(res, 401, { 'WWW-Authenticate': 'Bearer' });
+        return;
+      }
+      if (isFile) {
+        await handleFileRoute(req, res, user, url, documents);
         return;
       }
       if (req.method !== 'POST') {

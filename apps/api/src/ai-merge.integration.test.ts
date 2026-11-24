@@ -10,6 +10,7 @@ import { createWatchlist } from '@job-portal/boards';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import { createAiMerge, createDiscovery } from '@job-portal/discovery';
 import { createMatching } from '@job-portal/matching';
+import { createDocuments } from '@job-portal/documents';
 import { allMigrations } from '@job-portal/migrations';
 import { createPipeline } from '@job-portal/pipeline';
 import { createReview } from '@job-portal/review';
@@ -90,6 +91,7 @@ describe('AI merge over MCP', () => {
     });
     pipeline = createPipeline(handle.db, discovery, { aiMerge });
     server = createApiServer({
+      documents: createDocuments(handle.db),
       accounts,
       discovery,
       matching,
