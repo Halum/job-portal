@@ -4,6 +4,7 @@ import type { ModuleMigrations } from '@job-portal/db';
 
 export * from './discovery';
 export * from './source';
+export * from './sources/bambase';
 export * from './sources/bundesagentur';
 
 export const discoveryMigrations: ModuleMigrations = {

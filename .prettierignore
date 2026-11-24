@@ -4,3 +4,4 @@ coverage
 pnpm-lock.yaml
 *.md
 packages/*/drizzle
+packages/*/src/sources/fixtures/*.html

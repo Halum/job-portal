@@ -20,10 +20,19 @@ const envSchema = z.object({
   // source is scheduled only when this is set; the real value lives in the local .env only.
   BUNDESAGENTUR_QUERY: z.string().optional(),
   BUNDESAGENTUR_INTERVAL_MINUTES: z.coerce.number().int().min(1).default(60),
+  // Bambase needs no search criteria, so it is scheduled when its interval is set (empty counts as unset).
+  BAMBASE_INTERVAL_MINUTES: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.coerce.number().int().min(1).optional(),
+  ),
 });
 
 export interface SourceConfig {
   query: string;
+  intervalMinutes: number;
+}
+
+export interface IntervalConfig {
   intervalMinutes: number;
 }
 
@@ -36,7 +45,7 @@ export interface Config {
   port: number;
   logLevel: z.infer<typeof envSchema>['LOG_LEVEL'];
   /** One entry per source; null means the source is not configured and is never scheduled. */
-  sources: { bundesagentur: SourceConfig | null };
+  sources: { bundesagentur: SourceConfig | null; bambase: IntervalConfig | null };
 }
 
 /** Validates the environment once at process start; throws ConfigError naming each bad variable. */
@@ -60,6 +69,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
         e.BUNDESAGENTUR_QUERY === undefined || e.BUNDESAGENTUR_QUERY === ''
           ? null
           : { query: e.BUNDESAGENTUR_QUERY, intervalMinutes: e.BUNDESAGENTUR_INTERVAL_MINUTES },
+      bambase:
+        e.BAMBASE_INTERVAL_MINUTES === undefined
+          ? null
+          : { intervalMinutes: e.BAMBASE_INTERVAL_MINUTES },
     },
   };
 }

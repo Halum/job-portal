@@ -17,7 +17,7 @@ describe('loadConfig', () => {
       host: '127.0.0.1',
       port: 3000,
       logLevel: 'info',
-      sources: { bundesagentur: null },
+      sources: { bundesagentur: null, bambase: null },
     });
   });
 
@@ -52,6 +52,7 @@ describe('loadConfig', () => {
     it('is unset until a query is given, and then defaults to hourly', () => {
       expect(loadConfig({ ...valid, BUNDESAGENTUR_QUERY: 'wo=Musterstadt' }).sources).toEqual({
         bundesagentur: { query: 'wo=Musterstadt', intervalMinutes: 60 },
+        bambase: null,
       });
     });
 
@@ -68,6 +69,27 @@ describe('loadConfig', () => {
       const env = { ...valid, BUNDESAGENTUR_INTERVAL_MINUTES: value };
       expect(() => loadConfig(env)).toThrow(ConfigError);
       expect(() => loadConfig(env)).toThrow('BUNDESAGENTUR_INTERVAL_MINUTES');
+    });
+  });
+
+  describe('bambase source', () => {
+    it('is not scheduled until its interval is set, and an empty value counts as unset', () => {
+      expect(loadConfig(valid).sources.bambase).toBeNull();
+      expect(loadConfig({ ...valid, BAMBASE_INTERVAL_MINUTES: '' }).sources.bambase).toBeNull();
+    });
+
+    it('reads the interval in minutes, independent of the other sources', () => {
+      const env = { ...valid, BAMBASE_INTERVAL_MINUTES: '30', BUNDESAGENTUR_QUERY: 'wo=x' };
+      expect(loadConfig(env).sources).toEqual({
+        bundesagentur: { query: 'wo=x', intervalMinutes: 60 },
+        bambase: { intervalMinutes: 30 },
+      });
+    });
+
+    it.each(['0', '-5', '1.5', 'abc'])('rejects the interval %j', (value) => {
+      const env = { ...valid, BAMBASE_INTERVAL_MINUTES: value };
+      expect(() => loadConfig(env)).toThrow(ConfigError);
+      expect(() => loadConfig(env)).toThrow('BAMBASE_INTERVAL_MINUTES');
     });
   });
 });
