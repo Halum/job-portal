@@ -1,7 +1,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { userSchema, type User } from '@job-portal/accounts';
-import { DISCOVERY_STATES, DiscoveryError, type Discovery } from '@job-portal/discovery';
+import {
+  ADD_JOB_LIMITS,
+  DISCOVERY_STATES,
+  DiscoveryError,
+  type Discovery,
+} from '@job-portal/discovery';
 import { RUN_STATUSES, type Pipeline } from '@job-portal/pipeline';
 import {
   ACTORS,
@@ -256,10 +261,10 @@ export function registerTools(
       description:
         'Add a job by hand as a Posting with source manual. It goes through the same dedupe, so a later copy from a board merges with it. Adding the same URL again returns the same Job.',
       inputSchema: {
-        title: z.string().min(1).max(300),
-        company: z.string().min(1).max(200).optional(),
-        city: z.string().min(1).max(100).optional(),
-        url: z.url({ protocol: /^https?$/ }).max(2000),
+        title: z.string().min(1).max(ADD_JOB_LIMITS.title),
+        company: z.string().min(1).max(ADD_JOB_LIMITS.company).optional(),
+        city: z.string().min(1).max(ADD_JOB_LIMITS.city).optional(),
+        url: z.url({ protocol: /^https?$/ }).max(ADD_JOB_LIMITS.url),
       },
       outputSchema: { jobId: z.string() },
     },

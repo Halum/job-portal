@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
+import { createLogger } from '@job-portal/shared';
 import {
   createBambaseSource,
   createBundesagenturSource,
@@ -18,7 +19,7 @@ const serve =
   () =>
     Promise.resolve(new Response(body, { status: 200 }));
 
-describe('rule merge hardening against real Postgres', () => {
+describe('ingest resilience against real Postgres', () => {
   let container: StartedPostgreSqlContainer;
   let handle: DbHandle;
 
@@ -94,11 +95,40 @@ describe('rule merge hardening against real Postgres', () => {
           errors: ['source note'],
         }),
     };
-    const d = createDiscovery(handle.db, [source]);
+    const lines: string[] = [];
+    const logger = createLogger({ destination: { write: (l) => lines.push(l) } });
+    const d = createDiscovery(handle.db, [source], logger);
     const result = await d.poll(USER, 'odd');
     expect(result).toMatchObject({ fetched: 3, newPostings: 2 });
     expect(result.errors).toEqual(['source note', 'posting 2 could not be stored']);
     const titles = (await d.listJobs(USER, {})).jobs.flatMap((j) => j.postings.map((p) => p.title));
     expect(titles).toEqual(expect.arrayContaining(['Koch', 'Kellner']));
+    // The stored line stays short; the cause goes to the log.
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('"sourcePostingId":"2"');
+    expect(lines[0]).toContain('posting not stored');
+  });
+
+  it('a lost database connection fails the poll instead of becoming an error line', async () => {
+    const lost = createDb(container.getConnectionUri());
+    await lost.close();
+    const source: Source = {
+      id: 'lost',
+      fetch: () =>
+        Promise.resolve({
+          postings: [
+            {
+              sourcePostingId: '1',
+              title: 'Koch',
+              company: 'Beispiel GmbH',
+              location: 'Musterstadt',
+              url: 'https://jobs.example.invalid/1',
+              raw: {},
+            },
+          ],
+          errors: [],
+        }),
+    };
+    await expect(createDiscovery(lost.db, [source]).poll(USER, 'lost')).rejects.toThrow();
   });
 });

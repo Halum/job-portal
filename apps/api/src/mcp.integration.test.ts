@@ -7,7 +7,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createAccounts } from '@job-portal/accounts';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
-import { createBundesagenturSource, createDiscovery } from '@job-portal/discovery';
+import { ADD_JOB_LIMITS, createBundesagenturSource, createDiscovery } from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
 import { createPipeline } from '@job-portal/pipeline';
 import { createTracker } from '@job-portal/tracker';
@@ -343,12 +343,12 @@ describe('MCP endpoint over real HTTP', () => {
     const ok = { title: 'Koch', url: 'https://x.example.invalid/j/77' };
     expect(await refused({ ...ok, url: 'ftp://x.example.invalid/j' })).toBe(true);
     expect(await refused({ ...ok, url: 'javascript:alert(1)' })).toBe(true);
-    expect(await refused({ ...ok, title: 'x'.repeat(301) })).toBe(true);
-    expect(await refused({ ...ok, company: 'x'.repeat(201) })).toBe(true);
-    expect(await refused({ ...ok, city: 'x'.repeat(101) })).toBe(true);
-    expect(await refused({ ...ok, url: `https://x.example.invalid/${'a'.repeat(2000)}` })).toBe(
-      true,
-    );
+    expect(await refused({ ...ok, title: 'x'.repeat(ADD_JOB_LIMITS.title + 1) })).toBe(true);
+    expect(await refused({ ...ok, company: 'x'.repeat(ADD_JOB_LIMITS.company + 1) })).toBe(true);
+    expect(await refused({ ...ok, city: 'x'.repeat(ADD_JOB_LIMITS.city + 1) })).toBe(true);
+    const longUrl = `https://x.example.invalid/${'a'.repeat(ADD_JOB_LIMITS.url)}`;
+    expect(await refused({ ...ok, url: longUrl })).toBe(true);
+    expect(await refused({ ...ok, url: 'http://x.example.invalid/j/78' })).toBe(false);
     expect(await refused(ok)).toBe(false);
     await client.close();
   });

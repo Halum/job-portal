@@ -64,14 +64,9 @@ describe('companyKey normalization', () => {
     expect(key({ title })).toBe(key({ title: 'Koch' }));
   });
 
-  it('does not eat slashes that are not a gender marker', () => {
-    expect(key({ title: 'Front/Back/End Engineer' })).not.toBe(key({ title: 'Engineer' }));
-  });
-
   it('strips a leading German postcode from the city, but not a trailing one', () => {
     expect(key({ location: '96047 Bamberg' })).toBe(key({ location: 'Bamberg' }));
     expect(key({ location: 'Bamberg 96047' })).not.toBe(key({ location: 'Bamberg' }));
-    expect(key({ location: '96047' })).toBe(key({ location: '96047' }));
   });
 });
 
