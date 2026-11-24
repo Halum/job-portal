@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { createBundesagenturSource } from './bundesagentur';
+import { bundesagenturQuery, createBundesagenturSource } from './bundesagentur';
 
 interface Entry {
   referenznummer: string;
@@ -105,5 +105,79 @@ describe('bundesagentur source', () => {
   it('throws on a non-2xx description response', async () => {
     const source = createBundesagenturSource({ query: '', fetch: fakeFetch(403, {}).fetch });
     await expect(source.fetchDescription?.({ sourcePostingId: 'x' })).rejects.toThrow(/HTTP 403/);
+  });
+
+  describe('searches from Targets', () => {
+    const search =
+      (urls: string[]): ((u: string) => Promise<Response>) =>
+      (u) => {
+        urls.push(u);
+        return Promise.resolve(new Response(JSON.stringify(fixture), { status: 200 }));
+      };
+
+    it('runs one request per query, passes was, wo and umkreis, and merges equal postings', async () => {
+      const urls: string[] = [];
+      const source = createBundesagenturSource({
+        queries: () =>
+          Promise.resolve([
+            bundesagenturQuery({ was: 'koch', wo: 'Musterstadt', umkreis: 0 }),
+            bundesagenturQuery({ was: 'kellner', wo: 'Musterstadt' }),
+          ]),
+        fetch: search(urls) as unknown as typeof fetch,
+      });
+      const { postings, errors } = await source.fetch();
+      expect(urls).toHaveLength(2);
+      const first = new URL(urls[0] ?? '').searchParams;
+      expect([first.get('was'), first.get('wo'), first.get('umkreis')]).toEqual([
+        'koch',
+        'Musterstadt',
+        '0',
+      ]);
+      expect(new URL(urls[1] ?? '').searchParams.has('umkreis')).toBe(false);
+      expect(postings).toHaveLength(5); // the same five postings from both searches count once
+      expect(errors).toEqual([]);
+    });
+
+    it('makes no request when there is no query', async () => {
+      const urls: string[] = [];
+      const source = createBundesagenturSource({
+        queries: () => Promise.resolve([]),
+        fetch: search(urls) as unknown as typeof fetch,
+      });
+      expect(await source.fetch()).toEqual({ postings: [], errors: [] });
+      expect(urls).toEqual([]);
+    });
+
+    it('keeps the results of the searches that worked and reports the one that failed', async () => {
+      let n = 0;
+      const flaky = (() => {
+        n += 1;
+        return Promise.resolve(
+          n === 1 ? new Response('no', { status: 500 }) : new Response(JSON.stringify(fixture)),
+        );
+      }) as unknown as typeof fetch;
+      const source = createBundesagenturSource({
+        queries: () => Promise.resolve(['was=a', 'was=b']),
+        fetch: flaky,
+      });
+      const { postings, errors } = await source.fetch();
+      expect(postings).toHaveLength(5);
+      expect(errors).toEqual(['search failed: bundesagentur API returned HTTP 500']);
+    });
+
+    it('fails the run when every search fails', async () => {
+      const source = createBundesagenturSource({
+        queries: () => Promise.resolve(['was=a', 'was=b']),
+        fetch: fakeFetch(503, {}).fetch,
+      });
+      await expect(source.fetch()).rejects.toThrow(/HTTP 503/);
+    });
+
+    it('builds the query string from Matching parameters', () => {
+      expect(bundesagenturQuery({})).toBe('');
+      expect(bundesagenturQuery({ was: 'Koch & Küche', wo: '96047', umkreis: 25 })).toBe(
+        'was=Koch+%26+K%C3%BCche&wo=96047&umkreis=25',
+      );
+    });
   });
 });

@@ -16,7 +16,19 @@ export const MANUAL_SOURCE = 'manual';
 export interface PollResult {
   fetched: number;
   newPostings: number;
+  /** The Jobs of the Postings stored for the first time in this poll (a merge target counts once). */
+  jobIds: string[];
   errors: string[];
+}
+
+/** A Job in the shape Matching reads: the Source's own payload comes from its oldest Posting. */
+export interface MatchableJobRow {
+  id: string;
+  title: string;
+  company: string | null;
+  location: string | null;
+  raw: unknown;
+  recency: Date;
 }
 
 export interface PostingView {
@@ -47,6 +59,8 @@ export interface JobDetail extends Omit<JobView, 'postings'> {
 }
 
 export interface ListJobsOptions {
+  /** Only these Jobs (applied before paging); null or undefined means no restriction. */
+  jobIds?: string[] | null;
   limit?: number;
   /** The `nextCursor` of the previous page. */
   cursor?: string | null;
@@ -61,6 +75,8 @@ export interface Discovery {
     options: ListJobsOptions,
   ) => Promise<{ jobs: JobView[]; nextCursor: string | null }>;
   getJob: (userId: string, jobId: string) => Promise<JobDetail | null>;
+  /** The Jobs among `ids` that Matching may look at: New or Shortlisted ones, never Dismissed or Expired. */
+  listMatchable: (userId: string, ids: string[]) => Promise<MatchableJobRow[]>;
   /** A manual Posting (source `manual`) through the same dedupe; adding the same URL again is a no-op. */
   addJob: (userId: string, input: AddJobInput) => Promise<{ jobId: string }>;
   /**
@@ -246,10 +262,15 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
       if (!source) throw new Error(`unknown source: ${sourceId}`);
       const { postings: fetched, errors } = await source.fetch();
       let newPostings = 0;
+      const jobIds = new Set<string>();
       for (const p of fetched) {
-        if ((await ingest(db, userId, sourceId, p)).isNew) newPostings += 1;
+        const placed = await ingest(db, userId, sourceId, p);
+        if (placed.isNew) {
+          newPostings += 1;
+          jobIds.add(placed.jobId);
+        }
       }
-      return { fetched: fetched.length, newPostings, errors };
+      return { fetched: fetched.length, newPostings, jobIds: [...jobIds], errors };
     },
 
     async addJob(userId, input) {
@@ -316,12 +337,48 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
         .orderBy(asc(mergeConflicts.createdAt));
     },
 
-    async listJobs(userId, { limit = DEFAULT_LIMIT, cursor }) {
+    async listMatchable(userId, ids) {
+      if (ids.length === 0) return [];
+      const rows = await db
+        .select({ job: jobs, posting: postings })
+        .from(jobs)
+        .innerJoin(postings, eq(postings.jobId, jobs.id))
+        .where(
+          and(
+            eq(jobs.userId, userId),
+            inArray(jobs.id, ids),
+            inArray(jobs.discoveryState, ['new', 'shortlisted']),
+          ),
+        )
+        .orderBy(asc(postings.firstSeenAt));
+      const byJob = new Map<string, MatchableJobRow>();
+      for (const { job, posting } of rows) {
+        if (byJob.has(job.id)) continue; // the oldest Posting speaks for the Job
+        byJob.set(job.id, {
+          id: job.id,
+          title: job.title,
+          company: job.company,
+          location: job.location,
+          raw: posting.raw,
+          recency: posting.postedAt ?? posting.firstSeenAt,
+        });
+      }
+      return [...byJob.values()];
+    },
+
+    async listJobs(userId, { limit = DEFAULT_LIMIT, cursor, jobIds }) {
       const size = Math.min(Math.max(limit, 1), MAX_LIMIT);
+      if (jobIds && jobIds.length === 0) return { jobs: [], nextCursor: null };
       const rows = await db
         .select()
         .from(jobs)
-        .where(and(eq(jobs.userId, userId), cursor ? gt(jobs.id, cursor) : undefined))
+        .where(
+          and(
+            eq(jobs.userId, userId),
+            cursor ? gt(jobs.id, cursor) : undefined,
+            jobIds ? inArray(jobs.id, jobIds) : undefined,
+          ),
+        )
         .orderBy(asc(jobs.id))
         .limit(size + 1);
       const page = rows.slice(0, size);

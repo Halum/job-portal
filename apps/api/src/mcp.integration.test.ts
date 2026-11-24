@@ -9,6 +9,7 @@ import { createAccounts } from '@job-portal/accounts';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import { createBundesagenturSource, createDiscovery } from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
+import { createMatching } from '@job-portal/matching';
 import { createPipeline } from '@job-portal/pipeline';
 import { createLogger } from '@job-portal/shared';
 import { createApiServer } from './server';
@@ -44,9 +45,13 @@ describe('MCP endpoint over real HTTP', () => {
     ]);
     const pipeline = createPipeline(handle.db, discovery);
     await pipeline.execute(userId, 'bundesagentur');
+    const matching = createMatching(handle.db, {
+      loadJobs: (u, ids) => discovery.listMatchable(u, ids),
+    });
     server = createApiServer({
       accounts,
       discovery,
+      matching,
       pipeline,
       logger: createLogger({ level: 'silent' }),
     });
@@ -75,10 +80,14 @@ describe('MCP endpoint over real HTTP', () => {
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([
       'add_job',
+      'get_global_defaults',
       'get_job',
       'get_run_history',
       'list_jobs',
+      'list_targets',
       'split_job',
+      'update_global_defaults',
+      'upsert_target',
       'whoami',
     ]);
     await client.close();
@@ -262,5 +271,86 @@ describe('MCP endpoint over real HTTP', () => {
       body: JSON.stringify({ padding: 'x'.repeat(1024 * 1024 + 1) }),
     });
     expect(res.status).toBe(413);
+  });
+
+  describe('Targets and Global defaults', () => {
+    type TargetOut = {
+      id: string;
+      name: string;
+      paused: boolean;
+      criteria: Record<string, unknown>;
+      resolved: Record<string, unknown>;
+    };
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const client = await connect();
+      try {
+        return await client.callTool({ name, arguments: args });
+      } finally {
+        await client.close();
+      }
+    };
+
+    it('upserts a Target by name, patches it, and shows what it resolves to', async () => {
+      await call('update_global_defaults', {
+        criteria: { exclusionWords: ['Pflege'], radiusKm: 25, alertThreshold: 70 },
+      });
+      const made = (
+        await call('upsert_target', {
+          name: 'odd minijob',
+          criteria: { keywords: ['koch'], exclusionWords: ['Zeitarbeit'], alertThreshold: 0 },
+        })
+      ).structuredContent as { target: TargetOut };
+      expect(made.target.paused).toBe(false);
+      expect(made.target.criteria).toMatchObject({ keywords: ['koch'], radiusKm: null });
+      expect(made.target.resolved).toMatchObject({
+        radiusKm: 25,
+        alertThreshold: 0,
+        exclusionWords: ['Pflege', 'Zeitarbeit'],
+      });
+
+      const patched = (
+        await call('upsert_target', {
+          name: 'odd minijob',
+          paused: true,
+          criteria: { radiusKm: 0, keywords: null },
+        })
+      ).structuredContent as { target: TargetOut };
+      expect(patched.target.id).toBe(made.target.id);
+      expect(patched.target.paused).toBe(true);
+      expect(patched.target.criteria).toMatchObject({ radiusKm: 0, keywords: null });
+      expect(patched.target.criteria['exclusionWords']).toEqual(['Zeitarbeit']);
+
+      const listed = (await call('list_targets', {})).structuredContent as { targets: TargetOut[] };
+      expect(listed.targets.map((t) => t.name)).toEqual(['odd minijob']);
+      const defaults = (await call('get_global_defaults', {})).structuredContent as {
+        defaults: Record<string, unknown>;
+      };
+      expect(defaults.defaults).toMatchObject({ radiusKm: 25, exclusionWords: ['Pflege'] });
+    });
+
+    it('refuses values the zero rules forbid with a tool error', async () => {
+      for (const [name, args] of [
+        ['upsert_target', { name: 'bad', criteria: { prerankTopN: 0 } }],
+        ['update_global_defaults', { criteria: { alertThreshold: 101 } }],
+        ['upsert_target', { name: ' ' }],
+      ] as const) {
+        const outcome = await call(name, args).catch((err: unknown) => err);
+        const failed = outcome instanceof Error || (outcome as { isError?: boolean }).isError;
+        expect(failed).toBe(true);
+      }
+      const listed = (await call('list_targets', {})).structuredContent as { targets: TargetOut[] };
+      expect(listed.targets.map((t) => t.name)).not.toContain('bad');
+    });
+
+    it("list_jobs by Target returns only that Target's candidates, none for a new Target", async () => {
+      const made = (await call('upsert_target', { name: 'empty' })).structuredContent as {
+        target: TargetOut;
+      };
+      const out = (await call('list_jobs', { targetId: made.target.id })).structuredContent as {
+        jobs: unknown[];
+        nextCursor: string | null;
+      };
+      expect(out).toEqual({ jobs: [], nextCursor: null });
+    });
   });
 });

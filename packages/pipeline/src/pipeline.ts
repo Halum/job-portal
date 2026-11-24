@@ -1,6 +1,7 @@
 import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '@job-portal/db';
 import type { Discovery } from '@job-portal/discovery';
+import type { Matching } from '@job-portal/matching';
 import { runs, type RunStatus } from './schema';
 
 export interface Run {
@@ -9,6 +10,7 @@ export interface Run {
   status: RunStatus;
   fetched: number;
   newPostings: number;
+  prerankPassed: number;
   errors: string[];
   startedAt: Date;
   finishedAt: Date | null;
@@ -35,6 +37,7 @@ const columns = {
   status: runs.status,
   fetched: runs.fetched,
   newPostings: runs.newPostings,
+  prerankPassed: runs.prerankPassed,
   errors: runs.errors,
   startedAt: runs.startedAt,
   finishedAt: runs.finishedAt,
@@ -46,6 +49,8 @@ export interface PipelineOptions {
    * failed) and is failed by the next execute for the same source. Default one hour.
    */
   staleAfterMs?: number;
+  /** Runs after each poll over the Jobs it created; a failure there is an error line, not a failed run. */
+  matching?: Pick<Matching, 'run'>;
 }
 
 const DEFAULT_STALE_AFTER_MS = 60 * 60 * 1000;
@@ -58,7 +63,7 @@ const DEFAULT_STALE_AFTER_MS = 60 * 60 * 1000;
 export function createPipeline(
   db: Db,
   discovery: Pick<Discovery, 'poll'>,
-  { staleAfterMs = DEFAULT_STALE_AFTER_MS }: PipelineOptions = {},
+  { staleAfterMs = DEFAULT_STALE_AFTER_MS, matching }: PipelineOptions = {},
 ): Pipeline {
   /** Fails runs still "running" past the time bound that also match `scope`; returns how many. */
   const failLost = async (...scope: (SQL | undefined)[]): Promise<number> => {
@@ -92,7 +97,7 @@ export function createPipeline(
       if (!started) return null;
 
       const finish = async (
-        values: Pick<Run, 'status' | 'fetched' | 'newPostings' | 'errors'>,
+        values: Pick<Run, 'status' | 'fetched' | 'newPostings' | 'prerankPassed' | 'errors'>,
       ): Promise<Run> => {
         // Only a run still "running" may finish: one failed as lost keeps its failed row.
         const [run] = await db
@@ -107,11 +112,20 @@ export function createPipeline(
       };
 
       try {
-        const { fetched, newPostings, errors } = await discovery.poll(userId, sourceId);
+        const { fetched, newPostings, jobIds, errors } = await discovery.poll(userId, sourceId);
+        let prerankPassed = 0;
+        if (matching) {
+          try {
+            prerankPassed = (await matching.run(userId, jobIds)).prerankPassed;
+          } catch (err) {
+            errors.push(`matching failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
         return await finish({
           status: errors.length > 0 ? 'completed_with_errors' : 'completed',
           fetched,
           newPostings,
+          prerankPassed,
           errors,
         });
       } catch (err) {
@@ -119,6 +133,7 @@ export function createPipeline(
           status: 'failed',
           fetched: 0,
           newPostings: 0,
+          prerankPassed: 0,
           errors: [err instanceof Error ? err.message : String(err)],
         });
       }

@@ -1,9 +1,11 @@
 import { createAccounts } from '@job-portal/accounts';
 import { loadConfig } from '@job-portal/config';
 import { createDb, runMigrationsWithLock } from '@job-portal/db';
+import { createMatching } from '@job-portal/matching';
 import {
   BAMBASE,
   BUNDESAGENTUR,
+  bundesagenturQuery,
   createBambaseSource,
   createBundesagenturSource,
   createDiscovery,
@@ -21,18 +23,31 @@ await runMigrationsWithLock(config.databaseUrl, allMigrations, logger);
 const { db } = createDb(config.databaseUrl);
 const user = await createAccounts(db, config.mcpBearerToken).seedUser(config.seedUserEmail);
 
+// Targets decide what the Bundesagentur search asks for; Discovery supplies the Jobs Matching may look at.
+// ponytail: the Tracker's application-status exclusion (hasApplication) is wired when it exists.
+// (`discovery` is created below; the callback only runs during a run, after it exists.)
+const matching = createMatching(db, {
+  loadJobs: (userId, ids) => discovery.listMatchable(userId, ids),
+  defaultPrerankTopN: config.prerankTopN,
+});
+
 const sources: Source[] = [];
 const scheduled: ScheduledSource[] = [];
 const { bundesagentur, bambase } = config.sources;
 if (bundesagentur) {
-  sources.push(createBundesagenturSource({ query: bundesagentur.query }));
+  sources.push(
+    createBundesagenturSource({
+      queries: async () => (await matching.searchQueries(user.id)).map(bundesagenturQuery),
+    }),
+  );
   scheduled.push({ sourceId: BUNDESAGENTUR, intervalMinutes: bundesagentur.intervalMinutes });
 }
 if (bambase) {
   sources.push(createBambaseSource());
   scheduled.push({ sourceId: BAMBASE, intervalMinutes: bambase.intervalMinutes });
 }
-const pipeline = createPipeline(db, createDiscovery(db, sources));
+const discovery = createDiscovery(db, sources);
+const pipeline = createPipeline(db, discovery, { matching });
 
 const worker = await startWorker({
   redisUrl: config.redisUrl,

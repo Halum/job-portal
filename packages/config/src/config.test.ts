@@ -18,6 +18,7 @@ describe('loadConfig', () => {
       port: 3000,
       logLevel: 'info',
       sources: { bundesagentur: null, bambase: null },
+      prerankTopN: 20,
     });
   });
 
@@ -49,26 +50,32 @@ describe('loadConfig', () => {
   });
 
   describe('bundesagentur source', () => {
-    it('is unset until a query is given, and then defaults to hourly', () => {
-      expect(loadConfig({ ...valid, BUNDESAGENTUR_QUERY: 'wo=Musterstadt' }).sources).toEqual({
-        bundesagentur: { query: 'wo=Musterstadt', intervalMinutes: 60 },
-        bambase: null,
-      });
+    it('is not scheduled until its interval is set, and an empty value counts as unset', () => {
+      expect(loadConfig(valid).sources.bundesagentur).toBeNull();
+      expect(
+        loadConfig({ ...valid, BUNDESAGENTUR_INTERVAL_MINUTES: '' }).sources.bundesagentur,
+      ).toBeNull();
     });
 
-    it('treats an empty query as unset', () => {
-      expect(loadConfig({ ...valid, BUNDESAGENTUR_QUERY: '' }).sources.bundesagentur).toBeNull();
+    it('reads the interval in minutes and no longer reads a query from the environment', () => {
+      const env = { ...valid, BUNDESAGENTUR_INTERVAL_MINUTES: '15', BUNDESAGENTUR_QUERY: 'wo=x' };
+      expect(loadConfig(env).sources.bundesagentur).toEqual({ intervalMinutes: 15 });
     });
 
-    it('reads the interval in minutes', () => {
-      const env = { ...valid, BUNDESAGENTUR_QUERY: 'wo=x', BUNDESAGENTUR_INTERVAL_MINUTES: '15' };
-      expect(loadConfig(env).sources.bundesagentur?.intervalMinutes).toBe(15);
-    });
-
-    it.each(['0', '-5', '1.5', 'abc', ''])('rejects the interval %j', (value) => {
+    it.each(['0', '-5', '1.5', 'abc'])('rejects the interval %j', (value) => {
       const env = { ...valid, BUNDESAGENTUR_INTERVAL_MINUTES: value };
       expect(() => loadConfig(env)).toThrow(ConfigError);
       expect(() => loadConfig(env)).toThrow('BUNDESAGENTUR_INTERVAL_MINUTES');
+    });
+  });
+
+  describe('prerank default', () => {
+    it('defaults to 20, reads an override, and needs an integer of at least 1', () => {
+      expect(loadConfig(valid).prerankTopN).toBe(20);
+      expect(loadConfig({ ...valid, PRERANK_TOP_N: '5' }).prerankTopN).toBe(5);
+      for (const bad of ['0', '-1', '1.5', 'abc']) {
+        expect(() => loadConfig({ ...valid, PRERANK_TOP_N: bad })).toThrow('PRERANK_TOP_N');
+      }
     });
   });
 
@@ -79,9 +86,13 @@ describe('loadConfig', () => {
     });
 
     it('reads the interval in minutes, independent of the other sources', () => {
-      const env = { ...valid, BAMBASE_INTERVAL_MINUTES: '30', BUNDESAGENTUR_QUERY: 'wo=x' };
+      const env = {
+        ...valid,
+        BAMBASE_INTERVAL_MINUTES: '30',
+        BUNDESAGENTUR_INTERVAL_MINUTES: '60',
+      };
       expect(loadConfig(env).sources).toEqual({
-        bundesagentur: { query: 'wo=x', intervalMinutes: 60 },
+        bundesagentur: { intervalMinutes: 60 },
         bambase: { intervalMinutes: 30 },
       });
     });

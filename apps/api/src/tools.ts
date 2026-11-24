@@ -2,10 +2,12 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { userSchema, type User } from '@job-portal/accounts';
 import { DISCOVERY_STATES, type Discovery } from '@job-portal/discovery';
+import { criteriaPatchSchema, criteriaSchema, type Matching } from '@job-portal/matching';
 import { RUN_STATUSES, type Pipeline } from '@job-portal/pipeline';
 
 export interface ToolDeps {
   discovery: Discovery;
+  matching: Matching;
   pipeline: Pipeline;
 }
 
@@ -40,6 +42,7 @@ const runSchema = z.object({
   status: z.enum(RUN_STATUSES),
   fetched: z.number(),
   newPostings: z.number(),
+  prerankPassed: z.number().describe('Job and Target pairs that passed the filters and prerank'),
   errors: z.array(z.string()),
   errorCount: z.number().describe('Length of errors'),
   startedAt: isoDate,
@@ -73,7 +76,31 @@ const text = (value: unknown): { type: 'text'; text: string } => ({
   text: JSON.stringify(value),
 });
 
-export function registerTools(mcp: McpServer, user: User, { discovery, pipeline }: ToolDeps): void {
+const targetSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  paused: z.boolean(),
+  criteria: criteriaSchema.describe(
+    'Fields set on this Target; null means inherit the Global default',
+  ),
+  resolved: criteriaSchema.describe(
+    'What the Target uses after falling back to the Global defaults',
+  ),
+});
+
+const failure = (
+  err: unknown,
+  fallback: string,
+): { isError: true; content: { type: 'text'; text: string }[] } => ({
+  isError: true,
+  content: [{ type: 'text', text: err instanceof Error ? err.message : fallback }],
+});
+
+export function registerTools(
+  mcp: McpServer,
+  user: User,
+  { discovery, matching, pipeline }: ToolDeps,
+): void {
   mcp.registerTool(
     'whoami',
     {
@@ -91,11 +118,16 @@ export function registerTools(mcp: McpServer, user: User, { discovery, pipeline 
       inputSchema: {
         limit: z.number().int().min(1).max(200).optional(),
         cursor: z.uuid().optional().describe('The nextCursor of the previous page.'),
+        targetId: z
+          .uuid()
+          .optional()
+          .describe('Only Jobs that passed the hard filters and prerank of this Target.'),
       },
       outputSchema: { jobs: z.array(jobSchema), nextCursor: z.string().nullable() },
     },
-    async ({ limit, cursor }) => {
-      const page = await discovery.listJobs(user.id, { limit, cursor });
+    async ({ limit, cursor, targetId }) => {
+      const jobIds = targetId ? await matching.listJobIds(user.id, { targetId }) : undefined;
+      const page = await discovery.listJobs(user.id, { limit, cursor, jobIds });
       const out = {
         jobs: page.jobs.map(jobOut),
         nextCursor: page.nextCursor,
@@ -164,6 +196,71 @@ export function registerTools(mcp: McpServer, user: User, { discovery, pipeline 
           isError: true,
           content: [{ type: 'text', text: err instanceof Error ? err.message : 'split failed' }],
         };
+      }
+    },
+  );
+
+  mcp.registerTool(
+    'list_targets',
+    {
+      description:
+        'List the Targets (named searches) with the criteria set on each and the criteria it ends up using after falling back to the Global defaults.',
+      outputSchema: { targets: z.array(targetSchema) },
+    },
+    async () => {
+      const out = { targets: await matching.listTargets(user.id) };
+      return { content: [text(out)], structuredContent: out };
+    },
+  );
+
+  mcp.registerTool(
+    'upsert_target',
+    {
+      description:
+        'Create a Target, or update the one with this name. Only the criteria keys you pass change; null clears a field so it inherits the Global default again. Exclusion words and blocked companies add up with the Global defaults. radiusKm 0 means the same city only; paused stops matching.',
+      inputSchema: {
+        name: z.string().trim().min(1),
+        paused: z.boolean().optional(),
+        criteria: criteriaPatchSchema.optional(),
+      },
+      outputSchema: { target: targetSchema },
+    },
+    async (input) => {
+      try {
+        const out = { target: await matching.upsertTarget(user.id, input) };
+        return { content: [text(out)], structuredContent: out };
+      } catch (err) {
+        return failure(err, 'upsert failed');
+      }
+    },
+  );
+
+  mcp.registerTool(
+    'get_global_defaults',
+    {
+      description: 'Get the Global defaults every Target falls back to.',
+      outputSchema: { defaults: criteriaSchema },
+    },
+    async () => {
+      const out = { defaults: await matching.getGlobalDefaults(user.id) };
+      return { content: [text(out)], structuredContent: out };
+    },
+  );
+
+  mcp.registerTool(
+    'update_global_defaults',
+    {
+      description:
+        'Change the Global defaults. Only the keys you pass change; null clears a field.',
+      inputSchema: { criteria: criteriaPatchSchema },
+      outputSchema: { defaults: criteriaSchema },
+    },
+    async ({ criteria }) => {
+      try {
+        const out = { defaults: await matching.updateGlobalDefaults(user.id, criteria) };
+        return { content: [text(out)], structuredContent: out };
+      } catch (err) {
+        return failure(err, 'update failed');
       }
     },
   );

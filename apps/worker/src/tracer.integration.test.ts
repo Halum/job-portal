@@ -8,15 +8,21 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createAccounts } from '@job-portal/accounts';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
-import { createBundesagenturSource, createDiscovery } from '@job-portal/discovery';
+import {
+  bundesagenturQuery,
+  createBundesagenturSource,
+  createDiscovery,
+} from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
+import { createMatching } from '@job-portal/matching';
 import { createPipeline } from '@job-portal/pipeline';
 import { createLogger } from '@job-portal/shared';
 import { createApiServer } from '@job-portal/api';
 import { startWorker, type WorkerHandle } from './worker';
 
-// Tracer bullet: Bundesagentur (recorded response) -> BullMQ schedule -> Pipeline -> Discovery
-// -> Postgres -> MCP tools over real HTTP. Only the Bundesagentur HTTP call is faked.
+// Tracer bullet: a Target -> Bundesagentur search (recorded response) -> BullMQ schedule -> Pipeline
+// -> Discovery -> Matching (hard filters, prerank) -> Postgres -> MCP tools over real HTTP. Only the
+// Bundesagentur HTTP call is faked.
 const TOKEN = 'placeholder-token-for-tests';
 const fixtureText = readFileSync(
   new URL(
@@ -26,9 +32,9 @@ const fixtureText = readFileSync(
   'utf8',
 );
 const fixture = JSON.parse(fixtureText) as { ergebnisliste: { referenznummer: string }[] };
-let apiCalls = 0;
-const fakeFetch = (() => {
-  apiCalls += 1;
+const apiUrls: string[] = [];
+const fakeFetch = ((input: string) => {
+  apiUrls.push(input);
   return Promise.resolve(new Response(fixtureText, { status: 200 }));
 }) as unknown as typeof fetch;
 
@@ -49,10 +55,21 @@ describe('Bundesagentur source to MCP list_jobs', () => {
     handle = createDb(pg.getConnectionUri());
     const accounts = createAccounts(handle.db, TOKEN);
     const user = await accounts.seedUser('user@example.invalid');
+    const matching = createMatching(handle.db, {
+      loadJobs: (u, ids) => discovery.listMatchable(u, ids),
+    });
+    // Placeholder search: "Musterstadt" is not in the place table, so the radius cannot be checked.
+    await matching.upsertTarget(user.id, {
+      name: 'odd minijob',
+      criteria: { keywords: ['koch'], locations: ['Musterstadt'], radiusKm: 25 },
+    });
     const discovery = createDiscovery(handle.db, [
-      createBundesagenturSource({ query: 'wo=Musterstadt&umkreis=25', fetch: fakeFetch }),
+      createBundesagenturSource({
+        queries: async () => (await matching.searchQueries(user.id)).map(bundesagenturQuery),
+        fetch: fakeFetch,
+      }),
     ]);
-    const pipeline = createPipeline(handle.db, discovery);
+    const pipeline = createPipeline(handle.db, discovery, { matching });
     const logger = createLogger({ level: 'silent' });
 
     worker = await startWorker({
@@ -62,7 +79,7 @@ describe('Bundesagentur source to MCP list_jobs', () => {
       sources: [{ sourceId: 'bundesagentur', intervalMinutes: 1 }],
       logger,
     });
-    server = createApiServer({ accounts, discovery, pipeline, logger });
+    server = createApiServer({ accounts, discovery, matching, pipeline, logger });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const url = new URL(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}/mcp`);
     client = new Client({ name: 'test', version: '0.0.0' });
@@ -98,7 +115,12 @@ describe('Bundesagentur source to MCP list_jobs', () => {
     }
 
     expect(await runs()).toEqual([
-      expect.objectContaining({ status: 'completed', fetched: 5, newPostings: 5 }),
+      expect.objectContaining({
+        status: 'completed',
+        fetched: 5,
+        newPostings: 5,
+        prerankPassed: 1, // only the Koch posting matches the keyword
+      }),
     ]);
 
     const list = (await client.callTool({ name: 'list_jobs', arguments: {} }))
@@ -117,6 +139,23 @@ describe('Bundesagentur source to MCP list_jobs', () => {
     expect(detail.structuredContent).toMatchObject({
       job: { title: 'Koch (m/w/d)', postings: [{ raw: { hauptberuf: 'Koch/Köchin' } }] },
     });
-    expect(apiCalls).toBe(1);
+    expect(apiUrls).toHaveLength(1);
+    const params = new URL(apiUrls[0] ?? '').searchParams;
+    expect([params.get('was'), params.get('wo'), params.get('umkreis')]).toEqual([
+      'koch',
+      'Musterstadt',
+      '25',
+    ]);
+
+    // list_jobs by Target returns the one Job that passed, flagged candidate only for that Target.
+    const target = (
+      (await client.callTool({ name: 'list_targets', arguments: {} })).structuredContent as {
+        targets: { id: string }[];
+      }
+    ).targets[0];
+    const byTarget = (
+      await client.callTool({ name: 'list_jobs', arguments: { targetId: target?.id } })
+    ).structuredContent as { jobs: { id: string }[] };
+    expect(byTarget.jobs.map((j) => j.id)).toEqual([koch?.id]);
   });
 });

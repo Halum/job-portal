@@ -26,7 +26,7 @@ describe('pipeline against real Postgres', () => {
   });
 
   it('records a completed run with its counts', async () => {
-    poll = () => Promise.resolve({ fetched: 5, newPostings: 3, errors: [] });
+    poll = () => Promise.resolve({ fetched: 5, newPostings: 3, jobIds: [], errors: [] });
     const run = await pipeline().execute(USER, 'src-a');
     expect(run).toMatchObject({
       sourceId: 'src-a',
@@ -39,8 +39,47 @@ describe('pipeline against real Postgres', () => {
     expect(await pipeline().listRuns(USER, 10)).toContainEqual(run);
   });
 
+  it('runs Matching over the Jobs the poll created and records the prerank count', async () => {
+    poll = () => Promise.resolve({ fetched: 3, newPostings: 2, jobIds: ['j1', 'j2'], errors: [] });
+    const seen: string[][] = [];
+    const matched = createPipeline(
+      handle.db,
+      { poll: (u, s) => poll(u, s) },
+      {
+        matching: {
+          run: (_user, ids) => {
+            seen.push(ids);
+            return Promise.resolve({ prerankPassed: 4 });
+          },
+        },
+      },
+    );
+    const run = await matched.execute(USER, 'src-m1');
+    expect(seen).toEqual([['j1', 'j2']]);
+    expect(run).toMatchObject({ status: 'completed', fetched: 3, prerankPassed: 4 });
+    expect((await matched.listRuns(USER, 50)).find((r) => r.sourceId === 'src-m1')).toMatchObject({
+      prerankPassed: 4,
+    });
+  });
+
+  it('a Matching failure is an error line: the run keeps its fetch counts and ends with errors', async () => {
+    poll = () => Promise.resolve({ fetched: 3, newPostings: 2, jobIds: ['j1'], errors: [] });
+    const matched = createPipeline(
+      handle.db,
+      { poll: (u, s) => poll(u, s) },
+      { matching: { run: () => Promise.reject(new Error('boom')) } },
+    );
+    expect(await matched.execute(USER, 'src-m2')).toMatchObject({
+      status: 'completed_with_errors',
+      fetched: 3,
+      newPostings: 2,
+      prerankPassed: 0,
+      errors: ['matching failed: boom'],
+    });
+  });
+
   it('ends "completed with errors" when the source reports errors', async () => {
-    poll = () => Promise.resolve({ fetched: 2, newPostings: 1, errors: ['bad entry'] });
+    poll = () => Promise.resolve({ fetched: 2, newPostings: 1, jobIds: [], errors: ['bad entry'] });
     const run = await pipeline().execute(USER, 'src-b');
     expect(run).toMatchObject({ status: 'completed_with_errors', errors: ['bad entry'] });
   });
@@ -61,7 +100,7 @@ describe('pipeline against real Postgres', () => {
     poll = () =>
       new Promise((resolve) => {
         release = () => {
-          resolve({ fetched: 1, newPostings: 1, errors: [] });
+          resolve({ fetched: 1, newPostings: 1, jobIds: [], errors: [] });
         };
       });
     const first = pipeline().execute(USER, 'src-d');
@@ -70,7 +109,7 @@ describe('pipeline against real Postgres', () => {
     release();
     expect((await first)?.status).toBe('completed');
     // Once finished, the source can run again.
-    poll = () => Promise.resolve({ fetched: 0, newPostings: 0, errors: [] });
+    poll = () => Promise.resolve({ fetched: 0, newPostings: 0, jobIds: [], errors: [] });
     expect((await pipeline().execute(USER, 'src-d'))?.status).toBe('completed');
   });
 
@@ -97,7 +136,7 @@ describe('pipeline against real Postgres', () => {
     expect(stale?.finishedAt).toBeInstanceOf(Date);
     expect(runs.find((r) => r.sourceId === 'src-a')?.status).toBe('completed');
     // The source is free again.
-    poll = () => Promise.resolve({ fetched: 0, newPostings: 0, errors: [] });
+    poll = () => Promise.resolve({ fetched: 0, newPostings: 0, jobIds: [], errors: [] });
     expect((await pipeline().execute(USER, 'src-e'))?.status).toBe('completed');
   });
 
@@ -107,7 +146,7 @@ describe('pipeline against real Postgres', () => {
     await new Promise((r) => setTimeout(r, 100));
     expect(await pipeline().execute(USER, 'src-f')).toBeNull(); // within the bound it still blocks
 
-    poll = () => Promise.resolve({ fetched: 1, newPostings: 1, errors: [] });
+    poll = () => Promise.resolve({ fetched: 1, newPostings: 1, jobIds: [], errors: [] });
     const patient = createPipeline(handle.db, { poll: (u, s) => poll(u, s) }, { staleAfterMs: 50 });
     expect((await patient.execute(USER, 'src-f'))?.status).toBe('completed');
     const runs = (await patient.listRuns(USER, 50)).filter((r) => r.sourceId === 'src-f');
@@ -122,7 +161,7 @@ describe('pipeline against real Postgres', () => {
     poll = () =>
       new Promise((resolve) => {
         release = () => {
-          resolve({ fetched: 9, newPostings: 9, errors: [] });
+          resolve({ fetched: 9, newPostings: 9, jobIds: [], errors: [] });
         };
       });
     const slow = pipeline().execute(USER, 'src-g');
@@ -130,7 +169,7 @@ describe('pipeline against real Postgres', () => {
 
     const patient = createPipeline(
       handle.db,
-      { poll: () => Promise.resolve({ fetched: 0, newPostings: 0, errors: [] }) },
+      { poll: () => Promise.resolve({ fetched: 0, newPostings: 0, jobIds: [], errors: [] }) },
       { staleAfterMs: 50 },
     );
     expect((await patient.execute(USER, 'src-g'))?.status).toBe('completed');

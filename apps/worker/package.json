@@ -12,7 +12,8 @@
     "@job-portal/pipeline": "workspace:*",
     "@job-portal/shared": "workspace:*",
     "bullmq": "6.7.10",
-    "ioredis": "5.11.1"
+    "ioredis": "5.11.1",
+    "@job-portal/matching": "workspace:*"
   },
   "devDependencies": {
     "@job-portal/api": "workspace:*",
