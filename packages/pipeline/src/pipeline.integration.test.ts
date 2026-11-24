@@ -105,6 +105,70 @@ describe('pipeline against real Postgres', () => {
     });
   });
 
+  it('runs the AI merge check after the poll and adds its calls and cost to the run', async () => {
+    poll = () => Promise.resolve({ fetched: 0, newPostings: 0, jobIds: [], errors: [] });
+    const merged = createPipeline(
+      handle.db,
+      { poll: (u, s) => poll(u, s) },
+      {
+        aiMerge: {
+          run: () => Promise.resolve({ asked: 2, calls: 2, items: 1, costUsd: 0.02, errors: [] }),
+        },
+        scoring: {
+          score: () =>
+            Promise.resolve({
+              scored: 1,
+              tagged: 1,
+              rejections: 0,
+              calls: 1,
+              costUsd: 0.05,
+              errors: [],
+            }),
+        },
+      },
+    );
+    const run = await merged.execute(USER, 'src-m1');
+    expect(run).toMatchObject({ status: 'completed', aiMergeItems: 1, aiCalls: 3 });
+    expect(run?.aiCostUsd).toBeCloseTo(0.07);
+    expect(await merged.listRuns(USER, 50)).toContainEqual(run);
+  });
+
+  it('merge errors and crashes are error lines, a merge-only cost is kept, no cost stays unknown', async () => {
+    poll = () => Promise.resolve({ fetched: 0, newPostings: 0, jobIds: [], errors: [] });
+    const failing = createPipeline(
+      handle.db,
+      { poll: (u, s) => poll(u, s) },
+      {
+        aiMerge: {
+          run: () =>
+            Promise.resolve({
+              asked: 1,
+              calls: 1,
+              items: 0,
+              costUsd: 0.01,
+              errors: ['AI merge check failed (cap) for a pair of Jobs'],
+            }),
+        },
+      },
+    );
+    const run = await failing.execute(USER, 'src-m2');
+    expect(run).toMatchObject({ status: 'completed_with_errors', aiCalls: 1, aiCostUsd: 0.01 });
+    expect(run?.errors).toEqual(['AI merge check failed (cap) for a pair of Jobs']);
+
+    const crashing = createPipeline(
+      handle.db,
+      { poll: (u, s) => poll(u, s) },
+      { aiMerge: { run: () => Promise.reject(new Error('db down')) } },
+    );
+    const crashed = await crashing.execute(USER, 'src-m3');
+    expect(crashed).toMatchObject({
+      status: 'completed_with_errors',
+      aiMergeItems: 0,
+      aiCostUsd: null,
+    });
+    expect(crashed?.errors).toEqual(['AI merge failed: db down']);
+  });
+
   it('a failed AI call ends the run completed with errors and keeps the other counts', async () => {
     poll = () => Promise.resolve({ fetched: 1, newPostings: 1, jobIds: ['j1'], errors: [] });
     const scored = createPipeline(

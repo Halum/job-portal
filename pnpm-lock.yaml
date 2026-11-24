@@ -227,9 +227,15 @@ importers:
 
   packages/discovery:
     dependencies:
+      '@job-portal/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@job-portal/db':
         specifier: workspace:*
         version: link:../db
+      '@job-portal/review':
+        specifier: workspace:*
+        version: link:../review
       '@job-portal/shared':
         specifier: workspace:*
         version: link:../shared

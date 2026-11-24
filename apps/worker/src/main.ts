@@ -9,7 +9,7 @@ import {
 import { createWatchlist } from '@job-portal/boards';
 import { loadConfig } from '@job-portal/config';
 import { createDb, runMigrationsWithLock } from '@job-portal/db';
-import { connectRateLimiter, createDiscovery } from '@job-portal/discovery';
+import { connectRateLimiter, createAiMerge, createDiscovery } from '@job-portal/discovery';
 import { createMatching } from '@job-portal/matching';
 import { allMigrations } from '@job-portal/migrations';
 import { createPipeline } from '@job-portal/pipeline';
@@ -77,9 +77,20 @@ const notifications = buildNotifications(db, config.notifications, {
   review,
   log: logger,
 });
+// AI merge checks near-duplicate Jobs through the same runner and raises Review items; nothing merges unconfirmed.
+const aiMerge = createAiMerge(db, {
+  ...(ai ? { ai } : {}),
+  review,
+  hasApplication: async (userId, ids) => {
+    const states = await tracker.getStates(userId, ids);
+    return new Set(ids.filter((id) => states.get(id)?.applicationStatus != null));
+  },
+  minJaccard: config.aiMergeJaccard,
+  maxCallsPerPass: config.aiMergeMaxCallsPerRun,
+});
 const pipeline = createPipeline(db, discovery, {
   matching,
-  ...(ai ? { scoring: matching } : {}),
+  ...(ai ? { scoring: matching, aiMerge } : {}),
   ...(notifications ? { notifications } : {}),
   ...(config.ai ? { aiRunnerName: config.ai.runner } : {}),
 });

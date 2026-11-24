@@ -14,6 +14,9 @@ export {
 /** The subject of an ai_fit_rejection item: the Job and the Target it was scored against. */
 export const fitRejectionSubject = z.object({ jobId: z.uuid(), targetId: z.uuid() });
 
+/** The subject of an ai_merge item: the two Job ids, smaller first, so one pair is one item in either order. */
+export const mergeSubject = z.object({ jobA: z.uuid(), jobB: z.uuid() });
+
 export type ReviewDecision = 'confirm' | 'disagree';
 
 export interface ReviewItem {
@@ -84,6 +87,8 @@ export interface Review {
     input: NewReviewItem,
     tx?: Pick<Db, 'insert'>,
   ) => Promise<{ id: string; created: boolean }>;
+  /** Whether the user has an item of any status for this kind and subject. */
+  exists: (userId: string, kind: ReviewKind, subject: ReviewSubject) => Promise<boolean>;
   /** The user's items ordered and paged by id. */
   list: (
     userId: string,
@@ -132,6 +137,14 @@ export function createReview(db: Db): Review {
         .where(and(eq(items.userId, userId), eq(items.kind, kind), eq(items.subject, subject)));
       if (!existing) throw new Error('review item vanished during create');
       return { id: existing.id, created: false };
+    },
+
+    async exists(userId, kind, subject) {
+      const [row] = await db
+        .select({ id: items.id })
+        .from(items)
+        .where(and(eq(items.userId, userId), eq(items.kind, kind), eq(items.subject, subject)));
+      return row !== undefined;
     },
 
     async list(userId, { status = 'pending', kind, limit = DEFAULT_LIMIT, cursor }) {

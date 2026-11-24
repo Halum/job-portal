@@ -43,17 +43,42 @@ export interface CompanyKeyInput {
   location?: string | null;
 }
 
-/** Normalized company (legal suffix stripped) | title | city, only when all three are present. */
-export function companyKey({ company, title, location }: CompanyKeyInput): string | null {
+const normCompany = (company: string | null | undefined): string => {
   const tokens = fold(company ?? '')
     .split(' ')
     .filter(Boolean);
   while (tokens.length > 1 && LEGAL_TOKENS.has(tokens.at(-1) ?? '')) tokens.pop();
-  const c = tokens.join(' ');
-  const t = fold((title ?? '').replace(/\([^)]*\)/g, ' ').replace(GENDER_MARKER, ' '));
-  // A leading German postcode ("96047 Bamberg") is not part of the city.
-  const l = fold((location ?? '').replace(/^\s*\d{5}\s+/, ''));
+  return tokens.join(' ');
+};
+const normTitle = (title: string | null | undefined): string =>
+  fold((title ?? '').replace(/\([^)]*\)/g, ' ').replace(GENDER_MARKER, ' '));
+// A leading German postcode ("96047 Bamberg") is not part of the city.
+const normCity = (location: string | null | undefined): string =>
+  fold((location ?? '').replace(/^\s*\d{5}\s+/, ''));
+
+/** Normalized company (legal suffix stripped) | title | city, only when all three are present. */
+export function companyKey({ company, title, location }: CompanyKeyInput): string | null {
+  const c = normCompany(company);
+  const t = normTitle(title);
+  const l = normCity(location);
   return c && t && l ? `${c}|${t}|${l}` : null;
+}
+
+/** Normalized company | city, only when both are present: Jobs in one bucket may be the same job. */
+export function nearBucket({ company, location }: CompanyKeyInput): string | null {
+  const c = normCompany(company);
+  const l = normCity(location);
+  return c && l ? `${c}|${l}` : null;
+}
+
+/** Jaccard overlap (0 to 1) of the normalized title words of two titles; 0 when either has none. */
+export function titleOverlap(a: string, b: string): number {
+  const x = new Set(normTitle(a).split(' ').filter(Boolean));
+  const y = new Set(normTitle(b).split(' ').filter(Boolean));
+  if (x.size === 0 || y.size === 0) return 0;
+  let both = 0;
+  for (const w of x) if (y.has(w)) both += 1;
+  return both / (x.size + y.size - both);
 }
 
 /** The URL without scheme, www, fragment, tracking parameters and trailing slash; parameters sorted. */

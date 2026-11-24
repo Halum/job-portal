@@ -1,0 +1,1 @@
+ALTER TABLE "pipeline"."runs" ADD COLUMN "ai_merge_items" integer DEFAULT 0 NOT NULL;

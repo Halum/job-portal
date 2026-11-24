@@ -10,7 +10,9 @@
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@job-portal/ai": "workspace:*",
     "@job-portal/db": "workspace:*",
+    "@job-portal/review": "workspace:*",
     "@job-portal/shared": "workspace:*",
     "cheerio": "^1.0.0",
     "drizzle-orm": "0.45.4",

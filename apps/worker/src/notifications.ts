@@ -30,6 +30,8 @@ export function buildNotifications(
     newTags: (userId, since) => deps.matching.listNewTags(userId, since),
     jobInfo: async (userId, jobId) => {
       const job = await deps.discovery.getJob(userId, jobId);
+      // Discovery hides a Job an AI merge folded into another, so a merged-away shell is null here and never
+      // reaches a digest (its survivor is listed by its own pairs).
       if (job === null) return null;
       return {
         title: job.title,

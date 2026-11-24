@@ -5,6 +5,7 @@ import {
   ADD_JOB_LIMITS,
   DISCOVERY_STATES,
   DiscoveryError,
+  type AiMerge,
   type Discovery,
 } from '@job-portal/discovery';
 import type { AiLog } from '@job-portal/ai';
@@ -31,6 +32,8 @@ export interface ToolDeps {
   aiLog: Pick<AiLog, 'totals'>;
   boards: BoardToolDeps;
   review: Review;
+  /** Applies decided ai_merge items; without it they cannot be decided. */
+  aiMerge?: Pick<AiMerge, 'apply'>;
   tracker: Tracker;
   logger: Logger;
 }
@@ -125,7 +128,12 @@ const runSchema = z.object({
   aiRejections: z
     .number()
     .describe('Review items raised in this run for scores below the threshold'),
-  aiCalls: z.number(),
+  aiMergeItems: z
+    .number()
+    .describe(
+      'ai_merge Review items raised in this run for pairs of Jobs the AI judged to be one job',
+    ),
+  aiCalls: z.number().describe('AI calls of this run: fit scores and merge checks'),
   aiCostUsd: z
     .number()
     .nullable()
@@ -214,10 +222,10 @@ async function refusable<T>(
 export function registerTools(
   mcp: McpServer,
   user: User,
-  { discovery, matching, pipeline, tracker, aiLog, boards, review, logger }: ToolDeps,
+  { discovery, matching, pipeline, tracker, aiLog, boards, review, aiMerge, logger }: ToolDeps,
 ): void {
   registerBoardTools(mcp, user, boards, logger);
-  registerReviewTools(mcp, user, { review, discovery, matching, logger });
+  registerReviewTools(mcp, user, { review, discovery, matching, aiMerge, logger });
 
   mcp.registerTool(
     'whoami',
