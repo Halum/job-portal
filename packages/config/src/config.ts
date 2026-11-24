@@ -1,18 +1,18 @@
 import { z } from 'zod';
+import { CLAUDE_EFFORTS, type ClaudeEffort } from '@job-portal/ai';
 import { LOG_LEVELS } from '@job-portal/shared';
 
 export class ConfigError extends Error {
   override name = 'ConfigError';
 }
 
-// An optional interval in minutes: unset or empty means the source is not scheduled.
-const optionalInterval = z.preprocess(
-  (v) => (v === '' ? undefined : v),
-  z.coerce.number().int().min(1).optional(),
-);
+/** An empty variable counts as unset. */
+const emptyToUndefined = (v: unknown): unknown => (v === '' ? undefined : v);
 
-const optionalText = z.preprocess((v) => (v === '' ? undefined : v), z.string().min(1).optional());
-const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+// An optional interval in minutes: unset or empty means the source is not scheduled.
+const optionalInterval = z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).optional());
+
+const optionalText = z.preprocess(emptyToUndefined, z.string().min(1).optional());
 
 const envSchema = z
   .object({
@@ -48,8 +48,10 @@ const envSchema = z
     OPENROUTER_MODEL: optionalText,
     CLAUDE_BINARY_PATH: optionalText,
     CLAUDE_MODEL: optionalText,
-    CLAUDE_EFFORT: z.preprocess((v) => (v === '' ? undefined : v), z.enum(EFFORTS).default('low')),
+    CLAUDE_EFFORT: z.preprocess(emptyToUndefined, z.enum(CLAUDE_EFFORTS).default('low')),
     // Score at or above this tags the Job with the Target, when neither the Target nor the Global defaults set one.
+    // Most AI calls one run makes. A throughput limit, not a spend cap: pairs left over wait for the next run.
+    AI_MAX_CALLS_PER_RUN: z.coerce.number().int().min(1).default(50),
     ALERT_THRESHOLD: z.coerce.number().int().min(0).max(100).default(70),
   })
   .superRefine((e, ctx) => {
@@ -76,7 +78,7 @@ const interval = (minutes: number | undefined): IntervalConfig | null =>
 /** The configured AI runner, with only the settings that runner needs. */
 export type AiConfig =
   | { runner: 'openrouter'; apiKey: string; model: string }
-  | { runner: 'claude'; binaryPath: string; model: string; effort: (typeof EFFORTS)[number] };
+  | { runner: 'claude'; binaryPath: string; model: string; effort: ClaudeEffort };
 
 export interface Config {
   databaseUrl: string;
@@ -100,6 +102,8 @@ export interface Config {
   boardRequestsPerSecond: number;
   /** null means no AI runner is configured and nothing is scored. */
   ai: AiConfig | null;
+  /** Most AI calls one run makes, an integer of at least 1; the rest wait for the next run. */
+  aiMaxCallsPerRun: number;
   /** Default alert threshold, 0 to 100. */
   alertThreshold: number;
 }
@@ -150,6 +154,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     prerankTopN: e.PRERANK_TOP_N,
     boardRequestsPerSecond: e.BOARD_REQUESTS_PER_SECOND,
     ai: aiConfig(e),
+    aiMaxCallsPerRun: e.AI_MAX_CALLS_PER_RUN,
     alertThreshold: e.ALERT_THRESHOLD,
   };
 }

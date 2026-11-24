@@ -13,5 +13,6 @@ CREATE TABLE "matching"."scores" (
 	CONSTRAINT "scores_range" CHECK ("matching"."scores"."score" between 0 and 100)
 );
 --> statement-breakpoint
+ALTER TABLE "matching"."candidates" ADD COLUMN "attempts" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "matching"."scores" ADD CONSTRAINT "scores_target_id_targets_id_fk" FOREIGN KEY ("target_id") REFERENCES "matching"."targets"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "scores_user_idx" ON "matching"."scores" USING btree ("user_id","target_id");

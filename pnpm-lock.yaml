@@ -194,6 +194,9 @@ importers:
 
   packages/config:
     dependencies:
+      '@job-portal/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@job-portal/shared':
         specifier: workspace:*
         version: link:../shared

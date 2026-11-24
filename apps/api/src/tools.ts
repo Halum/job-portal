@@ -120,7 +120,10 @@ const runSchema = z.object({
   scored: z.number().describe('Job and Target pairs that got an AI fit score in this run'),
   tagged: z.number().describe('Of those, the pairs at or above the alert threshold'),
   aiCalls: z.number(),
-  aiCostUsd: z.number().describe('US dollars the runner reported for this run'),
+  aiCostUsd: z
+    .number()
+    .nullable()
+    .describe('US dollars the runner reported for this run; null when it reported none'),
   errors: z.array(z.string()),
   errorCount: z.number().describe('Length of errors'),
   startedAt: isoDate,

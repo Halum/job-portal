@@ -105,7 +105,7 @@ export function createAi(log: AiLog, runner: AiRunner): Ai {
           err instanceof AiError ? err : new AiError('request', 'unexpected runner failure');
         await log.record(userId, {
           ...base,
-          model: null,
+          model: runner.model,
           inputTokens: null,
           outputTokens: null,
           costUsd: null,

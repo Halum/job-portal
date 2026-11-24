@@ -26,11 +26,14 @@ describe('fit scores over MCP', () => {
   let url: URL;
   let userId: string;
   let fail = false;
+  /** Text that makes the fake runner score a posting high. */
+  let strong = 'Strong';
   const runner: AiRunner = {
     name: 'openrouter',
+    model: 'vendor/model',
     complete: (prompt) => {
       if (fail) return Promise.reject(new AiError('rate_limit', 'slow down'));
-      const score = prompt.includes('Strong') ? 88 : 41;
+      const score = prompt.includes(strong) ? 88 : 41;
       return Promise.resolve({
         text: JSON.stringify({ score, reasons: ['fits'], redFlags: ['far'], languages: [] }),
         model: 'vendor/model',
@@ -219,5 +222,36 @@ describe('fit scores over MCP', () => {
       job: { scores: { score: number | null }[] };
     };
     expect(scored.job.scores[0]?.score).toBe(88);
+  });
+
+  it('list_jobs applies the score filter before the page: a page of one holds the Job that passes even when it sorts last', async () => {
+    const made = await Promise.all(
+      ['one', 'two', 'three'].map(async (n, i) => ({
+        title: `Beta ${n} role`,
+        id: (
+          (
+            await call('add_job', {
+              title: `Beta ${n} role`,
+              url: `https://example.invalid/b${String(i)}`,
+            })
+          ).out as { jobId: string }
+        ).jobId,
+      })),
+    );
+    const last = [...made].sort((a, b) => a.id.localeCompare(b.id)).at(-1);
+    strong = last?.title ?? '';
+    const beta = (await call('upsert_target', { name: 'beta', criteria: { keywords: ['beta'] } }))
+      .out as {
+      target: { id: string };
+    };
+    await pipelineRef.execute(userId, 'idle');
+    const page = (await call('list_jobs', { targetId: beta.target.id, minScore: 80, limit: 1 }))
+      .out as {
+      jobs: { id: string }[];
+      nextCursor: string | null;
+    };
+    expect(page.jobs.map((j) => j.id)).toEqual([last?.id]);
+    expect(page.nextCursor).toBeNull();
+    strong = 'Strong';
   });
 });

@@ -124,6 +124,23 @@ describe('pipeline against real Postgres', () => {
     expect(run?.errors).toEqual(['fit score failed (rate_limit) for a Job and Target']);
   });
 
+  it('a run whose AI calls reported no cost has an unknown cost, not 0', async () => {
+    poll = () => Promise.resolve({ fetched: 0, newPostings: 0, jobIds: [], errors: [] });
+    const scored = createPipeline(
+      handle.db,
+      { poll: (u, s) => poll(u, s) },
+      {
+        scoring: {
+          score: () =>
+            Promise.resolve({ scored: 1, tagged: 0, calls: 1, costUsd: null, errors: [] }),
+        },
+      },
+    );
+    expect(await scored.execute(USER, 'src-s4')).toMatchObject({ scored: 1, aiCostUsd: null });
+    const none = createPipeline(handle.db, { poll: (u, s) => poll(u, s) });
+    expect(await none.execute(USER, 'src-s5')).toMatchObject({ scored: 0, aiCostUsd: null });
+  });
+
   it('a scoring crash is an error line, not a failed run', async () => {
     poll = () => Promise.resolve({ fetched: 2, newPostings: 1, jobIds: [], errors: [] });
     const scored = createPipeline(

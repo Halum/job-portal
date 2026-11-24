@@ -1,5 +1,5 @@
 import { and, asc, eq, gte, inArray, lt, notExists, notInArray, sql } from 'drizzle-orm';
-import { AiError, type Ai } from '@job-portal/ai';
+import { AiError, isRunnerWide, type Ai } from '@job-portal/ai';
 import type { Db } from '@job-portal/db';
 import {
   applyPatch,
@@ -59,6 +59,11 @@ export interface MatchingDeps {
   ai?: Pick<Ai, 'run'>;
   /** Used when neither the Target nor the Global defaults set alertThreshold. */
   defaultAlertThreshold?: number;
+  /**
+   * Most AI calls one scoring pass makes (a throughput limit, not a spend cap): the pairs left over wait
+   * for the next pass, oldest first, so nothing is dropped. Default 50.
+   */
+  maxCallsPerPass?: number;
   places?: PlaceTable;
 }
 
@@ -70,11 +75,20 @@ export interface ScoreResult {
   tagged: number;
   /** AI calls made, failed ones included. */
   calls: number;
-  /** Sum of the costs the runner reported. */
-  costUsd: number;
+  /** Sum of the costs the runner reported; null when no call reported one (unknown, not 0). */
+  costUsd: number | null;
   /** One line per failed call, with its error class. */
   errors: string[];
 }
+
+/** A pass that did nothing. */
+export const emptyScoreResult = (): ScoreResult => ({
+  scored: 0,
+  tagged: 0,
+  calls: 0,
+  costUsd: null,
+  errors: [],
+});
 
 /** One Job's standing with one Target it is a candidate for. */
 export interface JobScore {
@@ -125,7 +139,8 @@ export interface Matching {
 
 const DEFAULT_TOP_N = 20;
 const DEFAULT_ALERT_THRESHOLD = 70;
-/** A dead runner fails every call; this many in a row ends the pass. */
+const DEFAULT_MAX_CALLS_PER_PASS = 50;
+/** A dead runner fails every call; this many runner-wide failures in a row end the pass. */
 const MAX_CONSECUTIVE_FAILURES = 3;
 /** Most search requests one fetch makes (keywords x places over all active Targets). */
 export const MAX_QUERIES = 50;
@@ -141,6 +156,7 @@ export function createMatching(
     defaultPrerankTopN = DEFAULT_TOP_N,
     ai,
     defaultAlertThreshold = DEFAULT_ALERT_THRESHOLD,
+    maxCallsPerPass = DEFAULT_MAX_CALLS_PER_PASS,
     places,
   }: MatchingDeps,
 ): Matching {
@@ -391,17 +407,19 @@ export function createMatching(
     },
 
     async score(userId) {
-      const result: ScoreResult = { scored: 0, tagged: 0, calls: 0, costUsd: 0, errors: [] };
+      const result = emptyScoreResult();
       if (!ai) return result;
       const globals = await getGlobals(userId);
       /** Candidates this pass has already looked at, so a failed or skipped one is not picked again. */
       const seen: string[] = [];
-      let failuresInARow = 0;
-      while (failuresInARow < MAX_CONSECUTIVE_FAILURES) {
+      /** Failures in a row that say the runner is down (key, cap, login, network); a bad answer for one posting does not count. */
+      let runnerFailuresInARow = 0;
+      while (runnerFailuresInARow < MAX_CONSECUTIVE_FAILURES && result.calls < maxCallsPerPass) {
         // The row lock is held through the AI call: it keeps a second worker off this pair and is
-        // released by the database if this worker dies. ponytail: one connection per call in flight.
+        // released by the database if this worker dies. ponytail: one connection per call in flight;
+        // a lease column (claimed_at) would free the connection during the call if the pool ever runs short.
         const step = await db.transaction(
-          async (tx): Promise<'none' | 'skipped' | 'scored' | 'failed'> => {
+          async (tx): Promise<'none' | 'skipped' | 'scored' | 'pair_failed' | 'runner_failed'> => {
             const [picked] = await tx
               .select()
               .from(candidates)
@@ -426,26 +444,25 @@ export function createMatching(
                   ),
                 ),
               )
-              .orderBy(asc(candidates.createdAt), asc(candidates.id))
+              // Pairs that failed on their own go behind the ones that have not, then oldest first, so a
+              // posting the model cannot answer never starves the newer ones.
+              .orderBy(asc(candidates.attempts), asc(candidates.createdAt), asc(candidates.id))
               .limit(1)
               .for('update', { skipLocked: true });
             if (!picked) return 'none';
             seen.push(picked.id);
-            const [targetRow] = await tx
-              .select()
-              .from(targets)
-              .where(eq(targets.id, picked.targetId));
-            if (!targetRow) return 'skipped';
-            const row = { c: picked, t: targetRow };
+            const [target] = await tx.select().from(targets).where(eq(targets.id, picked.targetId));
+            if (!target) return 'skipped';
             // The lock does not see a score another worker committed after our query began: look again.
             const [already] = await tx
               .select({ id: scores.id })
               .from(scores)
-              .where(and(eq(scores.targetId, row.c.targetId), eq(scores.jobId, row.c.jobId)));
+              .where(and(eq(scores.targetId, picked.targetId), eq(scores.jobId, picked.jobId)));
             if (already) return 'skipped';
-            const [job] = await matchable(userId, [row.c.jobId]);
+            const [job] = await matchable(userId, [picked.jobId]);
             if (!job) return 'skipped';
-            const criteria = resolveCriteria(globals, read(row.t.criteria));
+            const targetCriteria = read(target.criteria);
+            const criteria = resolveCriteria(globals, targetCriteria);
             result.calls += 1;
             let assessed;
             try {
@@ -456,11 +473,18 @@ export function createMatching(
                 parseAssessment,
               );
             } catch (err) {
-              const cls = err instanceof AiError ? err.errorClass : 'unexpected';
+              const cls = err instanceof AiError ? err.errorClass : 'request';
               result.errors.push(`fit score failed (${cls}) for a Job and Target`);
-              return 'failed';
+              if (isRunnerWide(cls)) return 'runner_failed';
+              await tx
+                .update(candidates)
+                .set({ attempts: sql`${candidates.attempts} + 1` })
+                .where(eq(candidates.id, picked.id));
+              return 'pair_failed';
             }
-            result.costUsd += assessed.costUsd ?? 0;
+            // null stays null (unknown) until some call reports a cost; 0 is a real cost.
+            if (assessed.costUsd !== null)
+              result.costUsd = (result.costUsd ?? 0) + assessed.costUsd;
             const { score: raw, reasons, redFlags, languages } = assessed.value;
             const { met, unmet } = judgeLanguage(criteria.languageAbility, languages);
             const score = met === false ? Math.min(raw, LANGUAGE_CAP) : raw;
@@ -468,14 +492,12 @@ export function createMatching(
               met === false
                 ? [...redFlags, `language requirement not met: ${unmet.join(', ')}`]
                 : redFlags;
-            // Only the score is stored: the tag is derived when read (see listScores). The count is this run's.
-            const tagged = score >= (criteria.alertThreshold ?? defaultAlertThreshold);
             await tx
               .insert(scores)
               .values({
                 userId,
-                targetId: row.c.targetId,
-                jobId: row.c.jobId,
+                targetId: picked.targetId,
+                jobId: picked.jobId,
                 score,
                 reasons,
                 redFlags: flags,
@@ -484,12 +506,13 @@ export function createMatching(
               })
               .onConflictDoNothing();
             result.scored += 1;
-            if (tagged) result.tagged += 1;
+            // Only the score is stored: the tag is derived when read (see listScores). This count is the run's.
+            if (score >= thresholdOf(globals, targetCriteria)) result.tagged += 1;
             return 'scored';
           },
         );
         if (step === 'none') break;
-        failuresInARow = step === 'failed' ? failuresInARow + 1 : 0;
+        runnerFailuresInARow = step === 'runner_failed' ? runnerFailuresInARow + 1 : 0;
       }
       return result;
     },

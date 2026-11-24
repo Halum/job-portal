@@ -1,7 +1,7 @@
 import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '@job-portal/db';
 import type { Discovery } from '@job-portal/discovery';
-import type { Matching, ScoreResult } from '@job-portal/matching';
+import { emptyScoreResult, type Matching } from '@job-portal/matching';
 import { runs, type RunStatus } from './schema';
 
 export interface Run {
@@ -14,7 +14,8 @@ export interface Run {
   scored: number;
   tagged: number;
   aiCalls: number;
-  aiCostUsd: number;
+  /** null when no call reported a cost. */
+  aiCostUsd: number | null;
   errors: string[];
   startedAt: Date;
   finishedAt: Date | null;
@@ -145,7 +146,7 @@ export function createPipeline(
             errors.push(`matching failed: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
-        let ai: ScoreResult = { scored: 0, tagged: 0, calls: 0, costUsd: 0, errors: [] };
+        let ai = emptyScoreResult();
         if (scoring) {
           try {
             ai = await scoring.score(userId);
@@ -174,7 +175,7 @@ export function createPipeline(
           scored: 0,
           tagged: 0,
           aiCalls: 0,
-          aiCostUsd: 0,
+          aiCostUsd: null,
           errors: [err instanceof Error ? err.message : String(err)],
         });
       }

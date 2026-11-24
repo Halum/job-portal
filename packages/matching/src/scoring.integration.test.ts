@@ -33,12 +33,13 @@ describe('fit scoring against real Postgres', () => {
       return { value: parse(text), costUsd: cost };
     },
   };
-  const make = (deps: { ai?: Ai | null } = {}): Matching =>
+  const make = (deps: { ai?: Ai | null; maxCallsPerPass?: number } = {}): Matching =>
     createMatching(handle.db, {
       loadJobs: (_u, ids) =>
         Promise.resolve(jobs.filter((j) => ids === undefined || ids.includes(j.id))),
       ...(deps.ai === null ? {} : { ai: deps.ai ?? ai }),
       defaultAlertThreshold: 70,
+      ...(deps.maxCallsPerPass === undefined ? {} : { maxCallsPerPass: deps.maxCallsPerPass }),
     });
   let matching: Matching;
   let n = 0;
@@ -288,7 +289,7 @@ describe('fit scoring against real Postgres', () => {
       scored: 0,
       tagged: 0,
       calls: 0,
-      costUsd: 0,
+      costUsd: null,
       errors: [],
     });
   });
@@ -298,6 +299,64 @@ describe('fit scoring against real Postgres', () => {
     cost = null;
     jobs = [job(61)];
     await target();
-    expect((await matching.score(USER)).costUsd).toBe(0);
+    expect((await matching.score(USER)).costUsd).toBeNull(); // unknown, not 0
+  });
+
+  it('pairs whose answer is never usable do not starve the newer ones', async () => {
+    reset();
+    jobs = [
+      job(80, { title: 'Zeta poison 80' }),
+      job(81, { title: 'Zeta poison 81' }),
+      job(82, { title: 'Zeta poison 82' }),
+    ];
+    const id = await target({ keywords: ['zeta'] });
+    // Newer candidates, made by a later run.
+    jobs = [...jobs, job(83, { title: 'Zeta good 83' }), job(84, { title: 'Zeta good 84' })];
+    await matching.run(USER, [J(83), J(84)]);
+    respond = (p) => {
+      if (p.includes('poison')) throw new AiError('bad_output', 'not json');
+      return answer(90);
+    };
+    // Three bad pairs in a row are per-pair failures, so the pass goes on and scores the good ones.
+    const first = await matching.score(USER);
+    expect(first).toMatchObject({ scored: 2, calls: 5 });
+    expect(first.errors).toHaveLength(3);
+    expect((await scoreOf(J(83), id))?.score).toBe(90);
+    expect((await scoreOf(J(81), id))?.score).toBeNull();
+    // A newer pair goes before the ones that already failed (fewest attempts first).
+    jobs = [...jobs, job(85, { title: 'Zeta good 85' })];
+    await matching.run(USER, [J(85)]);
+    prompts = [];
+    await matching.score(USER);
+    expect(prompts[0]).toContain('good 85');
+    expect(prompts).toHaveLength(4);
+  });
+
+  it('a pass makes at most maxCallsPerPass calls and leaves the rest for the next pass, oldest first', async () => {
+    reset();
+    jobs = [job(90), job(91), job(92), job(93), job(94)];
+    const id = await target();
+    const capped = make({ maxCallsPerPass: 2 });
+    expect(await capped.score(USER)).toMatchObject({ scored: 2, calls: 2 });
+    expect(prompts).toHaveLength(2);
+    expect(await capped.score(USER)).toMatchObject({ scored: 2, calls: 2 });
+    expect(await capped.score(USER)).toMatchObject({ scored: 1, calls: 1 });
+    expect(await capped.score(USER)).toMatchObject({ scored: 0, calls: 0 });
+    expect(new Set(prompts).size).toBe(5);
+    expect((await scoreOf(J(94), id))?.score).toBe(80);
+  });
+
+  it("another user's Jobs and scores are invisible, and their scoring pass touches nothing of ours", async () => {
+    reset();
+    jobs = [job(95)];
+    const id = await target();
+    await matching.score(USER);
+    const OTHER = '00000000-0000-4000-8000-000000000002';
+    expect(await matching.listScores(OTHER, J(95))).toEqual([]);
+    expect(await matching.listJobIds(OTHER, { targetId: id, minScore: 0 })).toEqual([]);
+    expect(await matching.listJobIds(OTHER, { targetId: id, tagged: true })).toEqual([]);
+    prompts = [];
+    expect(await matching.score(OTHER)).toMatchObject({ scored: 0, calls: 0 });
+    expect(prompts).toEqual([]);
   });
 });

@@ -21,6 +21,7 @@ describe('loadConfig', () => {
       prerankTopN: 20,
       boardRequestsPerSecond: 2,
       ai: null,
+      aiMaxCallsPerRun: 50,
       alertThreshold: 70,
     });
   });
@@ -189,6 +190,18 @@ describe('loadConfig', () => {
       [{ AI_RUNNER: 'gpt' }, 'AI_RUNNER'],
     ])('rejects %j, naming %s', (extra, name) => {
       expect(() => loadConfig({ ...valid, ...extra })).toThrow(name);
+    });
+  });
+
+  describe('AI call cap per run', () => {
+    it('defaults to 50, reads an override and needs an integer of at least 1', () => {
+      expect(loadConfig(valid).aiMaxCallsPerRun).toBe(50);
+      expect(loadConfig({ ...valid, AI_MAX_CALLS_PER_RUN: '5' }).aiMaxCallsPerRun).toBe(5);
+      for (const bad of ['0', '-1', '1.5', 'abc']) {
+        expect(() => loadConfig({ ...valid, AI_MAX_CALLS_PER_RUN: bad })).toThrow(
+          'AI_MAX_CALLS_PER_RUN',
+        );
+      }
     });
   });
 

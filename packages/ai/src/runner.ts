@@ -24,6 +24,18 @@ export class AiError extends Error {
   }
 }
 
+/** Effort levels `claude -p --effort` accepts. */
+export const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type ClaudeEffort = (typeof CLAUDE_EFFORTS)[number];
+
+/**
+ * Failures that say the runner itself is down or refusing (key, cap, login, network, binary), so every
+ * further call would fail too. The others (an answer that is not usable, a request the provider rejects)
+ * belong to one posting and say nothing about the next.
+ */
+export const isRunnerWide = (errorClass: AiErrorClass): boolean =>
+  errorClass !== 'bad_output' && errorClass !== 'request';
+
 export interface AiResult {
   text: string;
   /** The model that answered, as the runner reports it (OpenRouter may route elsewhere). */
@@ -39,5 +51,7 @@ export interface AiResult {
 export interface AiRunner {
   /** Which implementation this is, for the call log. */
   readonly name: 'openrouter' | 'claude';
+  /** The configured model, for the log of a call that failed before an answer named one. */
+  readonly model: string;
   complete: (prompt: string) => Promise<AiResult>;
 }

@@ -52,6 +52,8 @@ export const candidates = matchingSchema.table(
     prerankScore: integer('prerank_score').notNull(),
     /** The place could not be resolved, so the radius was not checked. */
     unknownLocation: boolean('unknown_location').notNull(),
+    /** AI calls on this pair that failed for a reason of its own (an unusable answer); later ones wait behind fresher pairs. */
+    attempts: integer('attempts').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

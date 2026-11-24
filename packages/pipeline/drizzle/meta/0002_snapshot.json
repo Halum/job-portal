@@ -1,5 +1,5 @@
 {
-  "id": "25cebad9-cdd0-4fad-8e86-7cd783e6cdbc",
+  "id": "6fa54bb8-ffce-4d5c-8a6e-7cafcf6ca6bb",
   "prevId": "a4f29f13-839c-47fd-8856-12f60a8d4b28",
   "version": "7",
   "dialect": "postgresql",
@@ -79,8 +79,7 @@
           "name": "ai_cost_usd",
           "type": "double precision",
           "primaryKey": false,
-          "notNull": true,
-          "default": 0
+          "notNull": false
         },
         "errors": {
           "name": "errors",

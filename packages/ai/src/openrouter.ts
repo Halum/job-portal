@@ -42,6 +42,7 @@ export function createOpenRouterRunner({
 }: OpenRouterOptions): AiRunner {
   return {
     name: 'openrouter',
+    model,
     async complete(prompt): Promise<AiResult> {
       let res: Response;
       try {

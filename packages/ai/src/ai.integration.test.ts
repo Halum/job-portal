@@ -26,7 +26,7 @@ describe('AI call log against real Postgres', () => {
   let container: StartedPostgreSqlContainer;
   let handle: DbHandle;
   let next: () => Promise<AiResult>;
-  const runner: AiRunner = { name: 'openrouter', complete: () => next() };
+  const runner: AiRunner = { name: 'openrouter', model: 'm0', complete: () => next() };
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16-alpine').start();
@@ -79,7 +79,7 @@ describe('AI call log against real Postgres', () => {
       errorClass: 'rate_limit',
     });
     const [row] = await log.recent(USER, 1);
-    expect(row).toMatchObject({ outcome: 'error', errorClass: 'rate_limit', model: null });
+    expect(row).toMatchObject({ outcome: 'error', errorClass: 'rate_limit', model: 'm0' });
     const after = await log.totals(USER);
     expect(after.calls).toBe(before.calls + 1);
     expect(after.failures).toBe(before.failures + 1);

@@ -39,6 +39,7 @@ const ai = runner === null ? undefined : createAi(createAiLog(db), runner);
 const matching = createMatching(db, {
   ...(ai ? { ai } : {}),
   defaultAlertThreshold: config.alertThreshold,
+  maxCallsPerPass: config.aiMaxCallsPerRun,
   loadJobs: (userId, ids) => discovery.listMatchable(userId, ids),
   hasApplication: async (userId, ids) => {
     const states = await tracker.getStates(userId, ids);

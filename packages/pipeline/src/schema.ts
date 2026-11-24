@@ -34,8 +34,8 @@ export const runs = pipelineSchema.table(
     /** Of those, the pairs at or above the alert threshold. */
     tagged: integer('tagged').notNull().default(0),
     aiCalls: integer('ai_calls').notNull().default(0),
-    /** US dollars the runner reported for this run's AI calls. */
-    aiCostUsd: doublePrecision('ai_cost_usd').notNull().default(0),
+    /** US dollars the runner reported for this run's AI calls; null when it reported none (unknown, not 0). */
+    aiCostUsd: doublePrecision('ai_cost_usd'),
     errors: jsonb('errors').$type<string[]>().notNull().default([]),
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
