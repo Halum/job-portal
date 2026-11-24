@@ -14,6 +14,7 @@ describe('loadConfig', () => {
       redisUrl: valid.REDIS_URL,
       mcpBearerToken: valid.MCP_BEARER_TOKEN,
       seedUserEmail: 'user@example.invalid',
+      host: '127.0.0.1',
       port: 3000,
       logLevel: 'info',
     });
@@ -22,11 +23,13 @@ describe('loadConfig', () => {
   it('reads overrides, coercing the port', () => {
     const config = loadConfig({
       ...valid,
+      HOST: '0.0.0.0',
       PORT: '8080',
       LOG_LEVEL: 'debug',
       SEED_USER_EMAIL: 'me@example.invalid',
     });
     expect(config).toMatchObject({
+      host: '0.0.0.0',
       port: 8080,
       logLevel: 'debug',
       seedUserEmail: 'me@example.invalid',

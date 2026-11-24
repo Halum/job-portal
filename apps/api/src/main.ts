@@ -12,6 +12,6 @@ const { db } = createDb(config.databaseUrl);
 const accounts = createAccounts(db, config.mcpBearerToken);
 await accounts.seedUser(config.seedUserEmail);
 
-createApiServer(accounts, logger).listen(config.port, () => {
-  logger.info({ port: config.port }, 'api ready, MCP at /mcp');
+createApiServer(accounts, logger).listen(config.port, config.host, () => {
+  logger.info({ host: config.host, port: config.port }, 'api ready, MCP at /mcp');
 });

@@ -11,6 +11,8 @@ const envSchema = z.object({
   MCP_BEARER_TOKEN: z.string().min(16),
   // Placeholder by default; the real address lives in the local .env only.
   SEED_USER_EMAIL: z.string().min(1).default('user@example.invalid'),
+  // Loopback by default; set 0.0.0.0 only when something in front of it needs the port.
+  HOST: z.string().min(1).default('127.0.0.1'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
@@ -20,8 +22,9 @@ export interface Config {
   redisUrl: string;
   mcpBearerToken: string;
   seedUserEmail: string;
+  host: string;
   port: number;
-  logLevel: 'debug' | 'info' | 'warn' | 'error';
+  logLevel: z.infer<typeof envSchema>['LOG_LEVEL'];
 }
 
 /** Validates the environment once at process start; throws ConfigError naming each bad variable. */
@@ -37,6 +40,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     redisUrl: e.REDIS_URL,
     mcpBearerToken: e.MCP_BEARER_TOKEN,
     seedUserEmail: e.SEED_USER_EMAIL,
+    host: e.HOST,
     port: e.PORT,
     logLevel: e.LOG_LEVEL,
   };

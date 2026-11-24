@@ -2,8 +2,10 @@ import { pino, type Logger } from 'pino';
 
 export type { Logger } from 'pino';
 
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'silent';
+
 export interface CreateLoggerOptions {
-  level?: string;
+  level?: LogLevel;
   /** Process name (api, worker) attached to every log line. */
   name?: string;
 }
