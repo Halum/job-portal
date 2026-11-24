@@ -35,6 +35,8 @@ export const runs = pipelineSchema.table(
     tagged: integer('tagged').notNull().default(0),
     /** Review items raised in this run for scores below the threshold (AI fit rejections). */
     aiRejections: integer('ai_rejections').notNull().default(0),
+    /** ai_merge Review items raised in this run. */
+    aiMergeItems: integer('ai_merge_items').notNull().default(0),
     aiCalls: integer('ai_calls').notNull().default(0),
     /** US dollars the runner reported for this run's AI calls; null when it reported none (unknown, not 0). */
     aiCostUsd: doublePrecision('ai_cost_usd'),

@@ -1,4 +1,13 @@
-import { index, jsonb, pgSchema, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import {
+  type AnyPgColumn,
+  index,
+  jsonb,
+  pgSchema,
+  text,
+  timestamp,
+  unique,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 export const DISCOVERY_STATES = ['new', 'shortlisted', 'dismissed', 'expired'] as const;
 
@@ -20,6 +29,8 @@ export const jobs = discoverySchema.table(
     urlKey: text('url_key'),
     /** Dismissed Jobs stay as markers so their Postings never create a new Job. */
     discoveryState: text('discovery_state', { enum: DISCOVERY_STATES }).notNull().default('new'),
+    /** Set when a confirmed AI merge folded this Job into another (its Postings and keys moved there). */
+    mergedInto: uuid('merged_into').references((): AnyPgColumn => jobs.id),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -96,3 +107,17 @@ export const mergeConflicts = discoverySchema.table('merge_conflicts', {
   jobIds: uuid('job_ids').array().notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** A pair of Jobs the AI judged not to be the same job, so later runs do not ask (and pay) again. */
+export const mergeChecks = discoverySchema.table(
+  'merge_checks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull(),
+    /** The smaller Job id of the pair. */
+    jobA: uuid('job_a').notNull(),
+    jobB: uuid('job_b').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique('merge_checks_pair').on(t.userId, t.jobA, t.jobB)],
+);

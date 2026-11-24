@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import type { ModuleMigrations } from '@job-portal/db';
 
 export * from './discovery';
+export * from './ai-merge';
 export { DISCOVERY_STATES } from './schema';
 export * from './source';
 export * from './sources/bambase';

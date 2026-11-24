@@ -1,13 +1,14 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { User } from '@job-portal/accounts';
-import type { Discovery } from '@job-portal/discovery';
+import type { AiMerge, Discovery, PostingView } from '@job-portal/discovery';
 import type { Matching } from '@job-portal/matching';
 import {
   REVIEW_KINDS,
   REVIEW_STATUSES,
   ReviewError,
   fitRejectionSubject,
+  mergeSubject,
   type Review,
   type ReviewApplier,
   type ReviewItem,
@@ -19,6 +20,8 @@ export interface ReviewToolDeps {
   review: Review;
   discovery: Pick<Discovery, 'getJob'>;
   matching: Pick<Matching, 'listScores' | 'applyFitRejection'>;
+  /** Applies ai_merge items; without it they are refused as unsupported. */
+  aiMerge?: Pick<AiMerge, 'apply'>;
   logger: Logger;
 }
 
@@ -58,7 +61,7 @@ const refusal = (message: string) => ({
 export function registerReviewTools(
   mcp: McpServer,
   user: User,
-  { review, discovery, matching, logger }: ReviewToolDeps,
+  { review, discovery, matching, aiMerge, logger }: ReviewToolDeps,
 ): void {
   /** Posting links, Target and score of an item, read from the modules that own them. */
   const describe = async (item: ReviewItem): Promise<z.infer<typeof itemOut>> => {
@@ -76,7 +79,23 @@ export function registerReviewTools(
       reasons: [],
       redFlags: [],
     };
-    // ponytail: only ai_fit_rejection has details so far; ai_merge and mail_match add theirs with their tickets.
+    // ponytail: mail_match adds its details with its ticket.
+    const link = ({ id, sourceId, title, company, location, url }: PostingView) => ({
+      id,
+      sourceId,
+      title,
+      company,
+      location,
+      url,
+    });
+    if (item.kind === 'ai_merge') {
+      const pair = mergeSubject.safeParse(item.subject);
+      if (!pair.success) return base;
+      const both = await Promise.all(
+        [pair.data.jobA, pair.data.jobB].map((id) => discovery.getJob(user.id, id)),
+      );
+      return { ...base, postings: both.flatMap((j) => (j?.postings ?? []).map(link)) };
+    }
     if (item.kind !== 'ai_fit_rejection') return base;
     const subject = fitRejectionSubject.safeParse(item.subject);
     if (!subject.success) return base;
@@ -89,14 +108,7 @@ export function registerReviewTools(
     const pair = scores.find((s) => s.targetId === targetId);
     return {
       ...base,
-      postings: (job?.postings ?? []).map(({ id, sourceId, title, company, location, url }) => ({
-        id,
-        sourceId,
-        title,
-        company,
-        location,
-        url,
-      })),
+      postings: (job?.postings ?? []).map(link),
       target: pair ? { id: pair.targetId, name: pair.targetName } : null,
       score: pair?.score ?? null,
       reasons: pair?.reasons ?? [],
@@ -108,13 +120,16 @@ export function registerReviewTools(
   const appliers: Partial<Record<ReviewKind, ReviewApplier>> = {
     ai_fit_rejection: (item, tx, decision) =>
       matching.applyFitRejection(tx, user.id, item.subject, decision),
+    ...(aiMerge
+      ? { ai_merge: (item, tx, decision) => aiMerge.apply(tx, user.id, item.subject, decision) }
+      : {}),
   };
 
   mcp.registerTool(
     'list_reviews',
     {
       description:
-        'List Review items: questions the system could not settle alone (an AI fit rejection, later AI merges and unclear mail matches). Pending ones by default; kind and status filter. Each item shows the posting links, the Target, the AI score, its reasons and red flags, and the model that made the call. Ordered and paged by id; pass nextCursor back as cursor.',
+        'List Review items: questions the system could not settle alone (an AI fit rejection or an AI merge, later unclear mail matches). Pending ones by default; kind and status filter. Each item shows the posting links (the postings of both Jobs for an ai_merge), the Target, the AI score, its reasons and red flags, and the model that made the call. Ordered and paged by id; pass nextCursor back as cursor.',
       inputSchema: {
         kind: z.enum(REVIEW_KINDS).optional(),
         status: z.enum(REVIEW_STATUSES).optional().describe('Default pending.'),
@@ -136,7 +151,7 @@ export function registerReviewTools(
     'decide_review',
     {
       description:
-        'Decide a pending Review item. confirm: you agree with the AI (an AI fit rejection stays untagged). disagree: you do not; for an AI fit rejection the Job is tagged with that Target at once. An item can be decided once.',
+        'Decide a pending Review item. confirm: you agree with the AI (an AI fit rejection stays untagged; an AI merge folds the newer Job into the older one, keeping all postings, and is refused while either Job has an application, is dismissed or expired, or was split apart). disagree: you do not; for an AI fit rejection the Job is tagged with that Target at once, for an AI merge the two Jobs are never proposed for merging again. An item can be decided once.',
       inputSchema: { id: z.uuid(), decision: z.enum(['confirm', 'disagree']) },
       outputSchema: { item: itemOut },
     },

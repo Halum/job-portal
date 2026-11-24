@@ -3,7 +3,12 @@ import { createAiLog } from '@job-portal/ai';
 import { createWatchlist } from '@job-portal/boards';
 import { loadConfig } from '@job-portal/config';
 import { createDb, runMigrationsWithLock } from '@job-portal/db';
-import { connectRateLimiter, createDiscovery, createRedisLimit } from '@job-portal/discovery';
+import {
+  connectRateLimiter,
+  createAiMerge,
+  createDiscovery,
+  createRedisLimit,
+} from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
 import { createMatching } from '@job-portal/matching';
 import { createPipeline } from '@job-portal/pipeline';
@@ -31,6 +36,15 @@ const matching = createMatching(db, {
   },
   defaultPrerankTopN: config.prerankTopN,
 });
+const review = createReview(db);
+// The API only applies decided ai_merge items (no runner here); the worker raises them.
+const aiMerge = createAiMerge(db, {
+  review,
+  hasApplication: async (userId, ids) => {
+    const states = await tracker.getStates(userId, ids);
+    return new Set(ids.filter((id) => states.get(id)?.applicationStatus != null));
+  },
+});
 const pipeline = createPipeline(db, discovery);
 // add_board's verification fetch shares the per-host rate limit with the workers through Redis.
 const limiter = connectRateLimiter({
@@ -52,7 +66,8 @@ const server = createApiServer({
   matching,
   pipeline,
   tracker,
-  review: createReview(db),
+  review,
+  aiMerge,
   aiLog: createAiLog(db),
   boards: { watchlist: createWatchlist(db), fetch: limiter.fetch, allowAddBoard },
   logger,

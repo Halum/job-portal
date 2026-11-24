@@ -1,6 +1,6 @@
 import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '@job-portal/db';
-import type { Discovery } from '@job-portal/discovery';
+import { emptyAiMergeResult, type AiMerge, type Discovery } from '@job-portal/discovery';
 import { emptyScoreResult, type Matching } from '@job-portal/matching';
 import { runs, type RunStatus } from './schema';
 
@@ -15,6 +15,9 @@ export interface Run {
   tagged: number;
   /** Review items raised in this run for scores below the threshold. */
   aiRejections: number;
+  /** ai_merge Review items raised in this run for pairs of Jobs the AI judged to be one job. */
+  aiMergeItems: number;
+  /** AI calls of this run: scoring and merge checks together. */
   aiCalls: number;
   /** null when no call reported a cost. */
   aiCostUsd: number | null;
@@ -48,6 +51,7 @@ const columns = {
   scored: runs.scored,
   tagged: runs.tagged,
   aiRejections: runs.aiRejections,
+  aiMergeItems: runs.aiMergeItems,
   aiCalls: runs.aiCalls,
   aiCostUsd: runs.aiCostUsd,
   errors: runs.errors,
@@ -63,6 +67,12 @@ export interface PipelineOptions {
   staleAfterMs?: number;
   /** Runs after each poll over the Jobs it created; a failure there is an error line, not a failed run. */
   matching?: Pick<Matching, 'run'>;
+  /**
+   * Runs after Matching: asks the AI about near-duplicate Jobs and raises ai_merge Review items (nothing
+   * merges until the user confirms). Covers every Job of the user, so a pair whose call failed is asked
+   * again by the next run of any source. A failure is an error line, not a failed run.
+   */
+  aiMerge?: Pick<AiMerge, 'run'>;
   /**
    * Runs after Matching, over every unscored candidate of the user, not only this run's Jobs, so a pair
    * whose AI call failed is retried by the next run of any source. A failed call is an error line.
@@ -80,7 +90,7 @@ const DEFAULT_STALE_AFTER_MS = 60 * 60 * 1000;
 export function createPipeline(
   db: Db,
   discovery: Pick<Discovery, 'poll'>,
-  { staleAfterMs = DEFAULT_STALE_AFTER_MS, matching, scoring }: PipelineOptions = {},
+  { staleAfterMs = DEFAULT_STALE_AFTER_MS, matching, aiMerge, scoring }: PipelineOptions = {},
 ): Pipeline {
   /** Fails runs still "running" past the time bound that also match `scope`; returns how many. */
   const failLost = async (...scope: (SQL | undefined)[]): Promise<number> => {
@@ -123,6 +133,7 @@ export function createPipeline(
           | 'scored'
           | 'tagged'
           | 'aiRejections'
+          | 'aiMergeItems'
           | 'aiCalls'
           | 'aiCostUsd'
           | 'errors'
@@ -150,6 +161,15 @@ export function createPipeline(
             errors.push(`matching failed: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
+        let merge = emptyAiMergeResult();
+        if (aiMerge) {
+          try {
+            merge = await aiMerge.run(userId);
+            errors.push(...merge.errors);
+          } catch (err) {
+            errors.push(`AI merge failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
         let ai = emptyScoreResult();
         if (scoring) {
           try {
@@ -167,8 +187,13 @@ export function createPipeline(
           scored: ai.scored,
           tagged: ai.tagged,
           aiRejections: ai.rejections,
-          aiCalls: ai.calls,
-          aiCostUsd: ai.costUsd,
+          aiMergeItems: merge.items,
+          aiCalls: ai.calls + merge.calls,
+          // null stays null (unknown) until some call reported a cost; 0 is a real cost.
+          aiCostUsd:
+            ai.costUsd === null && merge.costUsd === null
+              ? null
+              : (ai.costUsd ?? 0) + (merge.costUsd ?? 0),
           errors,
         });
       } catch (err) {
@@ -180,6 +205,7 @@ export function createPipeline(
           scored: 0,
           tagged: 0,
           aiRejections: 0,
+          aiMergeItems: 0,
           aiCalls: 0,
           aiCostUsd: null,
           errors: [err instanceof Error ? err.message : String(err)],

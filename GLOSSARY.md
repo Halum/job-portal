@@ -6,7 +6,7 @@ Terms name things in code, database, tests and issues. Source of truth: the spec
 - **Posting**: one raw listing from one Source, identified by source id plus the Source's own posting id.
 - **Job**: the deduplicated thing the user tracks, made of one or more Postings.
 - **Rule merge**: automatic attachment of a Posting to an existing Job when its company key or URL key matches exactly one Job.
-- **AI merge**: a merge proposed by the AI check for a near match, stored as an ai_merge Review item and applied only once confirmed.
+- **AI merge**: a merge proposed by the AI check for a near match or a merge conflict, stored as an ai_merge Review item and applied only once confirmed. Confirming folds the newer Job into the older one (the folded Job is hidden, keeps its keys as aliases and points at the Job it went into through `merged_into`).
 - **Split**: moving Postings out of a Job into a new Job, which records a Never-merge pair.
 - **Board directory**: the shared list of ATS company boards (Greenhouse, Lever, Ashby), with a mark for boards that have posted in Germany or remote EU.
 - **Watchlist**: the user's own list of boards that narrows which directory boards are fetched.
