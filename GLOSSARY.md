@@ -17,6 +17,7 @@ Terms name things in code, database, tests and issues. Source of truth: the spec
 - **Prerank**: the keyword score per Target that keeps only the top prerank_top_n Postings for the AI.
 - **Fit score**: the AI's 0 to 100 rating of a Job against one Target, with reasons and red flags.
 - **AI runner**: the one interface for calling an AI, with an OpenRouter and a `claude -p` implementation.
+- **Pipeline**: the worker module that owns Runs: it schedules and executes them, from fetching a Source to scoring Jobs.
 - **Run**: one execution of the Pipeline for one Source, with its counts and errors.
 - **Digest**: the notification message listing Jobs that newly gained a Target tag in a Run.
 - **Review item**: a question the system cannot settle alone (ai_merge, ai_fit_rejection, mail_match) that waits for the user's decision.

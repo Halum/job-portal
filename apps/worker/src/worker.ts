@@ -8,7 +8,7 @@ export interface WorkerHandle {
 
 /**
  * Connects to Redis through BullMQ and reports ready. Nothing is scheduled yet: the Pipeline
- * module adds Job Schedulers and processors in a later ticket.
+ * module adds BullMQ job schedulers and processors in a later ticket.
  */
 export async function startWorker(
   redisUrl: string,
