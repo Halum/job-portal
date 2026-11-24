@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:fast": "FAST=1 vitest run",
     "test:coverage": "vitest run --coverage",
+    "verify": "pnpm typecheck && pnpm lint && pnpm format:check && TZ=UTC CI=true vitest run --coverage",
     "prepare": "sh scripts/prepare-hooks.sh",
     "db:generate": "pnpm -r db:generate",
     "dev:api": "tsx watch --env-file-if-exists=.env apps/api/src/main.ts",
