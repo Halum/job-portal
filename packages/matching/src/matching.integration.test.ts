@@ -81,6 +81,25 @@ describe('matching against real Postgres', () => {
     expect((await matching.getGlobalDefaults(OTHER)).alertThreshold).toBeNull();
   });
 
+  it('keeps the Gone cold days with the Global defaults: set, kept by other patches, null disables', async () => {
+    expect((await matching.getGlobalDefaults(USER)).goneColdDays).toBeNull();
+    await matching.updateGlobalDefaults(USER, { goneColdDays: 14 });
+    expect((await matching.updateGlobalDefaults(USER, { alertThreshold: 5 })).goneColdDays).toBe(
+      14,
+    );
+    expect((await matching.getGlobalDefaults(OTHER)).goneColdDays).toBeNull();
+    expect(
+      (await matching.updateGlobalDefaults(USER, { goneColdDays: null })).goneColdDays,
+    ).toBeNull();
+  });
+
+  it('refuses goneColdDays on a Target: it is a Global default only', async () => {
+    await expect(
+      matching.upsertTarget(USER, { name: 'gc', criteria: { goneColdDays: 5 } }),
+    ).rejects.toThrow('goneColdDays');
+    expect((await matching.listTargets(USER)).find((t) => t.name === 'gc')).toBeUndefined();
+  });
+
   describe('a run over Jobs', () => {
     beforeAll(async () => {
       await matching.updateGlobalDefaults(USER, {

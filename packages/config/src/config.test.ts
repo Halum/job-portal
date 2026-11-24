@@ -26,6 +26,24 @@ describe('loadConfig', () => {
       aiMergeMaxCallsPerRun: 20,
       alertThreshold: 70,
       notifications: null,
+      goneColdIntervalMinutes: 1440,
+    });
+  });
+
+  describe('gone cold check', () => {
+    it('runs daily by default and reads an override', () => {
+      expect(loadConfig({ ...valid, GONE_COLD_INTERVAL_MINUTES: '' }).goneColdIntervalMinutes).toBe(
+        1440,
+      );
+      expect(
+        loadConfig({ ...valid, GONE_COLD_INTERVAL_MINUTES: '60' }).goneColdIntervalMinutes,
+      ).toBe(60);
+    });
+
+    it.each(['0', '-5', '1.5', 'abc'])('rejects the interval %j', (value) => {
+      expect(() => loadConfig({ ...valid, GONE_COLD_INTERVAL_MINUTES: value })).toThrow(
+        'GONE_COLD_INTERVAL_MINUTES',
+      );
     });
   });
 

@@ -13,16 +13,26 @@ export interface ScheduledSource {
   intervalMinutes: number;
 }
 
+/** A check that runs on its own schedule next to the sources, such as the daily Gone cold check. */
+export interface ScheduledCheck {
+  /** Integer of at least 1; validated by loadConfig. */
+  intervalMinutes: number;
+  run: () => Promise<unknown>;
+}
+
 export interface WorkerOptions {
   redisUrl: string;
   pipeline: Pipeline;
   userId: string;
   sources: ScheduledSource[];
+  goneCold?: ScheduledCheck;
   logger: Logger;
   connectTimeoutMs?: number;
 }
 
 const QUEUE = 'pipeline';
+/** Scheduler id and job name of the Gone cold check; a Source id is never this. */
+const GONE_COLD = 'gone-cold';
 
 /**
  * Marks stale runs failed, then schedules one BullMQ Job Scheduler per source (scheduler id =
@@ -34,6 +44,7 @@ export async function startWorker({
   pipeline,
   userId,
   sources,
+  goneCold,
   logger,
   connectTimeoutMs = 10_000,
 }: WorkerOptions): Promise<WorkerHandle> {
@@ -55,6 +66,7 @@ export async function startWorker({
     if (stale > 0) logger.warn({ stale }, 'marked runs left running as failed');
 
     const wanted = new Set(sources.map((s) => s.sourceId));
+    if (goneCold) wanted.add(GONE_COLD);
     for (const scheduler of await queue.getJobSchedulers()) {
       if (!wanted.has(scheduler.key)) await queue.removeJobScheduler(scheduler.key);
     }
@@ -66,9 +78,22 @@ export async function startWorker({
       );
     }
 
+    if (goneCold) {
+      await queue.upsertJobScheduler(
+        GONE_COLD,
+        { every: goneCold.intervalMinutes * 60_000 },
+        { name: GONE_COLD },
+      );
+    }
+
     worker = new Worker(
       QUEUE,
       async (job) => {
+        if (job.name === GONE_COLD) {
+          const moved = goneCold ? await goneCold.run() : 0;
+          logger.info({ moved }, 'gone cold check done');
+          return;
+        }
         const run = await pipeline.execute(userId, job.name);
         if (run === null) logger.warn({ source: job.name }, 'run skipped: one is already active');
         else

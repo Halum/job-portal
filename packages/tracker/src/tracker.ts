@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, lte, max } from 'drizzle-orm';
 import type { Db, DbTx } from '@job-portal/db';
 import type { Discovery, DiscoveryState } from '@job-portal/discovery';
 import {
@@ -53,6 +53,13 @@ export interface ApplicationChange {
   timezone: string;
 }
 
+export interface GoneColdMove {
+  jobId: string;
+  /** Calendar days since the last Timeline event. */
+  daysSilent: number;
+  from: ApplicationStatus;
+}
+
 /** A change the state model refuses; the message says why. */
 export class TrackerError extends Error {}
 
@@ -79,6 +86,15 @@ export interface Tracker {
   /** Reverts the last state-changing event as a new event; refused if that event is itself an undo. */
   undoLastChange: (userId: string, jobId: string, actor: Actor) => Promise<JobTracking>;
   addNote: (userId: string, jobId: string, text: string) => Promise<Note>;
+  /**
+   * The Gone cold check: moves every Applied, Screening, Interview or Offer Job whose last Timeline event
+   * (any actor, undo included, notes not) is N or more calendar days old in the user's timezone to Gone cold,
+   * actor system. Idempotent and safe with several workers: each move takes the Job lock and rechecks inside it.
+   */
+  goneCold: (
+    userId: string,
+    options: { days: number; timezone: string },
+  ) => Promise<GoneColdMove[]>;
   getTimeline: (
     userId: string,
     jobId: string,
@@ -100,6 +116,13 @@ const view = (r: StateRow): ApplicationTracking => ({
   appliedOn: r.appliedOn,
   applyBy: r.applyBy,
 });
+
+/** Statuses the Gone cold check looks at. */
+const WAITING: ApplicationStatus[] = ['applied', 'screening', 'interview', 'offer'];
+
+/** Whole calendar days from one YYYY-MM-DD to another. */
+const daysBetween = (from: string, to: string): number =>
+  Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 function checkDate(label: string, value: string): string {
@@ -162,6 +185,7 @@ export function createTracker(
       actor: event.actor,
       evidence: event.evidence ?? null,
       undoes: event.undoes ?? null,
+      createdAt: now(),
       furthestBefore: before.furthestStage,
       appliedOnBefore: before.appliedOn,
       applyByBefore: before.applyBy,
@@ -296,6 +320,62 @@ export function createTracker(
               applyBy: last.applyByBefore,
             });
       }),
+
+    async goneCold(userId, { days, timezone }) {
+      if (!Number.isInteger(days) || days < 1) {
+        throw new TrackerError('gone cold days must be an integer of at least 1');
+      }
+      const lastEvent = max(timelineEvents.createdAt);
+      const silentDays = (last: Date | null): number | null =>
+        last === null ? null : daysBetween(todayIn(timezone, last), todayIn(timezone, now()));
+      const waiting = await db
+        .select({ jobId: jobState.jobId, last: lastEvent })
+        .from(jobState)
+        .innerJoin(
+          timelineEvents,
+          and(eq(timelineEvents.userId, jobState.userId), eq(timelineEvents.jobId, jobState.jobId)),
+        )
+        .where(and(eq(jobState.userId, userId), inArray(jobState.applicationStatus, WAITING)))
+        .groupBy(jobState.jobId);
+      const moves: GoneColdMove[] = [];
+      for (const { jobId, last } of waiting) {
+        const silentNow = silentDays(last);
+        if (silentNow === null || silentNow < days) continue;
+        const move = await db.transaction(async (tx): Promise<GoneColdMove | null> => {
+          // A Job folded into another is gone for every writer: lockJob finds no row and it is skipped.
+          const locked = await lock(tx, userId, jobId).catch((err: unknown) => {
+            if (err instanceof TrackerError) return null;
+            throw err;
+          });
+          if (locked === null) return null;
+          // Recheck inside the lock: a set_status that won the race left a fresh event or another status.
+          const from = locked.row.applicationStatus as ApplicationStatus | null;
+          const [latest] = await tx
+            .select({ last: lastEvent })
+            .from(timelineEvents)
+            .where(and(eq(timelineEvents.userId, userId), eq(timelineEvents.jobId, jobId)));
+          const silent = silentDays(latest?.last ?? null);
+          if (from === null || !WAITING.includes(from) || silent === null || silent < days) {
+            return null;
+          }
+          await record(
+            tx,
+            locked,
+            {
+              field: 'application',
+              from,
+              to: 'gone_cold',
+              actor: 'system',
+              evidence: `Gone cold rule: no status change for ${String(days)} days (${String(silent)} days silent)`,
+            },
+            { applicationStatus: 'gone_cold' },
+          );
+          return { jobId, daysSilent: silent, from };
+        });
+        if (move) moves.push(move);
+      }
+      return moves;
+    },
 
     async addNote(userId, jobId, text) {
       const [note] = await db.insert(notes).values({ userId, jobId, text }).returning();

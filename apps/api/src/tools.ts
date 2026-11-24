@@ -178,9 +178,9 @@ const targetSchema = z.object({
   criteria: criteriaSchema.describe(
     'Fields set on this Target; null means inherit the Global default',
   ),
-  resolved: criteriaSchema.describe(
-    'What the Target uses after falling back to the Global defaults',
-  ),
+  resolved: criteriaSchema
+    .omit({ goneColdDays: true })
+    .describe('What the Target uses after falling back to the Global defaults'),
 });
 
 /** A tool error: the message of an expected refusal as it is, a fixed text for anything else (never a raw database error). */
@@ -545,7 +545,7 @@ export function registerTools(
     'update_global_defaults',
     {
       description:
-        'Change the Global defaults. Only the keys you pass change; null clears a field.',
+        'Change the Global defaults. Only the keys you pass change; null clears a field. goneColdDays (integer of at least 1, null disables) is the number of days without a status change after which an application goes Gone cold; it only applies here, not on a Target.',
       inputSchema: { criteria: criteriaPatchSchema },
       outputSchema: { defaults: criteriaSchema },
     },

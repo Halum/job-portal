@@ -70,6 +70,12 @@ export interface Notifications {
    * workers at once.
    */
   afterRun: (userId: string, report: RunReport) => Promise<AfterRunResult>;
+  /**
+   * Stores each short line (a Gone cold or Gmail status change) as its own message of kind line, then sends
+   * everything pending the same way afterRun does: same retries, same webhook-down rule. A line the webhook
+   * did not take stays stored and goes out on a later flush.
+   */
+  sendLines: (userId: string, lines: string[]) => Promise<void>;
 }
 
 interface DigestEntry {
@@ -437,6 +443,21 @@ export function createNotifications(
   };
 
   return {
+    async sendLines(userId, lines) {
+      if (lines.length === 0) return;
+      // Distinct created times keep the lines in the order given (one statement shares one now()).
+      const base = Date.now();
+      await db.insert(messages).values(
+        lines.map((text, i) => ({
+          createdAt: new Date(base + i),
+          userId,
+          kind: 'line' as const,
+          payload: { text: clip(text, MAX_TEXT) },
+        })),
+      );
+      await flush(userId);
+    },
+
     async afterRun(userId, report) {
       await syncFailures(userId, report);
       await storeDigest(userId, report.since);
