@@ -1,5 +1,5 @@
-import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
-import type { Db } from '@job-portal/db';
+import { and, asc, eq, gt, gte, inArray, or, sql } from 'drizzle-orm';
+import type { Db, DbTx } from '@job-portal/db';
 import type { Source } from './source';
 import { companyKey, urlKey } from './keys';
 import {
@@ -12,6 +12,8 @@ import {
 } from './schema';
 
 export const MANUAL_SOURCE = 'manual';
+
+export type DiscoveryState = (typeof DISCOVERY_STATES)[number];
 
 export interface PollResult {
   fetched: number;
@@ -37,7 +39,7 @@ export interface JobView {
   title: string;
   company: string | null;
   location: string | null;
-  discoveryState: (typeof DISCOVERY_STATES)[number];
+  discoveryState: DiscoveryState;
   createdAt: Date;
   postings: PostingView[];
 }
@@ -50,6 +52,12 @@ export interface ListJobsOptions {
   limit?: number;
   /** The `nextCursor` of the previous page. */
   cursor?: string | null;
+  /** Only Jobs created at or after this instant. */
+  discoveredSince?: Date;
+  /** Only Jobs in this discovery state. */
+  discoveryState?: DiscoveryState;
+  /** Only these Jobs (another module's filter result); null or undefined means no restriction. */
+  jobIds?: string[] | null;
 }
 
 export interface Discovery {
@@ -74,6 +82,22 @@ export interface Discovery {
   ) => Promise<{ jobId: string; splitCount: number }>;
   /** Postings whose two keys hit different Jobs, kept for the AI merge ticket. */
   listMergeConflicts: (userId: string) => Promise<MergeConflict[]>;
+  /**
+   * Takes the Job row lock (select for update) inside the caller's transaction; null when the user has no
+   * such Job. The Tracker takes it before every Timeline write.
+   */
+  lockJob: (
+    tx: DbTx,
+    userId: string,
+    jobId: string,
+  ) => Promise<{ discoveryState: DiscoveryState } | null>;
+  /** Writes the discovery state inside the caller's transaction; the Tracker is its only caller. */
+  setDiscoveryState: (
+    tx: DbTx,
+    userId: string,
+    jobId: string,
+    state: DiscoveryState,
+  ) => Promise<void>;
 }
 
 export interface AddJobInput {
@@ -116,7 +140,7 @@ const postingColumns = {
 
 const MAX_ATTEMPTS = 5;
 
-type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+type Tx = DbTx;
 
 interface Incoming {
   sourcePostingId: string;
@@ -316,12 +340,40 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
         .orderBy(asc(mergeConflicts.createdAt));
     },
 
-    async listJobs(userId, { limit = DEFAULT_LIMIT, cursor }) {
+    async lockJob(tx, userId, jobId) {
+      const [job] = await tx
+        .select({ discoveryState: jobs.discoveryState })
+        .from(jobs)
+        .where(and(eq(jobs.userId, userId), eq(jobs.id, jobId)))
+        .for('update');
+      return job ?? null;
+    },
+
+    async setDiscoveryState(tx, userId, jobId, state) {
+      await tx
+        .update(jobs)
+        .set({ discoveryState: state })
+        .where(and(eq(jobs.userId, userId), eq(jobs.id, jobId)));
+    },
+
+    async listJobs(
+      userId,
+      { limit = DEFAULT_LIMIT, cursor, discoveredSince, discoveryState, jobIds },
+    ) {
+      if (jobIds && jobIds.length === 0) return { jobs: [], nextCursor: null };
       const size = Math.min(Math.max(limit, 1), MAX_LIMIT);
       const rows = await db
         .select()
         .from(jobs)
-        .where(and(eq(jobs.userId, userId), cursor ? gt(jobs.id, cursor) : undefined))
+        .where(
+          and(
+            eq(jobs.userId, userId),
+            cursor ? gt(jobs.id, cursor) : undefined,
+            discoveredSince ? gte(jobs.createdAt, discoveredSince) : undefined,
+            discoveryState ? eq(jobs.discoveryState, discoveryState) : undefined,
+            jobIds ? inArray(jobs.id, jobIds) : undefined,
+          ),
+        )
         .orderBy(asc(jobs.id))
         .limit(size + 1);
       const page = rows.slice(0, size);
