@@ -1,11 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { z } from 'zod';
-import type { Accounts, User } from '@job-portal/accounts';
+import { userSchema, type Accounts, type User } from '@job-portal/accounts';
 import type { Logger } from '@job-portal/shared';
-
-const userShape = { id: z.string(), email: z.string(), timezone: z.string() };
 
 function buildMcpServer(user: User): McpServer {
   const mcp = new McpServer({ name: 'job-automation', version: '0.1.0' });
@@ -13,11 +10,10 @@ function buildMcpServer(user: User): McpServer {
     'whoami',
     {
       description: 'Return the id, email and timezone of the authenticated user.',
-      outputSchema: userShape,
+      outputSchema: userSchema.shape,
     },
     () => {
-      const me = { id: user.id, email: user.email, timezone: user.timezone };
-      return { content: [{ type: 'text', text: JSON.stringify(me) }], structuredContent: me };
+      return { content: [{ type: 'text', text: JSON.stringify(user) }], structuredContent: user };
     },
   );
   return mcp;

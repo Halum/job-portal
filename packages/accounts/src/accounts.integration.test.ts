@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { sql } from 'drizzle-orm';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import { accountsMigrations, createAccounts } from './index';
@@ -31,6 +32,16 @@ describe('accounts against real Postgres', () => {
     const second = await accounts.seedUser('user@example.invalid');
     expect(first).toMatchObject({ email: 'user@example.invalid', timezone: 'Europe/Berlin' });
     expect(second.id).toBe(first.id);
+  });
+
+  it('keeps exactly one user when the configured email changes', async () => {
+    const accounts = createAccounts(handle.db, TOKEN);
+    const before = await accounts.seedUser('old@example.invalid');
+    const after = await accounts.seedUser('new@example.invalid');
+    expect(after).toEqual({ ...before, email: 'new@example.invalid' });
+    const rows = await handle.db.execute(sql`select email from accounts.users`);
+    expect(rows.map((r) => r.email)).toEqual(['new@example.invalid']);
+    expect(await accounts.authenticate(`Bearer ${TOKEN}`)).toEqual(after);
   });
 
   it('authenticates only the right bearer token', async () => {
