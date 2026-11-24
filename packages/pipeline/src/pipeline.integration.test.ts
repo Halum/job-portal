@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
-import type { PollResult } from '@job-portal/discovery';
+import {
+  createDiscovery,
+  discoveryMigrations,
+  type PollResult,
+  type Source,
+} from '@job-portal/discovery';
 import { createPipeline, pipelineMigrations } from './index';
 
 const USER = '00000000-0000-4000-8000-000000000001';
@@ -16,7 +21,10 @@ describe('pipeline against real Postgres', () => {
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16-alpine').start();
-    await runMigrationsWithLock(container.getConnectionUri(), [pipelineMigrations]);
+    await runMigrationsWithLock(container.getConnectionUri(), [
+      pipelineMigrations,
+      discoveryMigrations,
+    ]);
     handle = createDb(container.getConnectionUri());
   });
 
@@ -82,6 +90,46 @@ describe('pipeline against real Postgres', () => {
     poll = () => Promise.resolve({ fetched: 2, newPostings: 1, jobIds: [], errors: ['bad entry'] });
     const run = await pipeline().execute(USER, 'src-b');
     expect(run).toMatchObject({ status: 'completed_with_errors', errors: ['bad entry'] });
+  });
+
+  const oneListing = (id: string, title: string): Source => ({
+    id: 'real',
+    fetch: () =>
+      Promise.resolve({
+        postings: [
+          {
+            sourcePostingId: id,
+            title,
+            company: 'Beispiel GmbH',
+            location: 'Musterstadt',
+            url: `https://jobs.example.invalid/${id}`,
+            raw: {},
+          },
+        ],
+        errors: [],
+      }),
+  });
+
+  it('ends "completed with errors" when Discovery cannot store one Posting', async () => {
+    const bad = oneListing('1', `Bad${String.fromCharCode(0)}title`);
+    const run = await createPipeline(handle.db, createDiscovery(handle.db, [bad])).execute(
+      USER,
+      'real',
+    );
+    expect(run).toMatchObject({
+      status: 'completed_with_errors',
+      errors: ['posting 1 could not be stored'],
+    });
+  });
+
+  it('ends "failed" when Discovery loses its database connection', async () => {
+    const lost = createDb(container.getConnectionUri());
+    await lost.close();
+    const run = await createPipeline(
+      handle.db,
+      createDiscovery(lost.db, [oneListing('2', 'Koch')]),
+    ).execute(USER, 'real-lost');
+    expect(run?.status).toBe('failed');
   });
 
   it('ends "failed" with the error message when the poll throws', async () => {

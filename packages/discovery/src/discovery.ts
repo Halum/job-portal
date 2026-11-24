@@ -1,5 +1,6 @@
 import { and, asc, eq, gt, gte, inArray, or, sql } from 'drizzle-orm';
 import type { Db, DbTx } from '@job-portal/db';
+import type { Logger } from '@job-portal/shared';
 import type { Source } from './source';
 import { companyKey, urlKey } from './keys';
 import {
@@ -12,6 +13,14 @@ import {
 } from './schema';
 
 export const MANUAL_SOURCE = 'manual';
+
+/** A refusal that is safe to show the caller as it is (bad input, unknown id); anything else is internal. */
+export class DiscoveryError extends Error {
+  override name = 'DiscoveryError';
+}
+
+/** Longest accepted `add_job` fields; the MCP tool schema and its tests use these. */
+export const ADD_JOB_LIMITS = { title: 300, company: 200, city: 100, url: 2000 } as const;
 
 export type DiscoveryState = (typeof DISCOVERY_STATES)[number];
 
@@ -238,7 +247,8 @@ async function ingest(
         } // else a concurrent run inserted a Job with our key first: select it on the next pass
       }
     }
-    if (!jobId) throw new Error('could not place the posting after repeated key conflicts');
+    if (!jobId)
+      throw new DiscoveryError('could not place the posting after repeated key conflicts');
 
     const inserted = await tx
       .insert(postings)
@@ -250,7 +260,7 @@ async function ingest(
       // A concurrent run inserted this Posting first: drop our spare Job and update theirs.
       if (spare) await tx.delete(jobs).where(eq(jobs.id, jobId));
       const theirs = await touch();
-      if (!theirs) throw new Error('posting vanished during insert');
+      if (!theirs) throw new DiscoveryError('posting vanished during insert');
       return { jobId: theirs, isNew: false };
     }
     if (conflict.length > 0) {
@@ -278,7 +288,17 @@ async function newJob(
  * ponytail: postings are ingested one by one (one or two queries each); polls hold tens of postings, not
  * thousands. Rule merge only: AI merge arrives with its own ticket.
  */
-export function createDiscovery(db: Db, sources: Source[]): Discovery {
+/** Postgres class 22 (data exception) and 23 (constraint violation) are about the row sent, not the connection. */
+function aboutThisPosting(err: unknown): boolean {
+  for (let e = err, depth = 0; e instanceof Error && depth < 4; depth += 1, e = e.cause) {
+    if (e instanceof DiscoveryError) return true;
+    const code = (e as { code?: unknown }).code;
+    if (typeof code === 'string' && /^2[23]\d{3}$/.test(code)) return true;
+  }
+  return false;
+}
+
+export function createDiscovery(db: Db, sources: Source[], logger?: Logger): Discovery {
   const byId = new Map(sources.map((s) => [s.id, s]));
 
   return {
@@ -289,10 +309,18 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
       let newPostings = 0;
       const jobIds = new Set<string>();
       for (const p of fetched) {
-        const placed = await ingest(db, userId, sourceId, p);
-        if (placed.isNew) {
-          newPostings += 1;
-          jobIds.add(placed.jobId);
+        // One Posting the database refuses is an error line; the rest of the poll goes on. Anything
+        // else (a lost connection, an unexpected error) fails the run.
+        try {
+          const placed = await ingest(db, userId, sourceId, p);
+          if (placed.isNew) {
+            newPostings += 1;
+            jobIds.add(placed.jobId);
+          }
+        } catch (err) {
+          if (!aboutThisPosting(err)) throw err;
+          logger?.warn({ err, sourceId, sourcePostingId: p.sourcePostingId }, 'posting not stored');
+          errors.push(`posting ${p.sourcePostingId} could not be stored`);
         }
       }
       return { fetched: fetched.length, newPostings, jobIds: [...jobIds], errors };
@@ -300,7 +328,7 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
 
     async addJob(userId, input) {
       const key = urlKey(input.url);
-      if (!key) throw new Error('url must be an absolute http or https URL');
+      if (!key) throw new DiscoveryError('url must be an absolute http or https URL');
       const { jobId } = await ingest(db, userId, MANUAL_SOURCE, {
         sourcePostingId: key,
         title: input.title,
@@ -314,7 +342,7 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
 
     async splitJob(userId, jobId, postingIds) {
       const ids = [...new Set(postingIds)];
-      if (ids.length === 0) throw new Error('give at least one posting to split off');
+      if (ids.length === 0) throw new DiscoveryError('give at least one posting to split off');
       return db.transaction(async (tx: Tx) => {
         // Locking the Job serializes concurrent splits of it.
         const [job] = await tx
@@ -322,17 +350,18 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
           .from(jobs)
           .where(and(eq(jobs.userId, userId), eq(jobs.id, jobId)))
           .for('update');
-        if (!job) throw new Error(`No Job ${jobId}`);
+        if (!job) throw new DiscoveryError(`No Job ${jobId}`);
         const own = await tx
           .select()
           .from(postings)
           .where(and(eq(postings.userId, userId), eq(postings.jobId, jobId)))
           .orderBy(asc(postings.firstSeenAt));
         const moved = own.filter((o) => ids.includes(o.id));
-        if (moved.length !== ids.length) throw new Error('not a posting of this job');
-        if (moved.length === own.length) throw new Error('cannot move every posting out of a Job');
+        if (moved.length !== ids.length) throw new DiscoveryError('not a posting of this job');
+        if (moved.length === own.length)
+          throw new DiscoveryError('cannot move every posting out of a Job');
         const first = moved[0];
-        if (!first) throw new Error('nothing to move');
+        if (!first) throw new DiscoveryError('nothing to move');
 
         const [created] = await tx
           .insert(jobs)

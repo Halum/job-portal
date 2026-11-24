@@ -1,7 +1,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { userSchema, type User } from '@job-portal/accounts';
-import { DISCOVERY_STATES, type Discovery } from '@job-portal/discovery';
+import {
+  ADD_JOB_LIMITS,
+  DISCOVERY_STATES,
+  DiscoveryError,
+  type Discovery,
+} from '@job-portal/discovery';
 import { criteriaPatchSchema, criteriaSchema, type Matching } from '@job-portal/matching';
 import { RUN_STATUSES, type Pipeline } from '@job-portal/pipeline';
 import {
@@ -121,12 +126,13 @@ const targetSchema = z.object({
   ),
 });
 
+/** A tool error: the message of an expected refusal as it is, a fixed text for anything else (never a raw database error). */
 const failure = (
   err: unknown,
   fallback: string,
 ): { isError: true; content: { type: 'text'; text: string }[] } => ({
   isError: true,
-  content: [{ type: 'text', text: err instanceof Error ? err.message : fallback }],
+  content: [{ type: 'text', text: err instanceof DiscoveryError ? err.message : fallback }],
 });
 
 const NO_APPLICATION: ApplicationTracking = {
@@ -280,16 +286,20 @@ export function registerTools(
       description:
         'Add a job by hand as a Posting with source manual. It goes through the same dedupe, so a later copy from a board merges with it. Adding the same URL again returns the same Job.',
       inputSchema: {
-        title: z.string().min(1),
-        company: z.string().min(1).optional(),
-        city: z.string().min(1).optional(),
-        url: z.url(),
+        title: z.string().min(1).max(ADD_JOB_LIMITS.title),
+        company: z.string().min(1).max(ADD_JOB_LIMITS.company).optional(),
+        city: z.string().min(1).max(ADD_JOB_LIMITS.city).optional(),
+        url: z.url({ protocol: /^https?$/ }).max(ADD_JOB_LIMITS.url),
       },
       outputSchema: { jobId: z.string() },
     },
     async (input) => {
-      const out = await discovery.addJob(user.id, input);
-      return { content: [text(out)], structuredContent: out };
+      try {
+        const out = await discovery.addJob(user.id, input);
+        return { content: [text(out)], structuredContent: out };
+      } catch (err) {
+        return failure(err, 'add_job failed');
+      }
     },
   );
 
@@ -306,10 +316,7 @@ export function registerTools(
         const out = await discovery.splitJob(user.id, jobId, postingIds);
         return { content: [text(out)], structuredContent: out };
       } catch (err) {
-        return {
-          isError: true,
-          content: [{ type: 'text', text: err instanceof Error ? err.message : 'split failed' }],
-        };
+        return failure(err, 'split_job failed');
       }
     },
   );

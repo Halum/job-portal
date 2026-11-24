@@ -33,7 +33,7 @@ const matching = createMatching(db, {
 const directory = createBoardDirectory(db);
 const { sources, scheduled } = buildSources(config, { matching, directory, userId: user.id });
 // Discovery snapshots its Sources, so it is created only now, with every one of them in the list.
-const discovery = createDiscovery(db, sources);
+const discovery = createDiscovery(db, sources, logger);
 const tracker = createTracker(db, discovery);
 const pipeline = createPipeline(db, discovery, { matching });
 

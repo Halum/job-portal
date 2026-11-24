@@ -18,7 +18,7 @@ const accounts = createAccounts(db, config.mcpBearerToken);
 await accounts.seedUser(config.seedUserEmail);
 
 // The API only reads: it has no sources, so it can show runs and jobs but never polls.
-const discovery = createDiscovery(db, []);
+const discovery = createDiscovery(db, [], logger);
 const tracker = createTracker(db, discovery);
 const matching = createMatching(db, {
   loadJobs: (userId, ids) => discovery.listMatchable(userId, ids),
