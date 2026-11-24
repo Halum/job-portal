@@ -33,7 +33,7 @@ export const runs = pipelineSchema.table(
   (t) => [
     check(
       'runs_status',
-      sql`${t.status} in ('running', 'completed', 'completed_with_errors', 'failed')`,
+      sql`${t.status} in (${sql.raw(RUN_STATUSES.map((s) => `'${s}'`).join(', '))})`,
     ),
     // At most one active run per user and source, enforced by the database.
     uniqueIndex('runs_one_running')

@@ -106,6 +106,31 @@ describe('pipeline against real Postgres', () => {
     ]);
   });
 
+  it('a run failed as lost cannot later overwrite its failed row when it finishes', async () => {
+    let release: () => void = () => undefined;
+    poll = () =>
+      new Promise((resolve) => {
+        release = () => {
+          resolve({ fetched: 9, newPostings: 9, errors: [] });
+        };
+      });
+    const slow = pipeline().execute(USER, 'src-g');
+    await new Promise((r) => setTimeout(r, 100));
+
+    const patient = createPipeline(
+      handle.db,
+      { poll: () => Promise.resolve({ fetched: 0, newPostings: 0, errors: [] }) },
+      { staleAfterMs: 50 },
+    );
+    expect((await patient.execute(USER, 'src-g'))?.status).toBe('completed');
+
+    release(); // the old run finishes late
+    expect((await slow)?.status).toBe('failed');
+    const runs = (await pipeline().listRuns(USER, 50)).filter((r) => r.sourceId === 'src-g');
+    expect(runs.map((r) => r.status).sort()).toEqual(['completed', 'failed']);
+    expect(runs.find((r) => r.status === 'failed')).toMatchObject({ fetched: 0, newPostings: 0 });
+  });
+
   it('lists the newest runs first, limited, scoped to the user', async () => {
     const runs = await pipeline().listRuns(USER, 2);
     expect(runs).toHaveLength(2);

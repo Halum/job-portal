@@ -8,10 +8,10 @@
   },
   "dependencies": {
     "@job-portal/accounts": "workspace:*",
-    "@job-portal/migrations": "workspace:*",
     "@job-portal/config": "workspace:*",
     "@job-portal/db": "workspace:*",
     "@job-portal/discovery": "workspace:*",
+    "@job-portal/migrations": "workspace:*",
     "@job-portal/pipeline": "workspace:*",
     "@job-portal/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "1.32.2",

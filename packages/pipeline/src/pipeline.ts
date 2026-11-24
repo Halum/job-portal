@@ -85,13 +85,16 @@ export function createPipeline(
       const finish = async (
         values: Pick<Run, 'status' | 'fetched' | 'newPostings' | 'errors'>,
       ): Promise<Run> => {
+        // Only a run still "running" may finish: one failed as lost keeps its failed row.
         const [run] = await db
           .update(runs)
           .set({ ...values, finishedAt: sql`now()` })
-          .where(eq(runs.id, started.id))
+          .where(and(eq(runs.id, started.id), eq(runs.status, 'running')))
           .returning(columns);
-        if (!run) throw new Error('run vanished');
-        return run;
+        if (run) return run;
+        const [current] = await db.select(columns).from(runs).where(eq(runs.id, started.id));
+        if (!current) throw new Error('run vanished');
+        return current;
       };
 
       try {
