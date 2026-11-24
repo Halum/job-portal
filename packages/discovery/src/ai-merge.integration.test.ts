@@ -12,8 +12,6 @@ import {
   type Source,
 } from './index';
 
-const OTHER = '00000000-0000-4000-8000-0000000000aa';
-
 interface Fake {
   id: string;
   title: string;
@@ -191,7 +189,6 @@ describe('AI merge against real Postgres and a faked runner', () => {
       // company key of x, URL of y: the keys hit two Jobs
       posting('z', { url: 'https://y.example.invalid/2' }),
     ]);
-    expect(await discovery.listMergeConflicts(user)).toHaveLength(1);
     const jobs = (await discovery.listJobs(user, {})).jobs;
     const xy = jobs.filter((j) => j.postings.some((p) => ['x', 'y'].includes(p.sourcePostingId)));
     const result = await merge.run(user);
@@ -201,17 +198,15 @@ describe('AI merge against real Postgres and a faked runner', () => {
     expect(result.items).toBe(subjects.length);
   });
 
-  it('confirm merges the Postings into the older Job and closes the URL key chain', async () => {
+  it('confirm merges the Postings into the older Job and the folded Job keys keep leading to it', async () => {
     reset();
     const user = fresh();
     const { discovery, merge } = await setup(user, [
       posting('a', { url: 'https://jobs.example.invalid/one' }),
-      // same company key: attaches to a's Job, whose URL key stays the one of a
-      posting('b', { url: 'https://jobs.example.invalid/two' }),
-      // other title, so another company key; its URL is b's, which the Job never got
+      // other title, so another company key and another Job
       posting('c', {
         title: 'Alpha Developer Backend Senior',
-        url: 'https://jobs.example.invalid/two',
+        url: 'https://jobs.example.invalid/three',
       }),
     ]);
     const before = (await discovery.listJobs(user, {})).jobs;
@@ -226,12 +221,16 @@ describe('AI merge against real Postgres and a faked runner', () => {
       (x, y) => x.createdAt.getTime() - y.createdAt.getTime(),
     );
     expect(after[0]?.id).toBe(older?.id); // the older Job stays
-    expect(after[0]?.postings.map((p) => p.sourcePostingId).sort()).toEqual(['a', 'b', 'c']);
+    expect(after[0]?.postings.map((p) => p.sourcePostingId).sort()).toEqual(['a', 'c']);
     expect(await discovery.getJob(user, newer?.id ?? '')).toBeNull();
-    // the folded Job's URL key still leads to the kept Job: a later posting with that URL and another title attaches
+    // the folded Job's company key and URL key still lead to the kept Job
     const later = createDiscovery(handle.db, [
       source('late', [
-        posting('d', { title: 'Something Else', url: 'https://jobs.example.invalid/two' }),
+        posting('d', { title: 'Something Else', url: 'https://jobs.example.invalid/three' }),
+        posting('e', {
+          title: 'Alpha Developer Backend Senior',
+          url: 'https://jobs.example.invalid/nine',
+        }),
       ]),
     ]);
     await later.poll(user, 'late');
@@ -380,7 +379,9 @@ describe('AI merge against real Postgres and a faked runner', () => {
       posting('a'),
       posting('b', { title: 'Alpha Developer Backend Senior' }),
     ]);
+    // the other user has a near-match pair; mine is not asked about it
     expect(await mine.merge.run(user)).toMatchObject({ calls: 0, items: 0 });
+    expect(await pending(user)).toHaveLength(0);
     // an item of mine that names the other user's Jobs changes nothing there
     const jobs = (await theirs.discovery.listJobs(other, {})).jobs.map((j) => j.id).sort();
     const forged = await review.create(user, {
@@ -390,7 +391,42 @@ describe('AI merge against real Postgres and a faked runner', () => {
     });
     await decide(user, mine.merge, forged.id, 'confirm');
     expect((await theirs.discovery.listJobs(other, {})).jobs).toHaveLength(2);
-    expect(OTHER).toBeTruthy();
+    // and the other user's own pair is asked about, for them only
+    expect(await theirs.merge.run(other)).toMatchObject({ calls: 1, items: 1 });
+    expect(await pending(other)).toHaveLength(1);
+    expect(await pending(user)).toHaveLength(0); // the forged item was decided
+  });
+
+  it('two items of a chain decided at once never leave Postings on a hidden Job', async () => {
+    reset();
+    const user = fresh();
+    const { discovery, merge } = await setup(user, [
+      posting('a'),
+      posting('b', { title: 'Alpha Developer Backend Senior' }),
+      posting('c', { title: 'Alpha Developer Backend Lead' }),
+    ]);
+    await merge.run(user);
+    const [j0, j1, j2] = [...(await discovery.listJobs(user, {})).jobs].sort(
+      (x, y) => x.createdAt.getTime() - y.createdAt.getTime(),
+    );
+    const items = await pending(user);
+    const itemOf = (x: string, y: string) =>
+      items.find((i) => {
+        const s = mergeSubject.parse(i.subject);
+        return [s.jobA, s.jobB].sort().join() === [x, y].sort().join();
+      })?.id ?? '';
+    const ids = [itemOf(j0?.id ?? '', j1?.id ?? ''), itemOf(j1?.id ?? '', j2?.id ?? '')];
+    const first = await Promise.allSettled(ids.map((id) => decide(user, merge, id, 'confirm')));
+    // a decision that lost the race says so and stays pending; deciding it again settles it
+    for (const [i, r] of first.entries()) {
+      if (r.status === 'rejected') {
+        expect(String(r.reason)).toMatch(/decide again/);
+        await decide(user, merge, ids[i] ?? '', 'confirm');
+      }
+    }
+    const after = (await discovery.listJobs(user, {})).jobs;
+    expect(after).toHaveLength(1);
+    expect(after[0]?.postings.map((p) => p.sourcePostingId).sort()).toEqual(['a', 'b', 'c']);
   });
 
   it('review_stats counts ai_merge items per model', async () => {

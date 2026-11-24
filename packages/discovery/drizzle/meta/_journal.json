@@ -22,6 +22,13 @@
       "when": 1795544325148,
       "tag": "0002_futuristic_sunspot",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795544891068,
+      "tag": "0003_amused_emma_frost",
+      "breakpoints": true
     }
   ]
 }

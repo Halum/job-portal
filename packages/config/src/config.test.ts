@@ -215,7 +215,8 @@ describe('loadConfig', () => {
       expect(loadConfig({ ...valid, AI_MERGE_MAX_CALLS_PER_RUN: '3' }).aiMergeMaxCallsPerRun).toBe(
         3,
       );
-      for (const bad of ['0', '1.1', '-1', 'abc']) {
+      expect(loadConfig({ ...valid, AI_MERGE_JACCARD: '0' }).aiMergeJaccard).toBe(0);
+      for (const bad of ['1.1', '-1', 'abc']) {
         expect(() => loadConfig({ ...valid, AI_MERGE_JACCARD: bad })).toThrow('AI_MERGE_JACCARD');
       }
       for (const bad of ['0', '1.5', 'abc']) {

@@ -53,7 +53,7 @@ const envSchema = z
     // Most AI calls one run makes. A throughput limit, not a spend cap: pairs left over wait for the next run.
     AI_MAX_CALLS_PER_RUN: z.coerce.number().int().min(1).default(50),
     // Two Jobs of one company and city whose titles share at least this fraction of their words (Jaccard) go to the AI merge check.
-    AI_MERGE_JACCARD: z.coerce.number().gt(0).max(1).default(0.6),
+    AI_MERGE_JACCARD: z.coerce.number().min(0).max(1).default(0.6),
     // Most AI merge checks one run makes. A throughput limit, not a spend cap: pairs left over wait for the next run.
     AI_MERGE_MAX_CALLS_PER_RUN: z.coerce.number().int().min(1).default(20),
     ALERT_THRESHOLD: z.coerce.number().int().min(0).max(100).default(70),
@@ -108,7 +108,7 @@ export interface Config {
   ai: AiConfig | null;
   /** Most AI calls one run makes, an integer of at least 1; the rest wait for the next run. */
   aiMaxCallsPerRun: number;
-  /** Title word overlap (Jaccard, above 0 and at most 1) that sends two Jobs to the AI merge check. */
+  /** Title word overlap (Jaccard, 0 to 1) that sends two Jobs to the AI merge check. */
   aiMergeJaccard: number;
   /** Most AI merge checks one run makes, an integer of at least 1. */
   aiMergeMaxCallsPerRun: number;

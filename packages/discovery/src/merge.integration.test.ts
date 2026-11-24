@@ -146,17 +146,21 @@ describe('rule merge, split and add_job against real Postgres', () => {
     const d = createDiscovery(handle.db, [a, b, c]);
     await d.poll(user, 'alpha');
     await d.poll(user, 'beta');
-    expect(await d.listMergeConflicts(user)).toEqual([]);
+    const conflictRows = async () =>
+      await handle.db.execute<{ posting_id: string; job_ids: string[] }>(
+        sql`select posting_id, job_ids from discovery.merge_conflicts where user_id = ${user}`,
+      );
+    expect(await conflictRows()).toHaveLength(0);
     await d.poll(user, 'gamma');
 
     const jobs = await jobsOf(d, user);
     expect(jobs).toHaveLength(3);
-    const conflicts = await d.listMergeConflicts(user);
+    const conflicts = await conflictRows();
     expect(conflicts).toHaveLength(1);
     const gammaJob = jobs.find((j) => j.postings.some((p) => p.sourceId === 'gamma'));
     expect(gammaJob?.postings).toHaveLength(1);
-    expect(conflicts[0]?.postingId).toBe(gammaJob?.postings[0]?.id);
-    expect([...(conflicts[0]?.jobIds ?? [])].sort()).toEqual(
+    expect(conflicts[0]?.posting_id).toBe(gammaJob?.postings[0]?.id);
+    expect([...(conflicts[0]?.job_ids ?? [])].sort()).toEqual(
       jobs
         .filter((j) => j !== gammaJob)
         .map((j) => j.id)
@@ -297,5 +301,45 @@ describe('rule merge, split and add_job against real Postgres', () => {
     const jobs = await jobsOf(d1, user);
     expect(jobs).toHaveLength(25);
     for (const j of jobs) expect(j.postings).toHaveLength(3);
+  });
+
+  it('a Job that took a copy by company key also takes a later copy sharing the first copy URL, whatever its title', async () => {
+    const user = freshUser();
+    const a = fakeSource('one', [
+      {
+        id: '1',
+        title: 'Koch',
+        company: 'Beispiel',
+        location: 'Ort',
+        url: 'https://x.example.invalid/1',
+      },
+    ]);
+    // same company key, other URL: attaches to the Job, which keeps only the first URL as its own key
+    const b = fakeSource('two', [
+      {
+        id: '2',
+        title: 'Koch',
+        company: 'Beispiel',
+        location: 'Ort',
+        url: 'https://x.example.invalid/2',
+      },
+    ]);
+    // other company key and title, but the URL of the second copy
+    const c = fakeSource('three', [
+      {
+        id: '3',
+        title: 'Aushilfe Lager',
+        company: 'Anders',
+        location: 'Elsewhere',
+        url: 'https://x.example.invalid/2',
+      },
+    ]);
+    const d = createDiscovery(handle.db, [a, b, c]);
+    await d.poll(user, 'one');
+    await d.poll(user, 'two');
+    await d.poll(user, 'three');
+    const jobs = await jobsOf(d, user);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.postings).toHaveLength(3);
   });
 });

@@ -363,6 +363,11 @@ export function createAiMerge(db: Db, deps: AiMergeDeps): AiMerge {
       const x = locked.find((j) => j.id === ra);
       const y = locked.find((j) => j.id === rb);
       if (!x || !y) return;
+      // Another decision folded one of them between the read above and the lock (two items of a chain
+      // decided at once): folding into a Job that is itself folded would hide its Postings. The decision
+      // rolls back and stays pending; deciding again resolves the new roots.
+      if (x.mergedInto !== null || y.mergedInto !== null)
+        throw new DiscoveryError('another decision just merged one of these Jobs: decide again');
 
       if (decision === 'disagree') {
         const rows = await tx

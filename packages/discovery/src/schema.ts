@@ -55,6 +55,8 @@ export const postings = discoverySchema.table(
     company: text('company'),
     location: text('location'),
     url: text('url').notNull(),
+    /** The cleaned URL (see keys.ts); a later Posting with the same one belongs to this Posting's Job. */
+    urlKey: text('url_key'),
     postedAt: timestamp('posted_at', { withTimezone: true }),
     raw: jsonb('raw').notNull(),
     firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),
@@ -63,6 +65,7 @@ export const postings = discoverySchema.table(
   (t) => [
     unique('postings_identity').on(t.userId, t.sourceId, t.sourcePostingId),
     index('postings_job_idx').on(t.jobId),
+    index('postings_url_key_idx').on(t.userId, t.urlKey),
   ],
 );
 

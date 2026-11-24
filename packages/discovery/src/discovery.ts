@@ -106,8 +106,6 @@ export interface Discovery {
     jobId: string,
     postingIds: string[],
   ) => Promise<{ jobId: string; splitCount: number }>;
-  /** Postings whose two keys hit different Jobs; AI merge reads them as candidate pairs. */
-  listMergeConflicts: (userId: string) => Promise<MergeConflict[]>;
   /**
    * Takes the Job row lock (select for update) inside the caller's transaction; null when the user has no
    * such Job. The Tracker takes it before every Timeline write.
@@ -131,12 +129,6 @@ export interface AddJobInput {
   company?: string | null;
   city?: string | null;
   url: string;
-}
-
-export interface MergeConflict {
-  postingId: string;
-  jobIds: string[];
-  createdAt: Date;
 }
 
 const DEFAULT_LIMIT = 50;
@@ -195,6 +187,7 @@ async function ingest(
     company: p.company ?? null,
     location: p.location ?? null,
     url: p.url,
+    urlKey: urlKey(p.url),
     postedAt: p.postedAt ?? null,
     raw: p.raw,
   };
@@ -222,6 +215,17 @@ async function ingest(
     const keyMatch = or(
       ck ? eq(jobs.companyKey, ck) : undefined,
       uk ? eq(jobs.urlKey, uk) : undefined,
+      // Any Posting of a Job with this URL counts, not only the Posting that created the Job, so a Job that
+      // took a copy by company key also takes a later one that shares the copy's URL.
+      uk
+        ? inArray(
+            jobs.id,
+            tx
+              .select({ id: postings.jobId })
+              .from(postings)
+              .where(and(eq(postings.userId, userId), eq(postings.urlKey, uk))),
+          )
+        : undefined,
     );
     let jobId: string | undefined;
     let spare = false;
@@ -382,18 +386,6 @@ export function createDiscovery(db: Db, sources: Source[], logger?: Logger): Dis
           .where(eq(splits.userId, userId));
         return { jobId: created.id, splitCount: count?.n ?? 0 };
       });
-    },
-
-    async listMergeConflicts(userId) {
-      return db
-        .select({
-          postingId: mergeConflicts.postingId,
-          jobIds: mergeConflicts.jobIds,
-          createdAt: mergeConflicts.createdAt,
-        })
-        .from(mergeConflicts)
-        .where(eq(mergeConflicts.userId, userId))
-        .orderBy(asc(mergeConflicts.createdAt));
     },
 
     async listMatchable(userId, ids) {

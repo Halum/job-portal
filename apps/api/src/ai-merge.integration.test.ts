@@ -134,7 +134,8 @@ describe('AI merge over MCP', () => {
   it('a run raises an ai_merge item, the queue shows both postings, confirm merges, stats count it', async () => {
     const run = await pipeline.execute(userId, 'feed');
     expect(run).toMatchObject({ status: 'completed', aiMergeItems: 1, aiCalls: 1 });
-    expect(await jobs()).toHaveLength(2);
+    const both = (await jobs()).map((j) => j.id);
+    expect(both).toHaveLength(2);
 
     const list = (await call('list_reviews', { kind: 'ai_merge' })).out as { items: ItemOut[] };
     expect(list.items).toHaveLength(1);
@@ -157,6 +158,14 @@ describe('AI merge over MCP', () => {
     const after = await jobs();
     expect(after).toHaveLength(1);
     expect(after[0]?.postings).toHaveLength(2);
+
+    // the folded Job is gone for every writer: the Tracker refuses it
+    const folded = both.find((id) => id !== after[0]?.id) ?? '';
+    expect(
+      (await call('set_status', { jobId: folded, discoveryState: 'shortlisted' })).isError,
+    ).toBe(true);
+    expect((await call('add_note', { jobId: folded, text: 'x' })).isError).toBe(true);
+    expect((await call('get_job', { jobId: folded })).isError).toBe(true);
 
     const stats = (await call('review_stats')).out as {
       counts: { kind: string; model: string; agreed: number }[];
