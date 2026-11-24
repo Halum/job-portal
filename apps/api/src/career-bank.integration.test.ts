@@ -23,7 +23,7 @@ const OTHER_USER = '00000000-0000-4000-8000-0000000000b2';
 const UNKNOWN = '00000000-0000-4000-8000-000000000997';
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
 
-describe('Documents through the API', () => {
+describe('Career bank items through the API', () => {
   let container: StartedPostgreSqlContainer;
   let handle: DbHandle;
   let server: Server;

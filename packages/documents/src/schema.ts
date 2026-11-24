@@ -25,6 +25,9 @@ export type FileKind = (typeof FILE_KINDS)[number];
 export const MASTER_KINDS = ['master_resume', 'master_cover_letter'] as const;
 export type MasterKind = (typeof MASTER_KINDS)[number];
 
+/** Kinds with exactly one item per user: a write to them updates it. */
+export const SINGLETON_KINDS: readonly CareerItemKind[] = ['writing_style', 'contact'];
+
 export const CAREER_ITEM_KINDS = [
   'work_experience',
   'experience_point',
@@ -112,7 +115,7 @@ export const careerItems = documentsSchema.table(
     // One Writing style profile and one set of contact details per user.
     uniqueIndex('career_items_singleton')
       .on(t.userId, t.kind)
-      .where(sql`${t.kind} in ('writing_style', 'contact')`),
+      .where(sql`${t.kind} in (${inList(SINGLETON_KINDS)})`),
     check('career_items_kind', sql`${t.kind} in (${inList(CAREER_ITEM_KINDS)})`),
   ],
 );

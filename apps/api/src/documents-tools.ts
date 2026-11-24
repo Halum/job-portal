@@ -2,8 +2,10 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { User } from '@job-portal/accounts';
 import {
+  CAREER_EDIT_REASONS,
   CAREER_ITEM_KINDS,
   DocumentsError,
+  REVISION_REASONS,
   MASTER_KINDS,
   REVISION_ACTORS,
   careerBankImport,
@@ -100,9 +102,7 @@ export function registerDocumentsTools(
       try {
         return ok({ file: fileJson(await documents.registerMaster(user.id, kind, fileId)) });
       } catch (err) {
-        if (err instanceof DocumentsError) return refusal(err.message);
-        logger.error({ err }, 'register_master_document failed');
-        return refusal('register_master_document failed');
+        return failed(err, 'register_master_document');
       }
     },
   );
@@ -177,7 +177,7 @@ export function registerDocumentsTools(
         itemId: z.uuid().optional(),
         parentId: z.uuid().optional(),
         value: z.record(z.string(), z.unknown()),
-        reason: z.enum(['coaching', 'enrichment', 'user_edit']),
+        reason: z.enum(CAREER_EDIT_REASONS),
         actor: actorIn,
       },
       outputSchema: itemOut,
@@ -239,8 +239,8 @@ export function registerDocumentsTools(
             itemId: z.string(),
             oldValue: z.record(z.string(), z.unknown()).nullable(),
             newValue: z.record(z.string(), z.unknown()),
-            reason: z.string(),
-            actor: z.string(),
+            reason: z.enum(REVISION_REASONS),
+            actor: z.enum(REVISION_ACTORS),
             createdAt: z.string().describe('ISO 8601 timestamp, UTC'),
           }),
         ),

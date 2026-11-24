@@ -7,6 +7,7 @@ import {
   fileBytes,
   files,
   masterDocuments,
+  SINGLETON_KINDS,
   type CareerItemKind,
   type FileKind,
   type MasterKind,
@@ -31,8 +32,8 @@ export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 export const CAREER_LIMITS = {
   text: 1000,
   short: 200,
-  skill: 60,
-  skills: 20,
+  labelLength: 60,
+  labels: 20,
   points: 50,
   experiences: 50,
   entries: 100,
@@ -59,12 +60,12 @@ export type WorkExperienceValue = z.infer<typeof workExperienceValue>;
 /** The stored value of an Experience point; skills are its labels. */
 export const experiencePointValue = z.object({
   text: z.string().min(1).max(CAREER_LIMITS.text),
-  skills: z.array(z.string().min(1).max(CAREER_LIMITS.skill)).max(CAREER_LIMITS.skills),
+  skills: z.array(z.string().min(1).max(CAREER_LIMITS.labelLength)).max(CAREER_LIMITS.labels),
 });
 export type ExperiencePointValue = z.infer<typeof experiencePointValue>;
 
 const short = z.string().min(1).max(CAREER_LIMITS.short);
-const label = z.string().min(1).max(CAREER_LIMITS.skill);
+const label = z.string().min(1).max(CAREER_LIMITS.labelLength);
 
 /** The stored value of a Resume entry; the fields depend on its kind. */
 export const resumeEntryValue = z.discriminatedUnion('kind', [
@@ -94,8 +95,8 @@ export type OutlineSectionValue = z.infer<typeof outlineSectionValue>;
 /** The stored value of a Cover letter paragraph; themes and skills are its labels. */
 export const coverLetterParagraphValue = z.object({
   text: z.string().min(1).max(CAREER_LIMITS.text),
-  themes: z.array(label).max(CAREER_LIMITS.skills),
-  skills: z.array(label).max(CAREER_LIMITS.skills),
+  themes: z.array(label).max(CAREER_LIMITS.labels),
+  skills: z.array(label).max(CAREER_LIMITS.labels),
 });
 export type CoverLetterParagraphValue = z.infer<typeof coverLetterParagraphValue>;
 
@@ -128,7 +129,7 @@ export const contactValue = z.object({
 });
 export type ContactValue = z.infer<typeof contactValue>;
 
-/** One zod schema per item kind: import, edits, revisions and the MCP output all parse with it. */
+/** One zod schema per item kind: the import, every edit and a restore parse with it, and `getCareerBank` parses stored values with it. */
 const VALUE_SCHEMAS: Record<CareerItemKind, z.ZodType> = {
   work_experience: workExperienceValue,
   experience_point: experiencePointValue,
@@ -144,9 +145,6 @@ const PARENT_KIND: Partial<Record<CareerItemKind, CareerItemKind>> = {
   experience_point: 'work_experience',
   cover_letter_paragraph: 'outline_section',
 };
-
-/** Kinds with exactly one item per user: a write to them updates it. */
-const SINGLETON_KINDS: readonly CareerItemKind[] = ['writing_style', 'contact'];
 
 /** A reviewed parse of the Master resume and Master cover letter. Every part is optional, but not all of them. */
 export const careerBankImport = z.object({
@@ -171,6 +169,9 @@ export const careerBankImport = z.object({
   contact: contactValue.optional(),
 });
 export type CareerBankImport = z.infer<typeof careerBankImport>;
+
+/** The reasons a caller may give to `upsertItem`; import, hide and restore are written by their own calls. */
+export const CAREER_EDIT_REASONS = ['coaching', 'enrichment', 'user_edit'] as const;
 
 export class DocumentsError extends Error {
   constructor(
@@ -303,7 +304,7 @@ export interface UpsertItemInput {
   /** The Work experience of an Experience point, or the outline section of a Cover letter paragraph. */
   parentId?: string;
   value: unknown;
-  reason: 'coaching' | 'enrichment' | 'user_edit';
+  reason: (typeof CAREER_EDIT_REASONS)[number];
   actor: RevisionActor;
 }
 
@@ -618,6 +619,9 @@ export function createDocuments(db: Db): Documents {
         }
         const parent = await ownedItem(tx, userId, input.parentId);
         if (parent.kind !== parentKind) throw new DocumentsError('not_found', NOT_FOUND);
+        if (parent.hidden) {
+          throw new DocumentsError('invalid_argument', 'the parent is hidden, restore it first');
+        }
         return insertItem(tx, userId, kind, parent.id, value, input.reason, input.actor);
       });
     },
