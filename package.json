@@ -18,8 +18,8 @@
     "test:coverage": "vitest run --coverage",
     "prepare": "sh scripts/prepare-hooks.sh",
     "db:generate": "pnpm --filter @job-portal/accounts db:generate",
-    "dev:api": "tsx watch apps/api/src/main.ts",
-    "dev:worker": "tsx watch apps/worker/src/main.ts"
+    "dev:api": "tsx watch --env-file-if-exists=.env apps/api/src/main.ts",
+    "dev:worker": "tsx watch --env-file-if-exists=.env apps/worker/src/main.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

@@ -10,7 +10,6 @@ Needs Node 24, pnpm 9 and Docker.
 pnpm install
 docker compose up -d          # throwaway Postgres 16 and Redis 7
 cp .env.example .env          # then set MCP_BEARER_TOKEN
-set -a; . ./.env; set +a      # export the variables to your shell
 pnpm dev:api                  # migrates, seeds one user, serves MCP at http://localhost:3000/mcp
 pnpm dev:worker               # connects to Redis and logs ready
 docker compose down           # wipes everything
