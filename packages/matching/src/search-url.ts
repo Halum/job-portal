@@ -29,7 +29,11 @@ export function parseSearchUrl(raw: string): { query: SearchQuery } | { error: s
     if (value !== null && value.trim() !== '') query[key] = value;
   }
   const km = url.searchParams.get('umkreis');
-  if (km !== null && /^\d{1,3}$/.test(km)) query.umkreis = Number(km);
+  if (km !== null) {
+    if (!/^\d{1,3}$/.test(km))
+      return { error: 'umkreis must be a whole number of kilometres, up to three digits' };
+    query.umkreis = Number(km);
+  }
   // A search with no usable parameter would fetch the whole country; Targets never do that either (ADR 0009).
   if (Object.keys(query).length === 0)
     return {

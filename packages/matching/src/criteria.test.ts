@@ -156,6 +156,8 @@ describe('bundesagenturSearches', () => {
     'https://www.arbeitsagentur.de/jobsuche/suche',
     'https://www.arbeitsagentur.de/jobsuche/suche?foo=bar',
     'not a url',
+    'https://www.arbeitsagentur.de/jobsuche/suche?wo=Musterstadt&umkreis=abc',
+    'https://www.arbeitsagentur.de/jobsuche/suche?wo=Musterstadt&umkreis=',
   ])('refuses %s', (url) => {
     expect(criteriaPatchSchema.safeParse({ bundesagenturSearches: [url] }).success).toBe(false);
   });

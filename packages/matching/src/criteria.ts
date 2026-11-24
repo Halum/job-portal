@@ -6,12 +6,13 @@ export const MAX_WORD_LENGTH = 100;
 const words = z.array(z.string().trim().min(1).max(MAX_WORD_LENGTH)).max(MAX_WORDS).nullable();
 
 export const MAX_SEARCH_URLS = 20;
+export const MAX_SEARCH_URL_LENGTH = 2000;
 const searchUrls = z
   .array(
     z
       .string()
       .trim()
-      .max(2000)
+      .max(MAX_SEARCH_URL_LENGTH)
       .superRefine((value, ctx) => {
         const parsed = parseSearchUrl(value);
         if ('error' in parsed) ctx.addIssue({ code: 'custom', message: parsed.error });
