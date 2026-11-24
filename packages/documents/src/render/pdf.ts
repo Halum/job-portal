@@ -1,11 +1,14 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pdfmake, { type Content, type TDocumentDefinitions } from 'pdfmake';
+import { checkPhoto } from './image';
 import {
   LETTER_PAGE_CAP,
   RESUME_PAGE_CAP,
   formatLetterDate,
-  formatMonth,
+  certificateLine,
+  inPlace,
+  present,
   formatRange,
   labels,
   letterContent,
@@ -79,7 +82,7 @@ export async function renderResumePdf(
   const c = resumeContent.parse(input);
   const l = labels(c.locale);
   const h = c.header;
-  const contact = [h.address, h.phone, h.email, ...h.links].filter((x): x is string => Boolean(x));
+  const contact = present([h.address, h.phone, h.email, ...h.links]);
   const headerText: Content = {
     stack: [
       { text: h.name, style: 'name' },
@@ -113,7 +116,7 @@ export async function renderResumePdf(
           {
             text: [
               { text: e.role, style: 'title' },
-              { text: `, ${e.organisation}${e.place ? ` (${e.place})` : ''}` },
+              { text: `, ${e.organisation}${inPlace(e.place)}` },
             ],
           },
           {
@@ -135,18 +138,14 @@ export async function renderResumePdf(
       {
         text: [
           { text: e.degree, style: 'title' },
-          { text: `, ${e.institution}${e.place ? ` (${e.place})` : ''}` },
+          { text: `, ${e.institution}${inPlace(e.place)}` },
         ],
       },
       { text: formatRange(e.start, e.end, ''), style: 'muted', alignment: 'right', width: 'auto' },
     ],
   }));
   const languages = c.languages.map((x): Content => ({ text: `${x.language}: ${x.level}` }));
-  const certificates = c.certificates.map((x): Content => ({
-    text: [x.name, x.issuer ? `, ${x.issuer}` : '', x.date ? ` (${formatMonth(x.date)})` : ''].join(
-      '',
-    ),
-  }));
+  const certificates = c.certificates.map((x): Content => ({ text: certificateLine(x) }));
 
   return build(
     {
@@ -166,8 +165,8 @@ export async function renderResumePdf(
 }
 
 function photoDataUri(photo: Buffer): string {
-  const png = photo.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
-  return `data:image/${png ? 'png' : 'jpeg'};base64,${photo.toString('base64')}`;
+  const { type } = checkPhoto(photo);
+  return `data:image/${type};base64,${photo.toString('base64')}`;
 }
 
 export async function renderLetterPdf(input: LetterContent): Promise<RenderedPdf> {
@@ -175,7 +174,6 @@ export async function renderLetterPdf(input: LetterContent): Promise<RenderedPdf
   const s = c.sender;
   const r = c.recipient;
   const dateText = formatLetterDate(c.date, c.place);
-  const present = (xs: (string | null | undefined)[]) => xs.filter((x): x is string => Boolean(x));
   const lines = (xs: (string | null | undefined)[]): Content[] =>
     present(xs).map((text) => ({ text }));
   return build(

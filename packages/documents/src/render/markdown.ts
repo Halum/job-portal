@@ -1,6 +1,8 @@
 import {
   formatLetterDate,
-  formatMonth,
+  certificateLine,
+  inPlace,
+  present,
   formatRange,
   labels,
   letterContent,
@@ -9,8 +11,6 @@ import {
   type LetterContent,
   type ResumeContent,
 } from './content';
-
-const present = (xs: (string | null | undefined)[]) => xs.filter((x): x is string => Boolean(x));
 
 // Markdown is derived from the structured content, never stored on its own, so it cannot drift from the PDF.
 export function resumeMarkdown(input: ResumeContent): string {
@@ -28,7 +28,7 @@ export function resumeMarkdown(input: ResumeContent): string {
     l.experience,
     newestFirst(c.experiences).map((e) =>
       [
-        `### ${e.role}, ${e.organisation}${e.place ? ` (${e.place})` : ''}`,
+        `### ${e.role}, ${e.organisation}${inPlace(e.place)}`,
         formatRange(e.start, e.end, l.present),
         ...e.points.map((p) => `- ${p}`),
       ].join('\n'),
@@ -37,7 +37,7 @@ export function resumeMarkdown(input: ResumeContent): string {
   block(
     l.education,
     c.education.map((e) =>
-      `- ${e.degree}, ${e.institution}${e.place ? ` (${e.place})` : ''} ${formatRange(e.start, e.end, '')}`.trimEnd(),
+      `- ${e.degree}, ${e.institution}${inPlace(e.place)} ${formatRange(e.start, e.end, '')}`.trimEnd(),
     ),
   );
   block(l.skills, c.skills.length ? [c.skills.join(', ')] : []);
@@ -47,10 +47,7 @@ export function resumeMarkdown(input: ResumeContent): string {
   );
   block(
     l.certificates,
-    c.certificates.map(
-      (x) =>
-        `- ${x.name}${x.issuer ? `, ${x.issuer}` : ''}${x.date ? ` (${formatMonth(x.date)})` : ''}`,
-    ),
+    c.certificates.map((x) => `- ${certificateLine(x)}`),
   );
   return out.join('\n') + '\n';
 }

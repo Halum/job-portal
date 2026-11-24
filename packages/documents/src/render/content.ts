@@ -59,7 +59,6 @@ export const resumeContent = z.object({
     .default([]),
 });
 export type ResumeContent = z.input<typeof resumeContent>;
-export type ParsedResume = z.output<typeof resumeContent>;
 
 export const letterContent = z.object({
   locale,
@@ -74,7 +73,6 @@ export const letterContent = z.object({
   signature: line,
 });
 export type LetterContent = z.input<typeof letterContent>;
-export type ParsedLetter = z.output<typeof letterContent>;
 
 export const RESUME_PAGE_CAP = 2;
 export const LETTER_PAGE_CAP = 1;
@@ -121,6 +119,25 @@ export function formatRange(
 // 2026-11-25 becomes 25.11.2026, prefixed with the place when there is one
 export function formatLetterDate(date: string, place?: string | null): string {
   return `${place ? `${place}, ` : ''}${date.slice(8, 10)}.${date.slice(5, 7)}.${date.slice(0, 4)}`;
+}
+
+// Drops empty parts so a missing address or phone leaves no gap
+export function present(xs: (string | null | undefined)[]): string[] {
+  return xs.filter((x): x is string => Boolean(x));
+}
+
+// "Bamberg" becomes " (Bamberg)", nothing becomes ""
+export function inPlace(place: string | null | undefined): string {
+  return place ? ` (${place})` : '';
+}
+
+// "Hygiene course, Health office (05/2020)"
+export function certificateLine(x: {
+  name: string;
+  issuer?: string | null;
+  date?: string | null;
+}): string {
+  return `${x.name}${x.issuer ? `, ${x.issuer}` : ''}${x.date ? ` (${formatMonth(x.date)})` : ''}`;
 }
 
 // Newest first: current roles lead, then by end month, then by start month.

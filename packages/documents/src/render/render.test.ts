@@ -4,6 +4,28 @@ import { sampleLetter, sampleResume } from './fixtures';
 import { extractPages } from './pdf-text';
 import type { LetterContent, ResumeContent } from './content';
 
+// A PNG header that declares a huge picture in a few bytes: the signature and an IHDR chunk, no pixel data.
+function pngHeader(width: number, height: number): Buffer {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]),
+    Buffer.from('IHDR'),
+    ihdr,
+  ]);
+}
+
+// A JPEG header with a baseline start-of-frame segment that declares the size.
+function jpegHeader(width: number, height: number): Buffer {
+  const sof = Buffer.alloc(15);
+  sof.writeUInt16BE(17, 0);
+  sof[2] = 8;
+  sof.writeUInt16BE(height, 3);
+  sof.writeUInt16BE(width, 5);
+  return Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xc0]), sof]);
+}
+
 const PHOTO = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   'base64',
@@ -14,6 +36,7 @@ describe('renderResumePdf', () => {
     const out = await renderResumePdf(sampleResume);
     const text = (await extractPages(out.pdf)).join('\n');
     expect(out.pages).toBe(1);
+    expect((await extractPages(out.pdf)).length).toBe(out.pages);
     expect(out.overCap).toBe(false);
     expect(text).toContain('Mia Müller-Süß');
     expect(text).toContain('mia.mueller@example.test');
@@ -50,6 +73,21 @@ describe('renderResumePdf', () => {
     expect(withPhoto.pdf.includes('/Subtype /Image')).toBe(true);
   });
 
+  it('refuses a photo that declares huge dimensions before decoding it', async () => {
+    await expect(renderResumePdf(sampleResume, { photo: pngHeader(12000, 12000) })).rejects.toThrow(
+      /too large/,
+    );
+    await expect(
+      renderResumePdf(sampleResume, { photo: jpegHeader(12000, 12000) }),
+    ).rejects.toThrow(/too large/);
+  });
+
+  it('refuses photo bytes that are neither PNG nor JPEG', async () => {
+    await expect(
+      renderResumePdf(sampleResume, { photo: Buffer.from('<svg></svg>') }),
+    ).rejects.toThrow(/PNG or JPEG/);
+  });
+
   it('reports a long resume over the 2 page cap and never cuts content', async () => {
     const long: ResumeContent = {
       ...sampleResume,
@@ -67,6 +105,7 @@ describe('renderResumePdf', () => {
     };
     const out = await renderResumePdf(long);
     const text = (await extractPages(out.pdf)).join(' ');
+    expect((await extractPages(out.pdf)).length).toBe(out.pages);
     expect(out.pages).toBeGreaterThan(2);
     expect(out.overCap).toBe(true);
     for (let i = 1; i <= 12; i++) expect(text).toContain(`Aufgabe 6 von Stelle ${String(i)}`);
@@ -84,8 +123,11 @@ describe('renderLetterPdf', () => {
     const out = await renderLetterPdf(sampleLetter);
     const text = (await extractPages(out.pdf)).join(' ');
     expect(out.pages).toBe(1);
+    expect((await extractPages(out.pdf)).length).toBe(out.pages);
     expect(out.overCap).toBe(false);
     for (const s of [
+      'Mia Müller-Süß',
+      'mia.mueller@example.test',
       'Bewerbung als Küchenhilfe',
       'Sehr geehrte Frau Schäfer,',
       'Großküche',
@@ -107,6 +149,7 @@ describe('renderLetterPdf', () => {
     };
     const out = await renderLetterPdf(long);
     const text = (await extractPages(out.pdf)).join(' ');
+    expect((await extractPages(out.pdf)).length).toBe(out.pages);
     expect(out.pages).toBeGreaterThan(1);
     expect(out.overCap).toBe(true);
     expect(text).toContain('Absatz 12:');
