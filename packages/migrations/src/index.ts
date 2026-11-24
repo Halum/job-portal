@@ -3,6 +3,7 @@ import type { ModuleMigrations } from '@job-portal/db';
 import { boardsMigrations } from '@job-portal/boards';
 import { discoveryMigrations } from '@job-portal/discovery';
 import { pipelineMigrations } from '@job-portal/pipeline';
+import { trackerMigrations } from '@job-portal/tracker';
 
 /** Every module's migrations, in the order a process applies them. Add a new module here. */
 export const allMigrations: ModuleMigrations[] = [
@@ -10,4 +11,5 @@ export const allMigrations: ModuleMigrations[] = [
   discoveryMigrations,
   boardsMigrations,
   pipelineMigrations,
+  trackerMigrations,
 ];

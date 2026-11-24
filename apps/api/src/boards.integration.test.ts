@@ -16,6 +16,7 @@ import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import { createDiscovery } from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
 import { createPipeline } from '@job-portal/pipeline';
+import { createTracker } from '@job-portal/tracker';
 import { createLogger } from '@job-portal/shared';
 import { createApiServer } from './server';
 
@@ -68,6 +69,7 @@ describe('Watchlist and add_board over MCP (recorded ATS responses, real Postgre
       accounts,
       discovery,
       pipeline: createPipeline(handle.db, discovery),
+      tracker: createTracker(handle.db, discovery),
       boards: { directory, watchlist, fetch: fakeFetch },
       logger: createLogger({ level: 'silent' }),
     });

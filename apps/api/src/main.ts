@@ -6,6 +6,7 @@ import { createDb, runMigrationsWithLock } from '@job-portal/db';
 import { createDiscovery, createRateLimitedFetch, createRedisSlots } from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
 import { createPipeline } from '@job-portal/pipeline';
+import { createTracker } from '@job-portal/tracker';
 import { createLogger } from '@job-portal/shared';
 import { createApiServer } from './server';
 
@@ -28,10 +29,13 @@ const boards = {
     slots: createRedisSlots(new Redis(config.redisUrl)),
   }),
 };
-createApiServer({ accounts, discovery, pipeline, boards, logger }).listen(
-  config.port,
-  config.host,
-  () => {
-    logger.info({ host: config.host, port: config.port }, 'api ready, MCP at /mcp');
-  },
-);
+createApiServer({
+  accounts,
+  discovery,
+  pipeline,
+  tracker: createTracker(db, discovery),
+  boards,
+  logger,
+}).listen(config.port, config.host, () => {
+  logger.info({ host: config.host, port: config.port }, 'api ready, MCP at /mcp');
+});

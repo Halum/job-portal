@@ -14,6 +14,7 @@ import { allMigrations } from '@job-portal/migrations';
 import { createPipeline } from '@job-portal/pipeline';
 import { createLogger } from '@job-portal/shared';
 import { createApiServer } from '@job-portal/api';
+import { createTracker } from '@job-portal/tracker';
 import { startWorker, type WorkerHandle } from './worker';
 
 // Tracer bullet: Bundesagentur (recorded response) -> BullMQ schedule -> Pipeline -> Discovery
@@ -67,6 +68,7 @@ describe('Bundesagentur source to MCP list_jobs', () => {
       accounts,
       discovery,
       pipeline,
+      tracker: createTracker(handle.db, discovery),
       boards: { directory: createBoardDirectory(handle.db), watchlist: createWatchlist(handle.db) },
       logger,
     });

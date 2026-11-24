@@ -11,6 +11,7 @@ import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import { createBundesagenturSource, createDiscovery } from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
 import { createPipeline } from '@job-portal/pipeline';
+import { createTracker } from '@job-portal/tracker';
 import { createLogger } from '@job-portal/shared';
 import { createApiServer } from './server';
 
@@ -49,6 +50,7 @@ describe('MCP endpoint over real HTTP', () => {
       accounts,
       discovery,
       pipeline,
+      tracker: createTracker(handle.db, discovery),
       boards: { directory: createBoardDirectory(handle.db), watchlist: createWatchlist(handle.db) },
       logger: createLogger({ level: 'silent' }),
     });
@@ -78,11 +80,14 @@ describe('MCP endpoint over real HTTP', () => {
     expect(names).toEqual([
       'add_board',
       'add_job',
+      'add_note',
       'get_job',
       'get_run_history',
       'get_watchlist',
       'list_jobs',
+      'set_status',
       'split_job',
+      'undo_last_change',
       'update_watchlist',
       'whoami',
     ]);
@@ -187,6 +192,139 @@ describe('MCP endpoint over real HTTP', () => {
       arguments: { jobId: newJobId, postingIds: [moved] },
     });
     expect(refused.isError).toBe(true);
+    await client.close();
+  });
+
+  const call = async (client: Client, name: string, args: Record<string, unknown>) => {
+    const res = await client.callTool({ name, arguments: args });
+    return {
+      isError: res.isError === true,
+      out: res.structuredContent as never,
+      text: JSON.stringify(res.content),
+    };
+  };
+
+  it('tracks a Job: set_status, a refused second Applied, notes, undo, and the timeline in get_job', async () => {
+    const client = await connect();
+    const { out: added } = await call(client, 'add_job', {
+      title: 'Spüler',
+      url: 'https://z.example.invalid/1',
+    });
+    const jobId = (added as { jobId: string }).jobId;
+
+    expect(
+      (await call(client, 'set_status', { jobId, discoveryState: 'shortlisted' })).isError,
+    ).toBe(false);
+    const applied = await call(client, 'set_status', {
+      jobId,
+      applicationStatus: 'applied',
+      appliedOn: '2026-11-01',
+      applyBy: '2026-12-01',
+      actor: 'skill',
+    });
+    expect(applied.out).toMatchObject({
+      tracking: {
+        applicationStatus: 'applied',
+        furthestStage: 'applied',
+        appliedOn: '2026-11-01',
+        applyBy: '2026-12-01',
+      },
+    });
+    const again = await call(client, 'set_status', { jobId, applicationStatus: 'applied' });
+    expect(again.isError).toBe(true);
+    expect(again.text).toContain('already applied on 2026-11-01');
+    expect((await call(client, 'set_status', { jobId })).isError).toBe(true);
+    expect(
+      (
+        await call(client, 'set_status', {
+          jobId,
+          discoveryState: 'new',
+          applicationStatus: 'applied',
+        })
+      ).isError,
+    ).toBe(true);
+    expect(
+      (
+        await call(client, 'set_status', {
+          jobId: '00000000-0000-4000-8000-0000000000ff',
+          discoveryState: 'new',
+        })
+      ).isError,
+    ).toBe(true);
+
+    await call(client, 'add_note', { jobId, text: 'phoned them' });
+    const got = (await call(client, 'get_job', { jobId })).out as {
+      job: {
+        tracking: { applicationStatus: string };
+        timeline: { to: string; actor: string }[];
+        notes: { text: string }[];
+      };
+    };
+    expect(got.job.tracking.applicationStatus).toBe('applied');
+    expect(got.job.timeline.map((e) => [e.to, e.actor])).toEqual([
+      ['shortlisted', 'user'],
+      ['applied', 'skill'],
+    ]);
+    expect(got.job.notes.map((n) => n.text)).toEqual(['phoned them']);
+
+    const undone = await call(client, 'undo_last_change', { jobId });
+    expect(undone.out).toMatchObject({
+      tracking: { applicationStatus: null, furthestStage: null },
+    });
+    const twice = await call(client, 'undo_last_change', { jobId });
+    expect(twice.isError).toBe(true);
+    expect(twice.text).toContain('already an undo');
+    await call(client, 'set_status', {
+      jobId,
+      applicationStatus: 'applied',
+      appliedOn: '2026-11-01',
+      applyBy: '2026-12-01',
+    });
+    await client.close();
+  });
+
+  it('list_jobs filters by discovery state, application status, apply-by and discovered date, and pages the result', async () => {
+    const client = await connect();
+    const ids = async (
+      args: Record<string, unknown>,
+    ): Promise<{ ids: string[]; next: string | null; states: string[] }> => {
+      const { out } = await call(client, 'list_jobs', args);
+      const o = out as {
+        jobs: { id: string; tracking: { discoveryState: string } }[];
+        nextCursor: string | null;
+      };
+      return {
+        ids: o.jobs.map((j) => j.id),
+        next: o.nextCursor,
+        states: o.jobs.map((j) => j.tracking.discoveryState),
+      };
+    };
+    const applied = await ids({ applicationStatus: 'applied' });
+    expect(applied.ids).toHaveLength(1);
+    expect((await ids({ discoveryState: 'shortlisted' })).ids).toEqual(applied.ids);
+    expect((await ids({ applyByBefore: '2026-12-31' })).ids).toEqual(applied.ids);
+    expect((await ids({ applyByBefore: '2026-11-30' })).ids).toEqual([]);
+    expect((await ids({ discoveredSince: '2999-01-01T00:00:00Z' })).ids).toEqual([]);
+    expect((await ids({ discoveredSince: '2000-01-01T00:00:00Z' })).ids.length).toBeGreaterThan(5);
+
+    const first = await ids({ discoveryState: 'new', limit: 2 });
+    expect(first.ids).toHaveLength(2);
+    expect(first.states).toEqual(['new', 'new']);
+    expect(first.next).not.toBeNull();
+    const second = await ids({ discoveryState: 'new', limit: 2, cursor: first.next });
+    expect(second.ids.every((i) => !first.ids.includes(i) && !applied.ids.includes(i))).toBe(true);
+    await client.close();
+  });
+
+  it('a Dismissed Job stays as a marker: a later copy merges into it instead of creating a Job', async () => {
+    const client = await connect();
+    const input = { title: 'Barista', company: 'Marker GmbH', city: 'Ort' };
+    const first = (await call(client, 'add_job', { ...input, url: 'https://m.example.invalid/1' }))
+      .out as { jobId: string };
+    await call(client, 'set_status', { jobId: first.jobId, discoveryState: 'dismissed' });
+    const copy = (await call(client, 'add_job', { ...input, url: 'https://n.example.invalid/2' }))
+      .out as { jobId: string };
+    expect(copy.jobId).toBe(first.jobId);
     await client.close();
   });
 
