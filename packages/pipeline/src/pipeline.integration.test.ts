@@ -74,15 +74,26 @@ describe('pipeline against real Postgres', () => {
     expect((await pipeline().execute(USER, 'src-d'))?.status).toBe('completed');
   });
 
-  it('marks runs left running as failed on start, and leaves finished runs alone', async () => {
+  it("on start fails only runs older than the time bound, so another worker's live run survives", async () => {
     poll = () => new Promise(() => undefined); // never finishes: simulates a crashed worker
     void pipeline().execute(USER, 'src-e');
     await new Promise((r) => setTimeout(r, 100));
-    expect(await pipeline().failStaleRuns()).toBe(1);
 
+    // A second worker starting now sees a fresh run: it must not touch it.
+    expect(await pipeline().failStaleRuns()).toBe(0);
+    expect((await pipeline().listRuns(USER, 50)).find((r) => r.sourceId === 'src-e')?.status).toBe(
+      'running',
+    );
+
+    // Once the run is older than the bound, the sweep fails it, and only it.
+    const patient = createPipeline(handle.db, { poll: (u, s) => poll(u, s) }, { staleAfterMs: 50 });
+    expect(await patient.failStaleRuns()).toBe(1);
     const runs = await pipeline().listRuns(USER, 50);
     const stale = runs.find((r) => r.sourceId === 'src-e');
-    expect(stale).toMatchObject({ status: 'failed', errors: ['worker stopped during the run'] });
+    expect(stale).toMatchObject({
+      status: 'failed',
+      errors: ['run did not finish within the time bound'],
+    });
     expect(stale?.finishedAt).toBeInstanceOf(Date);
     expect(runs.find((r) => r.sourceId === 'src-a')?.status).toBe('completed');
     // The source is free again.

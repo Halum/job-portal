@@ -100,7 +100,7 @@ describe('worker against real Postgres and Redis', () => {
     await queue.close();
   });
 
-  it('marks runs left running as failed when it starts', async () => {
+  it('on start fails runs older than the time bound and leaves a live run of another worker', async () => {
     const hanging = createPipeline(handle.db, { poll: () => new Promise(() => undefined) });
     void hanging.execute(USER, 'left-behind');
     await eventually(async () =>
@@ -108,11 +108,22 @@ describe('worker against real Postgres and Redis', () => {
         (r) => r.sourceId === 'left-behind' && r.status === 'running',
       ),
     );
+    const statusOf = async (): Promise<string | undefined> =>
+      (await pipeline.listRuns(USER, 50)).find((r) => r.sourceId === 'left-behind')?.status;
 
-    worker = await start([]);
+    await (await start([])).close(); // a second worker starts: the run is fresh, so it survives
+    expect(await statusOf()).toBe('running');
 
-    const runs = await pipeline.listRuns(USER, 50);
-    expect(runs.find((r) => r.sourceId === 'left-behind')).toMatchObject({ status: 'failed' });
+    await new Promise((r) => setTimeout(r, 100));
+    const impatient = createPipeline(handle.db, discovery, { staleAfterMs: 50 });
+    worker = await startWorker({
+      redisUrl: redis.getConnectionUrl(),
+      pipeline: impatient,
+      userId: USER,
+      sources: [],
+      logger,
+    });
+    expect(await statusOf()).toBe('failed');
   });
 
   it('fails fast when Redis is unreachable', async () => {

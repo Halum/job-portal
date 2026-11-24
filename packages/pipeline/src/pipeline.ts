@@ -1,4 +1,4 @@
-import { and, desc, eq, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '@job-portal/db';
 import type { Discovery } from '@job-portal/discovery';
 import { runs, type RunStatus } from './schema';
@@ -20,7 +20,10 @@ export interface Pipeline {
    * user and source is already active.
    */
   execute: (userId: string, sourceId: string) => Promise<Run | null>;
-  /** Marks every run left "running" as failed; call once on worker start. Returns how many. */
+  /**
+   * Fails runs left "running" for longer than the time bound; call on worker start. A fresh run,
+   * which may belong to another live worker, is left alone. Returns how many.
+   */
   failStaleRuns: () => Promise<number>;
   /** The user's Runs, newest first. */
   listRuns: (userId: string, limit: number) => Promise<Run[]>;
@@ -49,32 +52,38 @@ const DEFAULT_STALE_AFTER_MS = 60 * 60 * 1000;
 
 /**
  * ponytail: the only stage is Discovery (fetch and store). Matching, Review and Notifications
- * join the run in later tickets. failStaleRuns assumes one worker process; with several, it would
- * fail another worker's live run.
+ * join the run in later tickets. Any number of workers may share one database: the unique index
+ * allows one running run per source, and only runs older than the time bound are ever failed as lost.
  */
 export function createPipeline(
   db: Db,
   discovery: Pick<Discovery, 'poll'>,
   { staleAfterMs = DEFAULT_STALE_AFTER_MS }: PipelineOptions = {},
 ): Pipeline {
+  /** Fails runs still "running" past the time bound that also match `scope`; returns how many. */
+  const failLost = async (...scope: (SQL | undefined)[]): Promise<number> => {
+    const failed = await db
+      .update(runs)
+      .set({
+        status: 'failed',
+        errors: ['run did not finish within the time bound'],
+        finishedAt: sql`now()`,
+      })
+      .where(
+        and(
+          eq(runs.status, 'running'),
+          lt(runs.startedAt, sql`now() - ${staleAfterMs} * interval '1 millisecond'`),
+          ...scope,
+        ),
+      )
+      .returning({ id: runs.id });
+    return failed.length;
+  };
+
   return {
     async execute(userId, sourceId) {
       // A lost run would otherwise hold the one-active-run index until the next worker start.
-      await db
-        .update(runs)
-        .set({
-          status: 'failed',
-          errors: ['run did not finish within the time bound'],
-          finishedAt: sql`now()`,
-        })
-        .where(
-          and(
-            eq(runs.userId, userId),
-            eq(runs.sourceId, sourceId),
-            eq(runs.status, 'running'),
-            lt(runs.startedAt, sql`now() - ${staleAfterMs} * interval '1 millisecond'`),
-          ),
-        );
+      await failLost(eq(runs.userId, userId), eq(runs.sourceId, sourceId));
       const [started] = await db
         .insert(runs)
         .values({ userId, sourceId, status: 'running' })
@@ -115,17 +124,8 @@ export function createPipeline(
       }
     },
 
-    async failStaleRuns() {
-      const failed = await db
-        .update(runs)
-        .set({
-          status: 'failed',
-          errors: ['worker stopped during the run'],
-          finishedAt: sql`now()`,
-        })
-        .where(eq(runs.status, 'running'))
-        .returning({ id: runs.id });
-      return failed.length;
+    failStaleRuns() {
+      return failLost();
     },
 
     listRuns(userId, limit) {
