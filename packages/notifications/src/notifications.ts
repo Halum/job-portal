@@ -76,6 +76,11 @@ export interface Notifications {
    * did not take stays stored and goes out on a later flush.
    */
   sendLines: (userId: string, lines: string[]) => Promise<void>;
+  /**
+   * Opens (failing true) or closes (false) one failure type outside a Pipeline run, such as `gmail_token`.
+   * Each change queues its alert once however many workers race; the alert is sent at once.
+   */
+  setFailure: (userId: string, key: string, failing: boolean) => Promise<void>;
 }
 
 interface DigestEntry {
@@ -443,6 +448,11 @@ export function createNotifications(
   };
 
   return {
+    async setFailure(userId, key, failing) {
+      const changed = failing ? await openFailure(userId, key) : await closeFailure(userId, key);
+      if (changed) await flush(userId);
+    },
+
     async sendLines(userId, lines) {
       if (lines.length === 0) return;
       // Distinct created times keep the lines in the order given (one statement shares one now()).

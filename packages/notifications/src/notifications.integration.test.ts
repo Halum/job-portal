@@ -460,4 +460,15 @@ describe('notifications against real Postgres and a fake webhook', () => {
     ]);
     expect(digests()).toHaveLength(1);
   });
+
+  it('setFailure opens a failure type once and closes it once, each with one alert', async () => {
+    const user = newUser();
+    statuses = [200];
+    const n = make();
+    await n.setFailure(user, 'gmail_token', true);
+    await n.setFailure(user, 'gmail_token', true);
+    await n.setFailure(user, 'gmail_token', false);
+    await n.setFailure(user, 'gmail_token', false);
+    expect(alerts().map((a) => a.text)).toEqual(['Failing: gmail_token', 'Recovered: gmail_token']);
+  });
 });
