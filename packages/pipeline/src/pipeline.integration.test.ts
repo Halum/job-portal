@@ -399,4 +399,110 @@ describe('pipeline against real Postgres', () => {
     expect(runs[0]?.startedAt.getTime()).toBeGreaterThanOrEqual(runs[1]?.startedAt.getTime() ?? 0);
     expect(await pipeline().listRuns(OTHER_USER, 10)).toEqual([]);
   });
+
+  describe('Notifications after a run', () => {
+    interface Report {
+      since: Date;
+      failing: string[];
+      checked: string[];
+    }
+    const withNotifications = (
+      sink: Report[],
+      scoring?: { calls: number; errors: string[] },
+      afterRun: () => Promise<void> = () => Promise.resolve(),
+    ): ReturnType<typeof createPipeline> =>
+      createPipeline(
+        handle.db,
+        { poll: (u, s) => poll(u, s) },
+        {
+          notifications: {
+            afterRun: async (_user, report) => {
+              sink.push(report);
+              await afterRun();
+              return { digestSent: false, alertsSent: 0, unsent: 0 };
+            },
+          },
+          aiRunnerName: 'openrouter',
+          ...(scoring
+            ? {
+                scoring: {
+                  score: () =>
+                    Promise.resolve({
+                      scored: 0,
+                      tagged: 0,
+                      rejections: 0,
+                      calls: scoring.calls,
+                      costUsd: null,
+                      errors: scoring.errors,
+                    }),
+                },
+              }
+            : {}),
+        },
+      );
+
+    it('reports a clean run as checked with nothing failing, with the run start as the instant', async () => {
+      poll = () => Promise.resolve({ fetched: 0, newPostings: 0, jobIds: [], errors: [] });
+      const reports: Report[] = [];
+      const run = await withNotifications(reports).execute(USER, 'src-n1');
+      expect(reports).toEqual([
+        { since: run?.startedAt, failing: [], checked: ['source:src-n1', 'board:src-n1:'] },
+      ]);
+    });
+
+    it('turns board lines and AI error classes into failure types, and checks the AI types only when calls were made', async () => {
+      poll = () =>
+        Promise.resolve({
+          fetched: 0,
+          newPostings: 0,
+          jobIds: [],
+          errors: ['src-n2 board acme: HTTP 404', 'src-n2 board beta-co: HTTP 500'],
+        });
+      const reports: Report[] = [];
+      await withNotifications(reports, {
+        calls: 2,
+        errors: [
+          'fit score failed (rate_limit) for a Job and Target',
+          'fit score failed (rate_limit) for a Job and Target',
+          'fit score failed (bad_output) for a Job and Target',
+        ],
+      }).execute(USER, 'src-n2');
+      expect(reports[0]?.failing.sort()).toEqual([
+        'ai:openrouter:bad_output',
+        'ai:openrouter:rate_limit',
+        'board:src-n2:acme',
+        'board:src-n2:beta-co',
+      ]);
+      expect(reports[0]?.checked).toEqual(['source:src-n2', 'board:src-n2:', 'ai:']);
+
+      const idle: Report[] = [];
+      await withNotifications(idle, { calls: 0, errors: [] }).execute(USER, 'src-n2b');
+      expect(idle[0]?.checked).toEqual(['source:src-n2b', 'board:src-n2b:']);
+    });
+
+    it('a failed run is a failing source and checks nothing else, since boards and the runner were not reached', async () => {
+      poll = () => Promise.reject(new Error('source is down'));
+      const reports: Report[] = [];
+      const run = await withNotifications(reports).execute(USER, 'src-n3');
+      expect(run?.status).toBe('failed');
+      expect(reports[0]).toMatchObject({
+        failing: ['source:src-n3'],
+        checked: ['source:src-n3'],
+      });
+    });
+
+    it('a Notifications crash is an error line, not a failed run', async () => {
+      poll = () => Promise.resolve({ fetched: 1, newPostings: 0, jobIds: [], errors: [] });
+      const run = await withNotifications([], undefined, () =>
+        Promise.reject(new Error('db went away')),
+      ).execute(USER, 'src-n4');
+      expect(run).toMatchObject({ status: 'completed_with_errors', fetched: 1 });
+      expect(run?.errors).toEqual(['notifications failed: db went away']);
+    });
+
+    it('without Notifications nothing changes', async () => {
+      poll = () => Promise.resolve({ fetched: 1, newPostings: 0, jobIds: [], errors: [] });
+      expect((await pipeline().execute(USER, 'src-n5'))?.status).toBe('completed');
+    });
+  });
 });

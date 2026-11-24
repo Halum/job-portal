@@ -15,7 +15,8 @@
     "@job-portal/shared": "workspace:*",
     "drizzle-orm": "0.45.4",
     "zod": "4.6.7",
-    "@job-portal/matching": "workspace:*"
+    "@job-portal/matching": "workspace:*",
+    "@job-portal/notifications": "workspace:*"
   },
   "devDependencies": {
     "drizzle-kit": "0.31.11"

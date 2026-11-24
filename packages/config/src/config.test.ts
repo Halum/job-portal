@@ -25,6 +25,7 @@ describe('loadConfig', () => {
       aiMergeJaccard: 0.6,
       aiMergeMaxCallsPerRun: 20,
       alertThreshold: 70,
+      notifications: null,
     });
   });
 
@@ -203,6 +204,68 @@ describe('loadConfig', () => {
         expect(() => loadConfig({ ...valid, AI_MAX_CALLS_PER_RUN: bad })).toThrow(
           'AI_MAX_CALLS_PER_RUN',
         );
+      }
+    });
+  });
+
+  describe('notifications', () => {
+    const hook = {
+      NOTIFY_WEBHOOK_URL: 'https://hooks.example.invalid/webhook/placeholder',
+      NOTIFY_TOPIC_ID: 'topic-placeholder',
+    };
+
+    it('is off when neither the webhook URL nor the topic id is set, empty counts as unset', () => {
+      expect(loadConfig(valid).notifications).toBeNull();
+      expect(
+        loadConfig({ ...valid, NOTIFY_WEBHOOK_URL: '', NOTIFY_TOPIC_ID: '' }).notifications,
+      ).toBeNull();
+    });
+
+    it('reads both settings with send defaults of 3 attempts and a 1000 ms backoff', () => {
+      expect(loadConfig({ ...valid, ...hook }).notifications).toEqual({
+        webhookUrl: hook.NOTIFY_WEBHOOK_URL,
+        topicId: hook.NOTIFY_TOPIC_ID,
+        maxAttempts: 3,
+        backoffMs: 1000,
+      });
+    });
+
+    it('reads the retry overrides and needs integers (attempts at least 1, backoff 0 or more)', () => {
+      const n = loadConfig({
+        ...valid,
+        ...hook,
+        NOTIFY_MAX_ATTEMPTS: '5',
+        NOTIFY_BACKOFF_MS: '0',
+      }).notifications;
+      expect(n).toMatchObject({ maxAttempts: 5, backoffMs: 0 });
+      for (const bad of ['0', '-1', '1.5', 'abc'])
+        expect(() => loadConfig({ ...valid, ...hook, NOTIFY_MAX_ATTEMPTS: bad })).toThrow(
+          'NOTIFY_MAX_ATTEMPTS',
+        );
+      expect(() => loadConfig({ ...valid, ...hook, NOTIFY_BACKOFF_MS: '-1' })).toThrow(
+        'NOTIFY_BACKOFF_MS',
+      );
+    });
+
+    it('needs the webhook URL and the topic id together', () => {
+      expect(() => loadConfig({ ...valid, NOTIFY_WEBHOOK_URL: hook.NOTIFY_WEBHOOK_URL })).toThrow(
+        'NOTIFY_TOPIC_ID',
+      );
+      expect(() => loadConfig({ ...valid, NOTIFY_TOPIC_ID: hook.NOTIFY_TOPIC_ID })).toThrow(
+        'NOTIFY_WEBHOOK_URL',
+      );
+    });
+
+    it('accepts only an http or https URL, and the error never echoes the URL', () => {
+      for (const bad of ['not a url', 'ftp://hooks.example.invalid/x', 'file:///etc/passwd']) {
+        let message = '';
+        try {
+          loadConfig({ ...valid, ...hook, NOTIFY_WEBHOOK_URL: bad });
+        } catch (err) {
+          message = err instanceof Error ? err.message : '';
+        }
+        expect(message).toContain('NOTIFY_WEBHOOK_URL');
+        expect(message).not.toContain(bad);
       }
     });
   });

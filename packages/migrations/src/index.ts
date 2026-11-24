@@ -4,6 +4,7 @@ import type { ModuleMigrations } from '@job-portal/db';
 import { boardsMigrations } from '@job-portal/boards';
 import { discoveryMigrations } from '@job-portal/discovery';
 import { matchingMigrations } from '@job-portal/matching';
+import { notificationsMigrations } from '@job-portal/notifications';
 import { pipelineMigrations } from '@job-portal/pipeline';
 import { reviewMigrations } from '@job-portal/review';
 import { trackerMigrations } from '@job-portal/tracker';
@@ -15,6 +16,7 @@ export const allMigrations: ModuleMigrations[] = [
   discoveryMigrations,
   boardsMigrations,
   matchingMigrations,
+  notificationsMigrations,
   pipelineMigrations,
   reviewMigrations,
   trackerMigrations,

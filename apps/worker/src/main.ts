@@ -16,6 +16,7 @@ import { createPipeline } from '@job-portal/pipeline';
 import { createReview } from '@job-portal/review';
 import { createTracker } from '@job-portal/tracker';
 import { createLogger } from '@job-portal/shared';
+import { buildNotifications } from './notifications';
 import { buildSources } from './sources';
 import { startWorker } from './worker';
 
@@ -37,9 +38,10 @@ const runner: AiRunner | null =
       ? createOpenRouterRunner({ apiKey: config.ai.apiKey, model: config.ai.model })
       : createClaudeRunner(config.ai);
 const ai = runner === null ? undefined : createAi(createAiLog(db), runner);
+const review = createReview(db);
 const matching = createMatching(db, {
   ...(ai ? { ai } : {}),
-  review: createReview(db),
+  review,
   defaultAlertThreshold: config.alertThreshold,
   maxCallsPerPass: config.aiMaxCallsPerRun,
   loadJobs: (userId, ids) => discovery.listMatchable(userId, ids),
@@ -68,10 +70,17 @@ const { sources, scheduled } = buildSources(config, {
 // Discovery snapshots its Sources, so it is created only now, with every one of them in the list.
 const discovery = createDiscovery(db, sources, logger);
 const tracker = createTracker(db, discovery);
+// Digest and failure alerts go out after each run when a webhook is configured; otherwise the step is skipped.
+const notifications = buildNotifications(db, config.notifications, {
+  matching,
+  discovery,
+  review,
+  log: logger,
+});
 // AI merge checks near-duplicate Jobs through the same runner and raises Review items; nothing merges unconfirmed.
 const aiMerge = createAiMerge(db, {
   ...(ai ? { ai } : {}),
-  review: createReview(db),
+  review,
   hasApplication: async (userId, ids) => {
     const states = await tracker.getStates(userId, ids);
     return new Set(ids.filter((id) => states.get(id)?.applicationStatus != null));
@@ -82,6 +91,8 @@ const aiMerge = createAiMerge(db, {
 const pipeline = createPipeline(db, discovery, {
   matching,
   ...(ai ? { scoring: matching, aiMerge } : {}),
+  ...(notifications ? { notifications } : {}),
+  ...(config.ai ? { aiRunnerName: config.ai.runner } : {}),
 });
 
 const worker = await startWorker({
