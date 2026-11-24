@@ -14,7 +14,8 @@
     "@job-portal/discovery": "workspace:*",
     "@job-portal/shared": "workspace:*",
     "drizzle-orm": "0.45.4",
-    "zod": "4.6.7"
+    "zod": "4.6.7",
+    "@job-portal/matching": "workspace:*"
   },
   "devDependencies": {
     "drizzle-kit": "0.31.11"

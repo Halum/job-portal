@@ -12,6 +12,7 @@
     "@job-portal/discovery": "workspace:*",
     "@job-portal/pipeline": "workspace:*",
     "@job-portal/boards": "workspace:*",
+    "@job-portal/matching": "workspace:*",
     "@job-portal/tracker": "workspace:*"
   }
 }

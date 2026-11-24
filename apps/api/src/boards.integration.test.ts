@@ -16,6 +16,7 @@ import {
 } from '@job-portal/boards';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import { createDiscovery, createRedisLimit } from '@job-portal/discovery';
+import { createMatching } from '@job-portal/matching';
 import { allMigrations } from '@job-portal/migrations';
 import { createPipeline } from '@job-portal/pipeline';
 import { createTracker } from '@job-portal/tracker';
@@ -88,6 +89,9 @@ describe('Watchlist and add_board over MCP (recorded ATS responses, real Postgre
     server = createApiServer({
       accounts,
       discovery,
+      matching: createMatching(handle.db, {
+        loadJobs: (u, ids) => discovery.listMatchable(u, ids),
+      }),
       pipeline: createPipeline(handle.db, discovery),
       tracker: createTracker(handle.db, discovery),
       boards: {

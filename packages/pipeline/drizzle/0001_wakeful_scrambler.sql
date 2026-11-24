@@ -1,0 +1,1 @@
+ALTER TABLE "pipeline"."runs" ADD COLUMN "prerank_passed" integer DEFAULT 0 NOT NULL;

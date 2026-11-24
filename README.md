@@ -17,7 +17,7 @@ docker compose down           # wipes everything
 
 The API listens on `127.0.0.1` by default; set `HOST` (for example to the tailnet IP, or `0.0.0.0`) to reach the MCP endpoint over the tailnet.
 
-Call the endpoint with `Authorization: Bearer <MCP_BEARER_TOKEN>`; the `whoami` tool returns the seeded user. Set `BUNDESAGENTUR_QUERY` in `.env` and the worker polls the Bundesagentur job board; `list_jobs`, `get_job` and `get_run_history` show the result.
+Call the endpoint with `Authorization: Bearer <MCP_BEARER_TOKEN>`; the `whoami` tool returns the seeded user. Create a Target with `upsert_target` (keywords, locations, radius), set `BUNDESAGENTUR_INTERVAL_MINUTES` in `.env`, and the worker polls the Bundesagentur job board for it; `list_jobs` (also by `targetId`), `get_job` and `get_run_history` show the result.
 
 ## Check
 

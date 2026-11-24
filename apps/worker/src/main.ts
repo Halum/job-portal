@@ -2,21 +2,14 @@ import { createAccounts } from '@job-portal/accounts';
 import { createWatchlist } from '@job-portal/boards';
 import { loadConfig } from '@job-portal/config';
 import { createDb, runMigrationsWithLock } from '@job-portal/db';
-import {
-  BAMBASE,
-  BUNDESAGENTUR,
-  ATS_IDS,
-  createAtsSource,
-  createBambaseSource,
-  createBundesagenturSource,
-  createDiscovery,
-  connectRateLimiter,
-  type Source,
-} from '@job-portal/discovery';
+import { connectRateLimiter, createDiscovery } from '@job-portal/discovery';
+import { createMatching } from '@job-portal/matching';
 import { allMigrations } from '@job-portal/migrations';
 import { createPipeline } from '@job-portal/pipeline';
+import { createTracker } from '@job-portal/tracker';
 import { createLogger } from '@job-portal/shared';
-import { startWorker, type ScheduledSource } from './worker';
+import { buildSources } from './sources';
+import { startWorker } from './worker';
 
 const config = loadConfig();
 const logger = createLogger({ level: config.logLevel, name: 'worker' });
@@ -25,20 +18,20 @@ await runMigrationsWithLock(config.databaseUrl, allMigrations, logger);
 const { db } = createDb(config.databaseUrl);
 const user = await createAccounts(db, config.mcpBearerToken).seedUser(config.seedUserEmail);
 
-const sources: Source[] = [];
-const scheduled: ScheduledSource[] = [];
-const { bundesagentur, bambase } = config.sources;
-if (bundesagentur) {
-  sources.push(createBundesagenturSource({ query: bundesagentur.query }));
-  scheduled.push({ sourceId: BUNDESAGENTUR, intervalMinutes: bundesagentur.intervalMinutes });
-}
-if (bambase) {
-  sources.push(createBambaseSource());
-  scheduled.push({ sourceId: BAMBASE, intervalMinutes: bambase.intervalMinutes });
-}
+// Targets decide what the Bundesagentur search asks for; Discovery supplies the Jobs Matching may look at.
+// A Job with any application status is skipped by matching (hasApplication, from the Tracker).
+// (`discovery` and `tracker` are created below; the callbacks only run during a run, after they exist.)
+const matching = createMatching(db, {
+  loadJobs: (userId, ids) => discovery.listMatchable(userId, ids),
+  hasApplication: async (userId, ids) => {
+    const states = await tracker.getStates(userId, ids);
+    return new Set(ids.filter((id) => states.get(id)?.applicationStatus != null));
+  },
+  defaultPrerankTopN: config.prerankTopN,
+});
+
 // Company boards: only marked boards of the Board directory (narrowed by the user's Watchlist) are fetched,
 // at a bounded rate per ATS host that every worker and the API share through Redis.
-const watchlist = createWatchlist(db);
 const limiter = connectRateLimiter({
   redisUrl: config.redisUrl,
   requestsPerSecond: config.boardRequestsPerSecond,
@@ -46,18 +39,16 @@ const limiter = connectRateLimiter({
     logger.error({ err }, 'rate limit redis error');
   },
 });
-for (const ats of ATS_IDS) {
-  const source = config.sources[ats];
-  if (!source) continue;
-  sources.push(
-    createAtsSource(ats, {
-      listBoards: () => watchlist.listBoards(user.id, ats),
-      fetch: limiter.fetch,
-    }),
-  );
-  scheduled.push({ sourceId: ats, intervalMinutes: source.intervalMinutes });
-}
-const pipeline = createPipeline(db, createDiscovery(db, sources, logger));
+const { sources, scheduled } = buildSources(config, {
+  matching,
+  watchlist: createWatchlist(db),
+  fetch: limiter.fetch,
+  userId: user.id,
+});
+// Discovery snapshots its Sources, so it is created only now, with every one of them in the list.
+const discovery = createDiscovery(db, sources, logger);
+const tracker = createTracker(db, discovery);
+const pipeline = createPipeline(db, discovery, { matching });
 
 const worker = await startWorker({
   redisUrl: config.redisUrl,

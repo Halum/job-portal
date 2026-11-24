@@ -14,6 +14,7 @@ Terms name things in code, database, tests and issues. Source of truth: the spec
 - **Global defaults**: the criteria every Target falls back to when it leaves a field unset.
 - **Criteria resolution**: how a Target field, when set, replaces the Global default, while exclusion words and blocked companies are the union of both.
 - **Hard filter**: a per-Target pass or fail check (radius, remote preference) applied before scoring.
+- **Candidate**: a Job that passed a Target's hard filters and prerank in a Run (table `matching.candidates`); the AI scoring ticket tags Jobs on top of it.
 - **Prerank**: the keyword score per Target that keeps only the top prerank_top_n Postings for the AI.
 - **Fit score**: the AI's 0 to 100 rating of a Job against one Target, with reasons and red flags.
 - **AI runner**: the one interface for calling an AI, with an OpenRouter and a `claude -p` implementation.

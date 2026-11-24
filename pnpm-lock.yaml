@@ -70,6 +70,9 @@ importers:
       '@job-portal/discovery':
         specifier: workspace:*
         version: link:../../packages/discovery
+      '@job-portal/matching':
+        specifier: workspace:*
+        version: link:../../packages/matching
       '@job-portal/migrations':
         specifier: workspace:*
         version: link:../../packages/migrations
@@ -109,6 +112,9 @@ importers:
       '@job-portal/discovery':
         specifier: workspace:*
         version: link:../../packages/discovery
+      '@job-portal/matching':
+        specifier: workspace:*
+        version: link:../../packages/matching
       '@job-portal/migrations':
         specifier: workspace:*
         version: link:../../packages/migrations
@@ -210,6 +216,22 @@ importers:
         specifier: 0.31.11
         version: 0.31.11
 
+  packages/matching:
+    dependencies:
+      '@job-portal/db':
+        specifier: workspace:*
+        version: link:../db
+      drizzle-orm:
+        specifier: 0.45.4
+        version: 0.45.4(postgres@4.1.1)
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      drizzle-kit:
+        specifier: 0.31.11
+        version: 0.31.11
+
   packages/migrations:
     dependencies:
       '@job-portal/accounts':
@@ -224,6 +246,9 @@ importers:
       '@job-portal/discovery':
         specifier: workspace:*
         version: link:../discovery
+      '@job-portal/matching':
+        specifier: workspace:*
+        version: link:../matching
       '@job-portal/pipeline':
         specifier: workspace:*
         version: link:../pipeline
@@ -239,6 +264,9 @@ importers:
       '@job-portal/discovery':
         specifier: workspace:*
         version: link:../discovery
+      '@job-portal/matching':
+        specifier: workspace:*
+        version: link:../matching
       '@job-portal/shared':
         specifier: workspace:*
         version: link:../shared

@@ -7,6 +7,7 @@ import {
   DiscoveryError,
   type Discovery,
 } from '@job-portal/discovery';
+import { criteriaPatchSchema, criteriaSchema, type Matching } from '@job-portal/matching';
 import { RUN_STATUSES, type Pipeline } from '@job-portal/pipeline';
 import type { Logger } from '@job-portal/shared';
 import { registerBoardTools, type BoardToolDeps } from './board-tools';
@@ -21,6 +22,7 @@ import {
 
 export interface ToolDeps {
   discovery: Discovery;
+  matching: Matching;
   pipeline: Pipeline;
   boards: BoardToolDeps;
   tracker: Tracker;
@@ -82,6 +84,7 @@ const runSchema = z.object({
   status: z.enum(RUN_STATUSES),
   fetched: z.number(),
   newPostings: z.number(),
+  prerankPassed: z.number().describe('Job and Target pairs that passed the filters and prerank'),
   errors: z.array(z.string()),
   errorCount: z.number().describe('Length of errors'),
   startedAt: isoDate,
@@ -113,6 +116,18 @@ const jobOut = <J extends { createdAt: Date; postings: Parameters<typeof withDat
 const text = (value: unknown): { type: 'text'; text: string } => ({
   type: 'text',
   text: JSON.stringify(value),
+});
+
+const targetSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  paused: z.boolean(),
+  criteria: criteriaSchema.describe(
+    'Fields set on this Target; null means inherit the Global default',
+  ),
+  resolved: criteriaSchema.describe(
+    'What the Target uses after falling back to the Global defaults',
+  ),
 });
 
 /** A tool error: the message of an expected refusal as it is, a fixed text for anything else (never a raw database error). */
@@ -154,7 +169,7 @@ async function refusable<T>(
 export function registerTools(
   mcp: McpServer,
   user: User,
-  { discovery, pipeline, tracker, boards, logger }: ToolDeps,
+  { discovery, matching, pipeline, tracker, boards, logger }: ToolDeps,
 ): void {
   registerBoardTools(mcp, user, boards, logger);
 
@@ -175,6 +190,10 @@ export function registerTools(
       inputSchema: {
         limit: z.number().int().min(1).max(200).optional(),
         cursor: z.uuid().optional().describe('The nextCursor of the previous page.'),
+        targetId: z
+          .uuid()
+          .optional()
+          .describe('Only Jobs that passed the hard filters and prerank of this Target.'),
         discoveryState: z.enum(DISCOVERY_STATES).optional(),
         applicationStatus: z.enum(APPLICATION_STATUSES).optional(),
         discoveredSince: z.iso
@@ -190,6 +209,7 @@ export function registerTools(
     async ({
       limit,
       cursor,
+      targetId,
       discoveryState,
       applicationStatus,
       discoveredSince,
@@ -201,11 +221,16 @@ export function registerTools(
           : null,
       );
       if (!filtered.ok) return filtered.error;
+      const byTarget = targetId ? new Set(await matching.listJobIds(user.id, { targetId })) : null;
+      const jobIds =
+        filtered.value && byTarget
+          ? filtered.value.filter((id) => byTarget.has(id))
+          : (filtered.value ?? (byTarget ? [...byTarget] : undefined));
       const page = await discovery.listJobs(user.id, {
         limit,
         cursor,
         discoveryState,
-        jobIds: filtered.value,
+        jobIds,
         discoveredSince: discoveredSince ? new Date(discoveredSince) : undefined,
       });
       const states = await tracker.getStates(
@@ -379,6 +404,71 @@ export function registerTools(
       const note = await tracker.addNote(user.id, jobId, body);
       const out = { note: { ...note, createdAt: note.createdAt.toISOString() } };
       return { content: [text(out)], structuredContent: out };
+    },
+  );
+
+  mcp.registerTool(
+    'list_targets',
+    {
+      description:
+        'List the Targets (named searches) with the criteria set on each and the criteria it ends up using after falling back to the Global defaults.',
+      outputSchema: { targets: z.array(targetSchema) },
+    },
+    async () => {
+      const out = { targets: await matching.listTargets(user.id) };
+      return { content: [text(out)], structuredContent: out };
+    },
+  );
+
+  mcp.registerTool(
+    'upsert_target',
+    {
+      description:
+        'Create a Target, or update the one with this name. Only the criteria keys you pass change; null clears a field so it inherits the Global default again. Exclusion words and blocked companies add up with the Global defaults. radiusKm 0 means the same city only; paused stops matching. The Target is matched at once over every stored Job and its list_jobs candidates are replaced; a Target with no keywords gets the top N stored Jobs at once (the newest), because nothing scores them. salaryFloor is stored but not enforced yet (no source reports salary).',
+      inputSchema: {
+        name: z.string().trim().min(1).max(100),
+        paused: z.boolean().optional(),
+        criteria: criteriaPatchSchema.optional(),
+      },
+      outputSchema: { target: targetSchema },
+    },
+    async (input) => {
+      try {
+        const out = { target: await matching.upsertTarget(user.id, input) };
+        return { content: [text(out)], structuredContent: out };
+      } catch (err) {
+        return failure(err, 'upsert failed');
+      }
+    },
+  );
+
+  mcp.registerTool(
+    'get_global_defaults',
+    {
+      description: 'Get the Global defaults every Target falls back to.',
+      outputSchema: { defaults: criteriaSchema },
+    },
+    async () => {
+      const out = { defaults: await matching.getGlobalDefaults(user.id) };
+      return { content: [text(out)], structuredContent: out };
+    },
+  );
+
+  mcp.registerTool(
+    'update_global_defaults',
+    {
+      description:
+        'Change the Global defaults. Only the keys you pass change; null clears a field.',
+      inputSchema: { criteria: criteriaPatchSchema },
+      outputSchema: { defaults: criteriaSchema },
+    },
+    async ({ criteria }) => {
+      try {
+        const out = { defaults: await matching.updateGlobalDefaults(user.id, criteria) };
+        return { content: [text(out)], structuredContent: out };
+      } catch (err) {
+        return failure(err, 'update failed');
+      }
     },
   );
 
