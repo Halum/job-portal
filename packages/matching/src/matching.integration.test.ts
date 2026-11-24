@@ -30,7 +30,8 @@ describe('matching against real Postgres', () => {
     handle = createDb(container.getConnectionUri());
     matching = createMatching(handle.db, {
       // Discovery would leave out Dismissed and Expired Jobs; the fake serves what it is given.
-      loadJobs: (_user, ids) => Promise.resolve(jobs.filter((j) => ids.includes(j.id))),
+      loadJobs: (_user, ids) =>
+        Promise.resolve(jobs.filter((j) => ids === undefined || ids.includes(j.id))),
       hasApplication: (_user, ids) => Promise.resolve(new Set(ids.filter((i) => blocked.has(i)))),
       defaultPrerankTopN: 2,
     });
@@ -186,6 +187,48 @@ describe('matching against real Postgres', () => {
 
     it('is empty for a user with no Targets', async () => {
       expect(await matching.searchQueries('00000000-0000-4000-8000-0000000000bb')).toEqual([]);
+    });
+  });
+
+  describe('rematch on upsert_target', () => {
+    const REMATCH = '00000000-0000-4000-8000-0000000000cc';
+    const ids = (targetId: string) => matching.listJobIds(REMATCH, { targetId });
+
+    it('a Job stored before the Target existed shows up, an edit replaces, pause removes, unpause restores', async () => {
+      jobs = [job(J(90), { title: 'Elektriker' }), job(J(91), { title: 'Schreiner' })];
+      const made = await matching.upsertTarget(REMATCH, {
+        name: 'late',
+        criteria: { keywords: ['elektriker'] },
+      });
+      expect(await ids(made.id)).toEqual([J(90)]);
+
+      await matching.upsertTarget(REMATCH, { name: 'late', criteria: { keywords: ['schreiner'] } });
+      expect(await ids(made.id)).toEqual([J(91)]);
+
+      await matching.upsertTarget(REMATCH, { name: 'late', paused: true });
+      expect(await ids(made.id)).toEqual([]);
+
+      await matching.upsertTarget(REMATCH, { name: 'late', paused: false });
+      expect(await ids(made.id)).toEqual([J(91)]);
+    });
+
+    it('leaves the candidates of other Targets alone and skips Jobs with an application status', async () => {
+      jobs = [job(J(92), { title: 'Maler' }), job(J(93), { title: 'Maler Meister' })];
+      blocked = new Set([J(93)]);
+      const a = await matching.upsertTarget(REMATCH, {
+        name: 'a',
+        criteria: { keywords: ['maler'] },
+      });
+      const b = await matching.upsertTarget(REMATCH, {
+        name: 'b',
+        criteria: { keywords: ['meister'] },
+      });
+      expect(await ids(a.id)).toEqual([J(92)]);
+      expect(await ids(b.id)).toEqual([]);
+      blocked = new Set();
+      await matching.upsertTarget(REMATCH, { name: 'b', criteria: { keywords: ['maler'] } });
+      expect((await ids(b.id)).sort()).toEqual([J(92), J(93)]);
+      expect(await ids(a.id)).toEqual([J(92)]);
     });
   });
 });

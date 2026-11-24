@@ -80,6 +80,8 @@ export function createBundesagenturSource({
       const postings = new Map<string, NormalizedPosting>();
       const errors: string[] = [];
       const failures: unknown[] = [];
+      // ponytail: one request per keyword x location of every active Target, no cap and sequential;
+      // upgrade: cap the count or run a few in parallel if Targets grow past a few dozen searches.
       const runs = queries ? await queries() : [query];
       for (const q of runs) {
         try {

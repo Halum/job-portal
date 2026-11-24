@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
-const words = z.array(z.string().trim().min(1)).nullable();
+export const MAX_WORDS = 50;
+export const MAX_WORD_LENGTH = 100;
+const words = z.array(z.string().trim().min(1).max(MAX_WORD_LENGTH)).max(MAX_WORDS).nullable();
 
 /**
  * The search criteria of Global defaults and of every Target. Every field is nullable: null means

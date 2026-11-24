@@ -75,8 +75,11 @@ export interface Discovery {
     options: ListJobsOptions,
   ) => Promise<{ jobs: JobView[]; nextCursor: string | null }>;
   getJob: (userId: string, jobId: string) => Promise<JobDetail | null>;
-  /** The Jobs among `ids` that Matching may look at: New or Shortlisted ones, never Dismissed or Expired. */
-  listMatchable: (userId: string, ids: string[]) => Promise<MatchableJobRow[]>;
+  /**
+   * The Jobs among `ids` (all of the user's when not given) that Matching may look at: New or
+   * Shortlisted ones, never Dismissed or Expired.
+   */
+  listMatchable: (userId: string, ids?: string[]) => Promise<MatchableJobRow[]>;
   /** A manual Posting (source `manual`) through the same dedupe; adding the same URL again is a no-op. */
   addJob: (userId: string, input: AddJobInput) => Promise<{ jobId: string }>;
   /**
@@ -338,7 +341,7 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
     },
 
     async listMatchable(userId, ids) {
-      if (ids.length === 0) return [];
+      if (ids && ids.length === 0) return [];
       const rows = await db
         .select({ job: jobs, posting: postings })
         .from(jobs)
@@ -346,7 +349,7 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
         .where(
           and(
             eq(jobs.userId, userId),
-            inArray(jobs.id, ids),
+            ids ? inArray(jobs.id, ids) : undefined,
             inArray(jobs.discoveryState, ['new', 'shortlisted']),
           ),
         )
@@ -376,6 +379,8 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
           and(
             eq(jobs.userId, userId),
             cursor ? gt(jobs.id, cursor) : undefined,
+            // ponytail: every candidate id is a bind parameter (Postgres ceiling about 65k); upgrade:
+            // page the candidates first and pass one page of ids.
             jobIds ? inArray(jobs.id, jobIds) : undefined,
           ),
         )

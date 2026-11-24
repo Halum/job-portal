@@ -60,6 +60,8 @@ describe('MCP endpoint over real HTTP', () => {
   });
 
   afterAll(async () => {
+    const b = serverB;
+    if (b) await new Promise((resolve) => b.close(resolve));
     await new Promise((resolve) => server.close(resolve));
     await handle.close();
     await container.stop();
@@ -273,6 +275,31 @@ describe('MCP endpoint over real HTTP', () => {
     expect(res.status).toBe(413);
   });
 
+  // A second server over the same database that authenticates every request as another user.
+  const USER_B = '00000000-0000-4000-8000-0000000000b2';
+  let serverB: Server | undefined;
+  async function createUserB(): Promise<URL> {
+    if (!serverB) {
+      const discovery = createDiscovery(handle.db, []);
+      serverB = createApiServer({
+        accounts: {
+          authenticate: () =>
+            Promise.resolve({ id: USER_B, email: 'b@example.invalid', timezone: 'UTC' }),
+          seedUser: () => Promise.reject(new Error('unused')),
+        },
+        discovery,
+        matching: createMatching(handle.db, {
+          loadJobs: (u, ids) => discovery.listMatchable(u, ids),
+        }),
+        pipeline: createPipeline(handle.db, discovery),
+        logger: createLogger({ level: 'silent' }),
+      });
+      const s = serverB;
+      await new Promise<void>((resolve) => s.listen(0, '127.0.0.1', resolve));
+    }
+    return new URL(`http://127.0.0.1:${String((serverB.address() as AddressInfo).port)}/mcp`);
+  }
+
   describe('Targets and Global defaults', () => {
     type TargetOut = {
       id: string;
@@ -342,10 +369,61 @@ describe('MCP endpoint over real HTTP', () => {
       expect(listed.targets.map((t) => t.name)).not.toContain('bad');
     });
 
-    it("list_jobs by Target returns only that Target's candidates, none for a new Target", async () => {
-      const made = (await call('upsert_target', { name: 'empty' })).structuredContent as {
-        target: TargetOut;
+    it('stores the salary floor but says in the tool description it is not enforced yet', async () => {
+      const client = await connect();
+      const tool = (await client.listTools()).tools.find((t) => t.name === 'upsert_target');
+      await client.close();
+      expect(tool?.description).toContain('salaryFloor is stored but not enforced yet');
+    });
+
+    it('refuses criteria lists and words over the caps', async () => {
+      const tooMany = Array.from({ length: 51 }, (_, i) => `w${String(i)}`);
+      for (const criteria of [{ keywords: tooMany }, { blockedCompanies: ['x'.repeat(101)] }]) {
+        const outcome = await call('upsert_target', { name: 'caps', criteria }).catch(
+          (err: unknown) => err,
+        );
+        const failed = outcome instanceof Error || (outcome as { isError?: boolean }).isError;
+        expect(failed).toBe(true);
+      }
+    });
+
+    it("user B cannot read or edit user A's Targets", async () => {
+      const made = (await call('upsert_target', { name: 'mine', criteria: { keywords: ['koch'] } }))
+        .structuredContent as { target: TargetOut };
+      const other = await createUserB();
+      const asB = async (name: string, args: Record<string, unknown>) => {
+        const client = new Client({ name: 'b', version: '0.0.0' });
+        await client.connect(
+          new StreamableHTTPClientTransport(other, {
+            requestInit: { headers: { Authorization: `Bearer ${TOKEN}` } },
+          }),
+        );
+        try {
+          return await client.callTool({ name, arguments: args });
+        } finally {
+          await client.close();
+        }
       };
+      const listed = (await asB('list_targets', {})).structuredContent as { targets: TargetOut[] };
+      expect(listed.targets).toEqual([]);
+      const jobs = (await asB('list_jobs', { targetId: made.target.id })).structuredContent as {
+        jobs: unknown[];
+      };
+      expect(jobs.jobs).toEqual([]);
+      // The same name for B is a separate Target, and A's stays as it was.
+      const edited = (await asB('upsert_target', { name: 'mine', criteria: { keywords: ['x'] } }))
+        .structuredContent as { target: TargetOut };
+      expect(edited.target.id).not.toBe(made.target.id);
+      const again = (await call('list_targets', {})).structuredContent as { targets: TargetOut[] };
+      expect(again.targets.find((t) => t.id === made.target.id)?.criteria.keywords).toEqual([
+        'koch',
+      ]);
+    });
+
+    it("list_jobs by Target returns only that Target's candidates, rematched at once on upsert", async () => {
+      const made = (
+        await call('upsert_target', { name: 'empty', criteria: { keywords: ['zzzunmatched'] } })
+      ).structuredContent as { target: TargetOut };
       const out = (await call('list_jobs', { targetId: made.target.id })).structuredContent as {
         jobs: unknown[];
         nextCursor: string | null;

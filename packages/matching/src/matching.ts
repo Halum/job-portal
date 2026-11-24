@@ -39,9 +39,10 @@ export interface SearchQuery {
 export interface MatchingDeps {
   /**
    * The Jobs among `ids` that may be matched. Discovery supplies it and leaves out Dismissed and
-   * Expired Jobs, so Matching never reads another module's tables.
+   * Expired Jobs, so Matching never reads another module's tables. Without `ids` it returns every
+   * matchable Job of the user (used to rematch a Target that was just created or edited).
    */
-  loadJobs: (userId: string, ids: string[]) => Promise<MatchableJob[]>;
+  loadJobs: (userId: string, ids?: string[]) => Promise<MatchableJob[]>;
   /** Ids among `ids` that already have an application status; those are skipped. Wired by the Tracker. */
   hasApplication?: (userId: string, ids: string[]) => Promise<Set<string>>;
   /** Used when neither the Target nor the Global defaults set prerankTopN. */
@@ -53,7 +54,10 @@ export interface Matching {
   /** Hard filters and prerank for each active Target over the given Jobs; returns how many passed in total. */
   run: (userId: string, jobIds: string[]) => Promise<{ prerankPassed: number }>;
   listTargets: (userId: string) => Promise<TargetView[]>;
-  /** Creates the Target or updates the one with this name; criteria keys not given keep their value, null clears one. */
+  /**
+   * Creates the Target or updates the one with this name; criteria keys not given keep their value, null clears one.
+   * Then rematches it over every matchable Job and replaces its candidates (a paused Target keeps none).
+   */
   upsertTarget: (userId: string, input: UpsertTargetInput) => Promise<TargetView>;
   getGlobalDefaults: (userId: string) => Promise<Criteria>;
   updateGlobalDefaults: (userId: string, patch: CriteriaPatch) => Promise<Criteria>;
@@ -100,46 +104,71 @@ export function createMatching(
     return rows.map((t) => view(globals, t));
   };
 
+  /** Jobs Matching may look at (all of the user's when `jobIds` is not given), minus those with an application status. */
+  const matchable = async (userId: string, jobIds?: string[]): Promise<MatchableJob[]> => {
+    const jobs = await loadJobs(userId, jobIds);
+    if (!hasApplication || jobs.length === 0) return jobs;
+    const blocked = await hasApplication(
+      userId,
+      jobs.map((j) => j.id),
+    );
+    return jobs.filter((j) => !blocked.has(j.id));
+  };
+
+  /** The Jobs that pass a Target's hard filters and prerank. */
+  const topFor = (c: ResolvedCriteria, jobs: MatchableJob[]) => {
+    const scored = jobs.flatMap((job) => {
+      const outcome = hardFilter(job, c, table);
+      return outcome.pass
+        ? [
+            {
+              job,
+              unknownLocation: outcome.unknownLocation,
+              score: prerankScore(job, c.keywords ?? []),
+            },
+          ]
+        : [];
+    });
+    return prerank(scored, c.prerankTopN ?? defaultPrerankTopN, (c.keywords ?? []).length > 0);
+  };
+
+  const insertCandidates = async (
+    tx: Pick<Db, 'insert'>,
+    userId: string,
+    targetId: string,
+    top: ReturnType<typeof topFor>,
+  ): Promise<void> => {
+    if (top.length === 0) return;
+    await tx
+      .insert(candidates)
+      .values(
+        top.map((s) => ({
+          userId,
+          targetId,
+          jobId: s.job.id,
+          prerankScore: s.score,
+          unknownLocation: s.unknownLocation,
+        })),
+      )
+      .onConflictDoNothing();
+  };
+
   return {
     async run(userId, jobIds) {
       if (jobIds.length === 0) return { prerankPassed: 0 };
-      const blocked = hasApplication ? await hasApplication(userId, jobIds) : new Set<string>();
-      const jobs = (await loadJobs(userId, jobIds)).filter((j) => !blocked.has(j.id));
+      const jobs = await matchable(userId, jobIds);
+      const globals = await getGlobals(userId);
       let prerankPassed = 0;
-      for (const target of await activeTargets(userId)) {
-        const c = target.resolved;
-        const scored = jobs.flatMap((job) => {
-          const outcome = hardFilter(job, c, table);
-          return outcome.pass
-            ? [
-                {
-                  job,
-                  unknownLocation: outcome.unknownLocation,
-                  score: prerankScore(job, c.keywords ?? []),
-                },
-              ]
-            : [];
+      for (const { id } of await activeTargets(userId)) {
+        // The Target row lock keeps a run from adding candidates computed from criteria a concurrent
+        // edit has just replaced; the criteria are read again under the lock.
+        prerankPassed += await db.transaction(async (tx) => {
+          const [row] = await tx.select().from(targets).where(eq(targets.id, id)).for('update');
+          if (!row || row.paused) return 0;
+          const top = topFor(view(globals, row).resolved, jobs);
+          await insertCandidates(tx, userId, id, top);
+          return top.length;
         });
-        const top = prerank(
-          scored,
-          c.prerankTopN ?? defaultPrerankTopN,
-          (c.keywords ?? []).length > 0,
-        );
-        if (top.length > 0) {
-          await db
-            .insert(candidates)
-            .values(
-              top.map((s) => ({
-                userId,
-                targetId: target.id,
-                jobId: s.job.id,
-                prerankScore: s.score,
-                unknownLocation: s.unknownLocation,
-              })),
-            )
-            .onConflictDoNothing();
-        }
-        prerankPassed += top.length;
       }
       return { prerankPassed };
     },
@@ -178,6 +207,16 @@ export function createMatching(
           .where(eq(targets.id, row.id))
           .returning();
         if (!saved) throw new Error('target update returned no row');
+        // Jobs stored before this edit never reach `run` again, so the Target is matched over all of them
+        // here, under the same row lock, and its candidates replaced in this transaction.
+        await tx.delete(candidates).where(eq(candidates.targetId, saved.id));
+        if (!saved.paused) {
+          const top = topFor(
+            view(await getGlobals(userId), saved).resolved,
+            await matchable(userId),
+          );
+          await insertCandidates(tx, userId, saved.id, top);
+        }
         return saved;
       });
       return view(await getGlobals(userId), updated);

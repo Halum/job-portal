@@ -58,17 +58,17 @@ describe('Bundesagentur source to MCP list_jobs', () => {
     const matching = createMatching(handle.db, {
       loadJobs: (u, ids) => discovery.listMatchable(u, ids),
     });
-    // Placeholder search: "Musterstadt" is not in the place table, so the radius cannot be checked.
-    await matching.upsertTarget(user.id, {
-      name: 'odd minijob',
-      criteria: { keywords: ['koch'], locations: ['Musterstadt'], radiusKm: 25 },
-    });
     const discovery = createDiscovery(handle.db, [
       createBundesagenturSource({
         queries: async () => (await matching.searchQueries(user.id)).map(bundesagenturQuery),
         fetch: fakeFetch,
       }),
     ]);
+    // Placeholder search: "Musterstadt" is not in the place table, so the radius cannot be checked.
+    await matching.upsertTarget(user.id, {
+      name: 'odd minijob',
+      criteria: { keywords: ['koch'], locations: ['Musterstadt'], radiusKm: 25 },
+    });
     const pipeline = createPipeline(handle.db, discovery, { matching });
     const logger = createLogger({ level: 'silent' });
 

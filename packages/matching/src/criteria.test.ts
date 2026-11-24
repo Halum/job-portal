@@ -99,4 +99,14 @@ describe('applyPatch and the zod rules', () => {
     expect(criteriaPatchSchema.safeParse({ prerankTopN: 1 }).success).toBe(true);
     expect(criteriaPatchSchema.safeParse({ keywords: [' '] }).success).toBe(false);
   });
+
+  it('caps the number and the length of words', () => {
+    const many = Array.from({ length: 51 }, (_, i) => `w${String(i)}`);
+    expect(criteriaPatchSchema.safeParse({ keywords: many.slice(0, 50) }).success).toBe(true);
+    expect(criteriaPatchSchema.safeParse({ keywords: many }).success).toBe(false);
+    expect(criteriaPatchSchema.safeParse({ blockedCompanies: ['a'.repeat(100)] }).success).toBe(
+      true,
+    );
+    expect(criteriaPatchSchema.safeParse({ locations: ['a'.repeat(101)] }).success).toBe(false);
+  });
 });

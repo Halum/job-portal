@@ -18,9 +18,38 @@ export interface FilterOutcome {
   unknownLocation: boolean;
 }
 
-const REMOTE = /\bremote\b|home[\s-]?office|mobiles?\s+arbeiten/i;
-const has = (haystack: string, needle: string): boolean =>
-  haystack.toLowerCase().includes(needle.trim().toLowerCase());
+// A remote marker stands alone: at the start or after a separator or bracket, and before the end,
+// a separator or bracket ("Berlin (Remote)", "Engineer - Remote", "Remote, Germany"), or as "fully
+// remote" or "remote-first". "Remote Sensing Engineer" and "not remote" are therefore not remote.
+const REMOTE_WORD =
+  /(?:^|[([)\-–—|,/:]\s*|\b(?:fully|full|100%)\s+)remote(?=\s*(?:$|[)\]\-–—|,/:]))|\bremote[\s-]first\b/i;
+const HOME_OFFICE =
+  /(?<!\b(?:kein|keine|ohne|no|not)\s)\b(?:home[\s-]?office|mobiles?\s+arbeiten)\b/i;
+
+const field = (raw: unknown, key: string): unknown =>
+  typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>)[key] : undefined;
+
+/** Remote from the place, the work type fields the sources give (isRemote, workplaceType) or the title. */
+function isRemote(job: MatchableJob): boolean {
+  if (field(job.raw, 'isRemote') === true) return true;
+  const type = field(job.raw, 'workplaceType');
+  if (typeof type === 'string' && type.trim().toLowerCase() === 'remote') return true;
+  return [job.title, job.location ?? ''].some((s) => REMOTE_WORD.test(s) || HOME_OFFICE.test(s));
+}
+
+const isWordChar = (ch: string | undefined): boolean =>
+  ch !== undefined && /[\p{L}\p{N}]/u.test(ch);
+
+/** Whole-word match, case-insensitive; letters and digits (any script) count as part of a word. */
+function has(haystack: string, needle: string): boolean {
+  const text = haystack.toLowerCase();
+  const word = needle.trim().toLowerCase();
+  if (word === '') return false;
+  for (let i = text.indexOf(word); i !== -1; i = text.indexOf(word, i + 1)) {
+    if (!isWordChar(text[i - 1]) && !isWordChar(text[i + word.length])) return true;
+  }
+  return false;
+}
 
 /**
  * The hard filters of one Target, before anything else: exclusion words, blocked companies, remote
@@ -37,7 +66,7 @@ export function hardFilter(
   if (c.blockedCompanies.some((b) => has(company, b)))
     return { pass: false, unknownLocation: false };
 
-  if (REMOTE.test(`${job.title} ${job.location ?? ''}`)) {
+  if (isRemote(job)) {
     // A remote posting has no place to measure: it passes unless remote work is refused.
     return { pass: c.remoteAllowed !== false, unknownLocation: false };
   }

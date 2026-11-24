@@ -30,7 +30,8 @@ describe('hardFilter', () => {
 
   it('drops a job with an exclusion word in title, company or location, ignoring case', () => {
     expect(
-      hardFilter(job({ title: 'Pflegehelfer' }), crit({ exclusionWords: ['pflege'] }), places).pass,
+      hardFilter(job({ title: 'Pflege Helfer' }), crit({ exclusionWords: ['pflege'] }), places)
+        .pass,
     ).toBe(false);
     expect(
       hardFilter(
@@ -137,5 +138,56 @@ describe('prerankScore and prerank', () => {
   it('breaks a full tie by id so the result is stable', () => {
     const items = [scored('b', 1, 1), scored('a', 1, 1)];
     expect(prerank(items, 5, true).map((s) => s.job.id)).toEqual(['a', 'b']);
+  });
+});
+
+describe('hardFilter word matching', () => {
+  it('matches exclusion words and blocked companies as whole words, not substrings', () => {
+    const kitchen = job({ title: 'Kitchen Assistant', company: 'Sapphire Foods' });
+    expect(hardFilter(kitchen, crit({ exclusionWords: ['IT'] }), places).pass).toBe(true);
+    expect(hardFilter(kitchen, crit({ blockedCompanies: ['SAP'] }), places).pass).toBe(true);
+    const it = job({ title: 'IT Support (m/w/d)', company: 'SAP SE' });
+    expect(hardFilter(it, crit({ exclusionWords: ['it'] }), places).pass).toBe(false);
+    expect(hardFilter(it, crit({ blockedCompanies: ['sap'] }), places).pass).toBe(false);
+  });
+
+  it('treats umlauts as letters and words with symbols as whole words', () => {
+    expect(
+      hardFilter(job({ title: 'Büroleiter' }), crit({ exclusionWords: ['Büro'] }), places).pass,
+    ).toBe(true);
+    expect(
+      hardFilter(job({ title: 'Büro Assistent' }), crit({ exclusionWords: ['büro'] }), places).pass,
+    ).toBe(false);
+    expect(
+      hardFilter(job({ title: 'C++ Entwickler' }), crit({ exclusionWords: ['C++'] }), places).pass,
+    ).toBe(false);
+  });
+});
+
+describe('hardFilter remote detection', () => {
+  const refuse = crit({ remoteAllowed: false });
+  const isRemote = (j: MatchableJob): boolean => !hardFilter(j, refuse, places).pass;
+
+  it('does not read remote into other phrases', () => {
+    expect(isRemote(job({ title: 'Remote Sensing Engineer', location: 'Bamberg' }))).toBe(false);
+    expect(isRemote(job({ title: 'Engineer, not remote', location: 'Bamberg' }))).toBe(false);
+    expect(isRemote(job({ title: 'Engineer', location: 'Bamberg (kein Homeoffice)' }))).toBe(false);
+  });
+
+  it('reads remote from the place, the work type fields and the title phrases sources use', () => {
+    expect(isRemote(job({ title: 'Engineer', location: 'Remote' }))).toBe(true);
+    expect(isRemote(job({ title: 'Engineer', location: 'Remote, Germany' }))).toBe(true);
+    expect(isRemote(job({ title: 'Engineer - Remote', location: 'Berlin' }))).toBe(true);
+    expect(isRemote(job({ title: 'Engineer (Remote)', location: 'Berlin' }))).toBe(true);
+    expect(isRemote(job({ title: 'Engineer', location: 'Berlin', raw: { isRemote: true } }))).toBe(
+      true,
+    );
+    expect(
+      isRemote(job({ title: 'Engineer', location: 'Berlin', raw: { workplaceType: 'Remote' } })),
+    ).toBe(true);
+    expect(
+      isRemote(job({ title: 'Engineer', location: 'Berlin', raw: { workplaceType: 'hybrid' } })),
+    ).toBe(false);
+    expect(isRemote(job({ title: 'Büro im Homeoffice', location: 'Berlin' }))).toBe(true);
   });
 });

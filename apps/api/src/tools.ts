@@ -217,7 +217,7 @@ export function registerTools(
     'upsert_target',
     {
       description:
-        'Create a Target, or update the one with this name. Only the criteria keys you pass change; null clears a field so it inherits the Global default again. Exclusion words and blocked companies add up with the Global defaults. radiusKm 0 means the same city only; paused stops matching.',
+        'Create a Target, or update the one with this name. Only the criteria keys you pass change; null clears a field so it inherits the Global default again. Exclusion words and blocked companies add up with the Global defaults. radiusKm 0 means the same city only; paused stops matching. The Target is matched at once over every stored Job and its list_jobs candidates are replaced. salaryFloor is stored but not enforced yet (no source reports salary).',
       inputSchema: {
         name: z.string().trim().min(1),
         paused: z.boolean().optional(),
