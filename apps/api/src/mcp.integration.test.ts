@@ -6,6 +6,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testconta
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createAccounts } from '@job-portal/accounts';
+import { createWatchlist } from '@job-portal/boards';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import { ADD_JOB_LIMITS, createBundesagenturSource, createDiscovery } from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
@@ -60,6 +61,11 @@ describe('MCP endpoint over real HTTP', () => {
       matching,
       pipeline,
       tracker,
+      boards: {
+        watchlist: createWatchlist(handle.db),
+        fetch: () => Promise.reject(new Error('no network in tests')),
+        allowAddBoard: () => Promise.resolve(true),
+      },
       logger: createLogger({ level: 'silent' }),
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -88,17 +94,20 @@ describe('MCP endpoint over real HTTP', () => {
     const client = await connect();
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      'add_board',
       'add_job',
       'add_note',
       'get_global_defaults',
       'get_job',
       'get_run_history',
+      'get_watchlist',
       'list_jobs',
       'list_targets',
       'set_status',
       'split_job',
       'undo_last_change',
       'update_global_defaults',
+      'update_watchlist',
       'upsert_target',
       'whoami',
     ]);
@@ -481,6 +490,11 @@ describe('MCP endpoint over real HTTP', () => {
         }),
         pipeline: createPipeline(handle.db, discovery),
         tracker: createTracker(handle.db, discovery),
+        boards: {
+          watchlist: createWatchlist(handle.db),
+          fetch: () => Promise.reject(new Error('no network in tests')),
+          allowAddBoard: () => Promise.resolve(true),
+        },
         logger: createLogger({ level: 'silent' }),
       });
       const s = serverB;

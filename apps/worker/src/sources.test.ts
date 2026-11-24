@@ -4,7 +4,8 @@ import { buildSources } from './sources';
 
 const deps = {
   matching: { searchQueries: () => Promise.resolve([]) },
-  directory: { listMarked: () => Promise.resolve([]) },
+  watchlist: { listBoards: () => Promise.resolve([]) },
+  fetch: () => Promise.reject(new Error('no network in tests')),
   userId: '00000000-0000-4000-8000-000000000001',
 };
 

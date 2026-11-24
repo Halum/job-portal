@@ -30,4 +30,4 @@ Terms name things in code, database, tests and issues. Source of truth: the spec
 - **Processed-mail ledger**: the record of Gmail message ids already handled, keyed by user id and message id, so a mail is never applied twice.
 - **Never-merge pair**: a recorded (Posting, Job) pair that rule and AI merges must skip, created by a Split.
 - **Manual job**: a Job the user adds by hand (add_job) as a Posting with source `manual`, which still goes through dedupe.
-- **Board URL resolver**: the add_board step that recognises a Greenhouse, Lever or Ashby careers URL, verifies it with one fetch and adds the board to the directory and Watchlist.
+- **Board URL resolver**: `resolveBoardUrl`, the pure first step of add_board: it recognises a Greenhouse, Lever or Ashby careers URL (https, exact host, no credentials) and extracts the ATS, the board id and Lever's EU host, or returns null. Verifying the board with one fetch and adding it to the directory and Watchlist are the later steps of add_board.

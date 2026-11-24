@@ -1,9 +1,9 @@
 import { createAccounts } from '@job-portal/accounts';
-import { createBoardDirectory } from '@job-portal/boards';
+import { createWatchlist } from '@job-portal/boards';
 import { loadConfig } from '@job-portal/config';
 import { createDb, runMigrationsWithLock } from '@job-portal/db';
+import { connectRateLimiter, createDiscovery } from '@job-portal/discovery';
 import { createMatching } from '@job-portal/matching';
-import { createDiscovery } from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
 import { createPipeline } from '@job-portal/pipeline';
 import { createTracker } from '@job-portal/tracker';
@@ -30,8 +30,21 @@ const matching = createMatching(db, {
   defaultPrerankTopN: config.prerankTopN,
 });
 
-const directory = createBoardDirectory(db);
-const { sources, scheduled } = buildSources(config, { matching, directory, userId: user.id });
+// Company boards: only marked boards of the Board directory (narrowed by the user's Watchlist) are fetched,
+// at a bounded rate per ATS host that every worker and the API share through Redis.
+const limiter = connectRateLimiter({
+  redisUrl: config.redisUrl,
+  requestsPerSecond: config.boardRequestsPerSecond,
+  onError: (err) => {
+    logger.error({ err }, 'rate limit redis error');
+  },
+});
+const { sources, scheduled } = buildSources(config, {
+  matching,
+  watchlist: createWatchlist(db),
+  fetch: limiter.fetch,
+  userId: user.id,
+});
 // Discovery snapshots its Sources, so it is created only now, with every one of them in the list.
 const discovery = createDiscovery(db, sources, logger);
 const tracker = createTracker(db, discovery);
@@ -47,6 +60,9 @@ const worker = await startWorker({
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
-    void worker.close().then(() => process.exit(0));
+    void worker.close().then(() => {
+      limiter.close();
+      process.exit(0);
+    });
   });
 }

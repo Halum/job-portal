@@ -1,7 +1,8 @@
 import { createAccounts } from '@job-portal/accounts';
+import { createWatchlist } from '@job-portal/boards';
 import { loadConfig } from '@job-portal/config';
 import { createDb, runMigrationsWithLock } from '@job-portal/db';
-import { createDiscovery } from '@job-portal/discovery';
+import { connectRateLimiter, createDiscovery, createRedisLimit } from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
 import { createMatching } from '@job-portal/matching';
 import { createPipeline } from '@job-portal/pipeline';
@@ -13,7 +14,7 @@ const config = loadConfig();
 const logger = createLogger({ level: config.logLevel, name: 'api' });
 
 await runMigrationsWithLock(config.databaseUrl, allMigrations, logger);
-const { db } = createDb(config.databaseUrl);
+const { db, close: closeDb } = createDb(config.databaseUrl);
 const accounts = createAccounts(db, config.mcpBearerToken);
 await accounts.seedUser(config.seedUserEmail);
 
@@ -29,10 +30,38 @@ const matching = createMatching(db, {
   defaultPrerankTopN: config.prerankTopN,
 });
 const pipeline = createPipeline(db, discovery);
-createApiServer({ accounts, discovery, matching, pipeline, tracker, logger }).listen(
-  config.port,
-  config.host,
-  () => {
-    logger.info({ host: config.host, port: config.port }, 'api ready, MCP at /mcp');
+// add_board's verification fetch shares the per-host rate limit with the workers through Redis.
+const limiter = connectRateLimiter({
+  redisUrl: config.redisUrl,
+  requestsPerSecond: config.boardRequestsPerSecond,
+  onError: (err) => {
+    logger.error({ err }, 'rate limit redis error');
   },
-);
+});
+// ponytail: 10 add_board attempts per user per hour, fixed in code; make it config if it ever needs tuning
+const allowAddBoard = createRedisLimit(limiter.redis, {
+  max: 10,
+  windowMs: 3_600_000,
+  prefix: 'add_board',
+});
+const server = createApiServer({
+  accounts,
+  discovery,
+  matching,
+  pipeline,
+  tracker,
+  boards: { watchlist: createWatchlist(db), fetch: limiter.fetch, allowAddBoard },
+  logger,
+}).listen(config.port, config.host, () => {
+  logger.info({ host: config.host, port: config.port }, 'api ready, MCP at /mcp');
+});
+
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(signal, () => {
+    server.close(() => {
+      limiter.close();
+      void closeDb().then(() => process.exit(0));
+    });
+    server.closeAllConnections();
+  });
+}

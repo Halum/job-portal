@@ -9,6 +9,8 @@ import {
 } from '@job-portal/discovery';
 import { criteriaPatchSchema, criteriaSchema, type Matching } from '@job-portal/matching';
 import { RUN_STATUSES, type Pipeline } from '@job-portal/pipeline';
+import type { Logger } from '@job-portal/shared';
+import { registerBoardTools, type BoardToolDeps } from './board-tools';
 import {
   ACTORS,
   APPLICATION_STATUSES,
@@ -22,7 +24,9 @@ export interface ToolDeps {
   discovery: Discovery;
   matching: Matching;
   pipeline: Pipeline;
+  boards: BoardToolDeps;
   tracker: Tracker;
+  logger: Logger;
 }
 
 const isoDate = z.string().describe('ISO 8601 timestamp, UTC');
@@ -165,8 +169,10 @@ async function refusable<T>(
 export function registerTools(
   mcp: McpServer,
   user: User,
-  { discovery, matching, pipeline, tracker }: ToolDeps,
+  { discovery, matching, pipeline, tracker, boards, logger }: ToolDeps,
 ): void {
+  registerBoardTools(mcp, user, boards, logger);
+
   mcp.registerTool(
     'whoami',
     {

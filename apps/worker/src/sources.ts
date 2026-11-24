@@ -1,4 +1,4 @@
-import type { BoardDirectory } from '@job-portal/boards';
+import type { Watchlist } from '@job-portal/boards';
 import type { Config } from '@job-portal/config';
 import {
   ATS_IDS,
@@ -8,7 +8,6 @@ import {
   createAtsSource,
   createBambaseSource,
   createBundesagenturSource,
-  createRateLimitedFetch,
   type Source,
 } from '@job-portal/discovery';
 import type { Matching } from '@job-portal/matching';
@@ -19,10 +18,13 @@ import type { ScheduledSource } from './worker';
  * created from the result of this one call, after all Sources are in it.
  */
 export function buildSources(
-  config: Pick<Config, 'sources' | 'boardRequestsPerSecond'>,
+  config: Pick<Config, 'sources'>,
   deps: {
     matching: Pick<Matching, 'searchQueries'>;
-    directory: Pick<BoardDirectory, 'listMarked'>;
+    /** The marked directory boards, narrowed by the user's Watchlist. */
+    watchlist: Pick<Watchlist, 'listBoards'>;
+    /** The rate-limited fetch every ATS board request goes through (shared through Redis). */
+    fetch: typeof fetch;
     userId: string;
   },
 ): { sources: Source[]; scheduled: ScheduledSource[] } {
@@ -42,15 +44,14 @@ export function buildSources(
     sources.push(createBambaseSource());
     scheduled.push({ sourceId: BAMBASE, intervalMinutes: bambase.intervalMinutes });
   }
-  // Company boards: only marked boards of the Board directory are fetched, at a bounded rate per ATS host.
-  const limitedFetch = createRateLimitedFetch(config.boardRequestsPerSecond);
+  // Company boards: only marked boards of the Board directory (narrowed by the Watchlist) are fetched.
   for (const ats of ATS_IDS) {
     const source = config.sources[ats];
     if (!source) continue;
     sources.push(
       createAtsSource(ats, {
-        listBoards: () => deps.directory.listMarked(ats),
-        fetch: limitedFetch,
+        listBoards: () => deps.watchlist.listBoards(deps.userId, ats),
+        fetch: deps.fetch,
       }),
     );
     scheduled.push({ sourceId: ats, intervalMinutes: source.intervalMinutes });

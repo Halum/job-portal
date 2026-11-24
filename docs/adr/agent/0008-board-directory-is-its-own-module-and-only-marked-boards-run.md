@@ -1,5 +1,7 @@
 # The Board directory is its own module, and only marked boards are fetched
 
+Partly superseded by [0010](0010-watchlist-lives-in-boards-and-the-rate-limit-is-shared-through-redis.md): the rate limit is no longer per process (it is shared through Redis), and the Watchlist narrows which marked boards run.
+
 The directory is shared reference data (no user id), so it gets its own package and Postgres schema, `boards`, instead of a table in `discovery`. Reasons: it is read by every ATS source but queried by no other table, and a separate migration folder lets it land beside the Jobs and Postings work without clashing on Drizzle's numbered files and journal. Discovery stays unaware of it: an ATS source takes a `listBoards` function, and the worker wires `directory.listMarked(ats)` into it. The one-off scripts (`boards:import`, `boards:mark` in the worker app) live in the worker because the migrations package depends on boards, and a script in boards would make a cycle.
 
 The mark is a boolean on the directory row and the only thing the mark script writes. A marked board stays marked (it "has posted" in Germany or remote EU), so a re-run checks only unmarked boards; a board that cannot be fetched keeps its mark and is listed in the script's result. The Germany or remote EU test is a text heuristic over location strings with a short German city list; the city table the spec bundles for radius filters can replace it later.

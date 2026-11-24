@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { createRateLimitedFetch } from '../rate-limit';
+import { createMemorySlots, createRateLimitedFetch } from '../rate-limit';
 import { createAtsSource, fetchBoardPostings, type BoardRef } from './ats';
 
 const fixture = (name: string): string =>
@@ -120,6 +120,16 @@ describe('createAtsSource', () => {
     expect(errors).toEqual(['greenhouse board gone: HTTP 404']);
   });
 
+  it('never follows a redirect: the request asks for redirect "error"', async () => {
+    let seen: RequestInit | undefined;
+    const spy: typeof fetch = (_input, init) => {
+      seen = init;
+      return Promise.resolve(new Response(fixture('greenhouse-board.json')));
+    };
+    await fetchBoardPostings('greenhouse', board('good'), spy);
+    expect(seen?.redirect).toBe('error');
+  });
+
   it('reports a malformed body as an error of that board', async () => {
     const source = createAtsSource('ashby', {
       listBoards: () => Promise.resolve([board('bad')]),
@@ -137,7 +147,7 @@ describe('createAtsSource', () => {
       return Promise.resolve(new Response(url.includes('lever') ? '[]' : '{"jobs":[]}'));
     };
     const limited = createRateLimitedFetch(2, inner, {
-      now: () => t,
+      slots: createMemorySlots(() => t),
       sleep: (ms) => {
         t += ms;
         return Promise.resolve();

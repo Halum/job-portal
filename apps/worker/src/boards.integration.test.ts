@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { createBoardDirectory, type BoardDirectory } from '@job-portal/boards';
+import {
+  createBoardDirectory,
+  createWatchlist,
+  type BoardDirectory,
+  type Watchlist,
+} from '@job-portal/boards';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import { createAtsSource, createDiscovery, type Discovery } from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
@@ -20,6 +25,7 @@ describe('company board runs against real Postgres', () => {
   let pg: StartedPostgreSqlContainer;
   let handle: DbHandle;
   let directory: BoardDirectory;
+  let watchlist: Watchlist;
   let discovery: Discovery;
   let pipeline: Pipeline;
   const requested: string[] = [];
@@ -40,6 +46,7 @@ describe('company board runs against real Postgres', () => {
     await runMigrationsWithLock(pg.getConnectionUri(), allMigrations);
     handle = createDb(pg.getConnectionUri());
     directory = createBoardDirectory(handle.db);
+    watchlist = createWatchlist(handle.db);
     await directory.importBoards([
       { ats: 'greenhouse', token: 'goodboard', name: 'Good Board' },
       { ats: 'greenhouse', token: 'staleboard', name: 'Stale Board' },
@@ -48,7 +55,7 @@ describe('company board runs against real Postgres', () => {
     await directory.mark('greenhouse', ['goodboard', 'staleboard']);
     discovery = createDiscovery(handle.db, [
       createAtsSource('greenhouse', {
-        listBoards: () => directory.listMarked('greenhouse'),
+        listBoards: () => watchlist.listBoards(USER, 'greenhouse'),
         fetch: fakeFetch,
       }),
     ]);
@@ -82,5 +89,14 @@ describe('company board runs against real Postgres', () => {
       'completed_with_errors',
       'completed_with_errors',
     ]);
+  });
+
+  it('a non-empty Watchlist narrows the run to the watched boards, so the failing board is no longer fetched', async () => {
+    await watchlist.add(USER, [{ ats: 'greenhouse', token: 'goodboard' }]);
+    requested.length = 0;
+    const run = await pipeline.execute(USER, 'greenhouse');
+    expect(run).toMatchObject({ status: 'completed', fetched: 2, errors: [] });
+    expect(requested).toHaveLength(1);
+    expect(requested[0]).toContain('/goodboard/');
   });
 });

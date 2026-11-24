@@ -7,6 +7,7 @@ import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redi
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createAccounts } from '@job-portal/accounts';
+import { createWatchlist } from '@job-portal/boards';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import {
   bundesagenturQuery,
@@ -87,6 +88,11 @@ describe('Bundesagentur source to MCP list_jobs', () => {
       matching,
       pipeline,
       tracker,
+      boards: {
+        watchlist: createWatchlist(handle.db),
+        fetch: () => Promise.reject(new Error('no network in tests')),
+        allowAddBoard: () => Promise.resolve(true),
+      },
       logger,
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));

@@ -2,7 +2,6 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Accounts, User } from '@job-portal/accounts';
-import type { Logger } from '@job-portal/shared';
 import { registerTools, type ToolDeps } from './tools';
 
 function buildMcpServer(user: User, deps: ToolDeps): McpServer {
@@ -36,10 +35,10 @@ function reply(res: ServerResponse, status: number, headers: Record<string, stri
  */
 export interface ApiDeps extends ToolDeps {
   accounts: Accounts;
-  logger: Logger;
 }
 
-export function createApiServer({ accounts, logger, ...tools }: ApiDeps): Server {
+export function createApiServer({ accounts, ...tools }: ApiDeps): Server {
+  const { logger } = tools;
   return createServer((req, res) => {
     void (async () => {
       if (req.url !== '/mcp') {
