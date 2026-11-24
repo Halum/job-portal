@@ -43,22 +43,32 @@ describe('notifications against real Postgres and a fake webhook', () => {
   let tags: NewTagInput[];
   let pending: number;
   let sleeps: number[];
+  /** The "since" each newTags call got. */
+  let sinces: Date[];
+  let failJobInfo = false;
+  /** Message kinds the fake webhook rejects with a 400. */
+  const rejectKinds = new Set<string>();
   const jobs = new Map<string, JobInfo | null>();
 
   const make = (maxAttempts = 3): Notifications =>
     createNotifications(handle.db, {
-      newTags: () => Promise.resolve(tags),
+      newTags: (_u, since) => {
+        sinces.push(since);
+        return Promise.resolve(tags);
+      },
       jobInfo: (_u, id) =>
-        Promise.resolve(
-          jobs.has(id)
-            ? (jobs.get(id) ?? null)
-            : {
-                title: `Role ${id.slice(-2)}`,
-                company: 'Beispiel Firma',
-                links: ['https://example.invalid/j/' + id.slice(-2)],
-                active: true,
-              },
-        ),
+        failJobInfo
+          ? Promise.reject(new Error('lookup failed'))
+          : Promise.resolve(
+              jobs.has(id)
+                ? (jobs.get(id) ?? null)
+                : {
+                    title: `Role ${id.slice(-2)}`,
+                    company: 'Beispiel Firma',
+                    links: ['https://example.invalid/j/' + id.slice(-2)],
+                    active: true,
+                  },
+            ),
       pendingReviews: () => Promise.resolve(pending),
       webhook: { url, topicId: TOPIC },
       maxAttempts,
@@ -80,8 +90,13 @@ describe('notifications against real Postgres and a fake webhook', () => {
       let body = '';
       req.on('data', (c: Buffer) => (body += c.toString()));
       req.on('end', () => {
-        const status = statuses.length > 1 ? (statuses.shift() ?? 200) : (statuses[0] ?? 200);
-        if (status === 200) received.push(JSON.parse(body) as (typeof received)[number]);
+        const parsed = JSON.parse(body) as (typeof received)[number];
+        const status = rejectKinds.has(parsed.kind)
+          ? 400
+          : statuses.length > 1
+            ? (statuses.shift() ?? 200)
+            : (statuses[0] ?? 200);
+        if (status === 200) received.push(parsed);
         else received.push({ kind: 'failed-request', text: '', topicId: '' });
         res.statusCode = status;
         res.end();
@@ -101,6 +116,9 @@ describe('notifications against real Postgres and a fake webhook', () => {
     tags = [];
     pending = 0;
     sleeps = [];
+    sinces = [];
+    failJobInfo = false;
+    rejectKinds.clear();
     jobs.clear();
   });
 
@@ -287,5 +305,115 @@ describe('notifications against real Postgres and a fake webhook', () => {
     await Promise.all([make().afterRun(user, input), make().afterRun(user, input)]);
     expect(digests()).toHaveLength(1);
     expect(alerts()).toHaveLength(1);
+  });
+
+  const bigJob = (n: number): void => {
+    jobs.set(J(n), {
+      title: `Job ${String(n)} ${'T'.repeat(90)}`,
+      company: 'C'.repeat(50),
+      links: [
+        `https://example.invalid/${'a'.repeat(150)}/${String(n)}`,
+        'https://example.invalid/second',
+      ],
+      active: true,
+    });
+  };
+  const longTag = (job: number, over: Partial<NewTagInput> = {}): NewTagInput =>
+    tag(job, { reasons: ['r1', 'r2', 'r3'].map((r) => `${r} ${'x'.repeat(115)}`), ...over });
+  const occurrences = (text: string, part: string): number => text.split(part).length - 1;
+
+  it('splits a long digest into messages under 4096 characters, whole Jobs only, the Review count on the last', async () => {
+    const user = newUser();
+    pending = 7;
+    tags = [];
+    for (let n = 1; n <= 80; n += 1) {
+      bigJob(n);
+      tags.push(longTag(n, { score: 100 - (n % 30) }));
+    }
+    await make().afterRun(user, { since, ...NONE });
+    const texts = digests().map((d) => d.text);
+    expect(texts.length).toBeGreaterThan(5);
+    for (const t of texts) expect(t.length).toBeLessThan(4096);
+    const all = texts.join('\n');
+    for (let n = 1; n <= 80; n += 1) expect(occurrences(all, `Job ${String(n)} T`)).toBe(1);
+    expect(texts[0]).toContain(`part 1 of ${String(texts.length)}`);
+    expect(texts.filter((t) => t.includes('Review waiting: 7'))).toEqual([texts.at(-1)]);
+    // Each Job's lines stay together: its link follows its title in the same message.
+    for (const t of texts)
+      expect(occurrences(t, 'https://example.invalid/second')).toBe(occurrences(t, ' at '));
+  });
+
+  it('counts a message as sent only when it got a 2xx: the rest wait and go out once, never twice', async () => {
+    const user = newUser();
+    tags = [];
+    for (let n = 1; n <= 30; n += 1) {
+      bigJob(n);
+      tags.push(longTag(n));
+    }
+    statuses = [200, 500];
+    const first = await make().afterRun(user, { since, ...NONE });
+    expect(digests()).toHaveLength(1);
+    const chunks = 1 + (first.unsent - 1); // the unsent ones, minus the webhook failure alert
+    expect(chunks).toBeGreaterThan(2);
+
+    statuses = [200];
+    await make().afterRun(user, { since, ...NONE });
+    expect(digests()).toHaveLength(chunks);
+    const all = digests()
+      .map((d) => d.text)
+      .join('\n');
+    for (let n = 1; n <= 30; n += 1) expect(occurrences(all, `Job ${String(n)} T`)).toBe(1);
+  });
+
+  it('cuts the reasons of one oversized Job and keeps its links', async () => {
+    const user = newUser();
+    bigJob(1);
+    tags = Array.from({ length: 30 }, (_, i) =>
+      longTag(1, {
+        targetId: `00000000-0000-4000-8000-0000000008${String(10 + i)}`,
+        targetName: `target ${String(i)}`,
+      }),
+    );
+    await make().afterRun(user, { since, ...NONE });
+    expect(digests()).toHaveLength(1);
+    const text = digests()[0]?.text ?? '';
+    expect(text.length).toBeLessThan(4096);
+    expect(text).toContain('https://example.invalid/second');
+    expect(text).toContain('Job 1 T');
+    expect(text).not.toContain('r1 xxx');
+  });
+
+  it('an alert is not held back by a digest the webhook rejects, and a rejection is not retried', async () => {
+    const user = newUser();
+    rejectKinds.add('digest');
+    tags = [tag(1)];
+    const first = await make().afterRun(user, { since, ...NONE });
+    expect(first).toMatchObject({ digestSent: false, unsent: 1 });
+    expect(received.filter((m) => m.kind === 'failed-request')).toHaveLength(1);
+
+    tags = [];
+    const second = await make().afterRun(user, {
+      since,
+      failing: ['source:bambase'],
+      checked: [],
+    });
+    expect(second).toMatchObject({ alertsSent: 1, digestSent: false, unsent: 1 });
+    expect(alerts()).toHaveLength(1);
+  });
+
+  it('loses nothing when a run fails before its digest is stored: the next run looks up from the same watermark', async () => {
+    const user = newUser();
+    const first = new Date(Date.now() - 3 * 3600_000);
+    tags = [tag(1)];
+    failJobInfo = true;
+    await expect(make().afterRun(user, { since: first, ...NONE })).rejects.toThrow('lookup failed');
+    failJobInfo = false;
+    await make().afterRun(user, { since: new Date(), ...NONE });
+    expect(sinces[0]).toEqual(first);
+    expect(sinces[1]).toEqual(first);
+    expect(digests()).toHaveLength(1);
+    // Stored: the watermark moves on, so the next run looks only at newer scores.
+    await make().afterRun(user, { since: new Date(), ...NONE });
+    expect((sinces[2] ?? first).getTime()).toBeGreaterThan(first.getTime());
   });
 });

@@ -108,8 +108,8 @@ function observeFailures(
 }
 
 /**
- * ponytail: the only stage is Discovery (fetch and store). Matching, Review and Notifications
- * join the run in later tickets. Any number of workers may share one database: the unique index
+ * ponytail: stages are Discovery (fetch and store), Matching, scoring and Notifications; Review is
+ * not a stage (Matching raises its items). Any number of workers may share one database: the unique index
  * allows one running run per source, and only runs older than the time bound are ever failed as lost.
  */
 export function createPipeline(

@@ -57,6 +57,12 @@ export const digestPairs = notificationsSchema.table(
   (t) => [primaryKey({ columns: [t.userId, t.jobId, t.targetId] })],
 );
 
+/** How far a user's new tags have been looked at: only pairs scored after it are looked up, and it moves once a digest is stored. */
+export const watermarks = notificationsSchema.table('watermarks', {
+  userId: uuid('user_id').primaryKey(),
+  through: timestamp('through', { withTimezone: true }).notNull(),
+});
+
 /** The failure types that are failing now, one row each; the row is what makes an alert fire once. */
 export const openFailures = notificationsSchema.table(
   'open_failures',

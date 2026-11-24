@@ -38,9 +38,10 @@ const runner: AiRunner | null =
       ? createOpenRouterRunner({ apiKey: config.ai.apiKey, model: config.ai.model })
       : createClaudeRunner(config.ai);
 const ai = runner === null ? undefined : createAi(createAiLog(db), runner);
+const review = createReview(db);
 const matching = createMatching(db, {
   ...(ai ? { ai } : {}),
-  review: createReview(db),
+  review,
   defaultAlertThreshold: config.alertThreshold,
   maxCallsPerPass: config.aiMaxCallsPerRun,
   loadJobs: (userId, ids) => discovery.listMatchable(userId, ids),
@@ -73,7 +74,7 @@ const tracker = createTracker(db, discovery);
 const notifications = buildNotifications(db, config.notifications, {
   matching,
   discovery,
-  review: createReview(db),
+  review,
   log: logger,
 });
 const pipeline = createPipeline(db, discovery, {

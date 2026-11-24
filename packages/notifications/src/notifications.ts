@@ -1,7 +1,7 @@
 import { and, asc, count, eq, inArray, sql } from 'drizzle-orm';
 import type { Db } from '@job-portal/db';
 import type { Logger } from '@job-portal/shared';
-import { digestPairs, messages, openFailures, type MessageKind } from './schema';
+import { digestPairs, messages, openFailures, watermarks, type MessageKind } from './schema';
 
 /** A Job and Target pair that gained a tag; Matching's `listNewTags` returns this shape. */
 export interface NewTagInput {
@@ -92,46 +92,89 @@ interface DigestPayload {
 
 const WEBHOOK_KEY = 'webhook';
 const REQUEST_TIMEOUT_MS = 10_000;
-/** Telegram caps a message at 4096 characters; lines stay short so a normal run fits. */
+/** Telegram caps a message at 4096 characters; every digest message stays under this. */
+const MAX_TEXT = 3900;
+/** Room kept in each message for its header and the footer of the last one. */
+const FRAME = 120;
 const MAX_REASONS = 3;
 const MAX_LINKS = 2;
+/**
+ * New tags are looked up from a watermark held this far behind now. A scoring transaction can stamp a
+ * score earlier than the moment it commits; the overlap only costs a rescan, since a claimed pair is
+ * never listed twice. Matches the Pipeline's one-hour bound on a run.
+ */
+const WATERMARK_LAG_MS = 60 * 60 * 1000;
 
 const humanize = (key: string): string => key.split(':').filter(Boolean).join(' ');
 
 const covers = (checked: string[], key: string): boolean =>
   checked.some((c) => c === key || (c.endsWith(':') && key.startsWith(c)));
 
-export function renderDigest(entries: DigestEntry[], pendingReviews: number): string {
-  const jobs = new Map<string, DigestEntry[]>();
-  for (const e of [...entries].sort((a, b) => (b.score ?? -1) - (a.score ?? -1)))
-    jobs.set(e.jobId, [...(jobs.get(e.jobId) ?? []), e]);
-  const blocks = [...jobs.values()].map((rows) => {
-    const [first] = rows;
-    const head =
-      first === undefined
-        ? ''
-        : first.company === null
-          ? first.title
-          : `${first.title} at ${first.company}`;
+const clip = (text: string, max: number): string =>
+  text.length > max ? `${text.slice(0, max - 1)}…` : text;
+
+/** One Job's lines. A Job too long for a message loses its reasons first, its links last. */
+function jobBlock(rows: DigestEntry[]): string {
+  const [first] = rows;
+  const title = clip(first?.title ?? '', 100);
+  const head = first?.company == null ? title : `${title} at ${clip(first.company, 60)}`;
+  const links = (first?.links ?? []).slice(0, MAX_LINKS).map((l) => `  ${clip(l, 200)}`);
+  const build = (withReasons: boolean): string => {
     const lines = rows.map((r) => {
       const score = r.score === null ? '' : `: ${String(r.score)}`;
-      const reasons =
-        r.reasons.length === 0 ? '' : ` - ${r.reasons.slice(0, MAX_REASONS).join('; ')}`;
-      return `  ${r.targetName}${score}${r.override ? ' (override)' : ''}${reasons}`;
+      const reasons = withReasons
+        ? r.reasons
+            .slice(0, MAX_REASONS)
+            .map((x) => clip(x, 120))
+            .join('; ')
+        : '';
+      return `  ${clip(r.targetName, 40)}${score}${r.override ? ' (override)' : ''}${reasons === '' ? '' : ` - ${reasons}`}`;
     });
-    const links = (first?.links ?? []).slice(0, MAX_LINKS).map((l) => `  ${l}`);
     return [head, ...lines, ...links].join('\n');
-  });
-  return [
-    `New matches (${String(jobs.size)})`,
-    ...blocks,
-    `Review waiting: ${String(pendingReviews)}`,
-  ].join('\n\n');
+  };
+  const full = build(true);
+  const block = full.length <= MAX_TEXT - FRAME ? full : build(false);
+  return clip(block, MAX_TEXT - FRAME);
 }
 
 /**
- * ponytail: one message per digest, no splitting for Telegram's length cap; reasons and links are trimmed
- * instead. Split into several messages if a run ever tags more than a few dozen Jobs.
+ * The digest as one or more messages under Telegram's cap: whole Job blocks, best score first, packed into
+ * messages in order. Each message carries the entries it lists; the Review count closes the last one.
+ */
+function renderDigest(
+  entries: DigestEntry[],
+  pendingReviews: number,
+): { entries: DigestEntry[]; text: string }[] {
+  const jobs = new Map<string, DigestEntry[]>();
+  for (const e of [...entries].sort((a, b) => (b.score ?? -1) - (a.score ?? -1)))
+    jobs.set(e.jobId, [...(jobs.get(e.jobId) ?? []), e]);
+  const groups: { rows: DigestEntry[]; blocks: string[]; size: number }[] = [];
+  for (const rows of jobs.values()) {
+    const block = jobBlock(rows);
+    const open = groups.at(-1);
+    if (open && open.size + block.length + 2 <= MAX_TEXT - FRAME) {
+      open.rows.push(...rows);
+      open.blocks.push(block);
+      open.size += block.length + 2;
+    } else groups.push({ rows: [...rows], blocks: [block], size: block.length + 2 });
+  }
+  const footer = `Review waiting: ${String(pendingReviews)}`;
+  return groups.map((g, i) => ({
+    entries: g.rows,
+    text: [
+      groups.length === 1
+        ? `New matches (${String(jobs.size)})`
+        : `New matches (${String(jobs.size)}), part ${String(i + 1)} of ${String(groups.length)}`,
+      ...g.blocks,
+      ...(i === groups.length - 1 ? [footer] : []),
+    ].join('\n\n'),
+  }));
+}
+
+/**
+ * ponytail: a send holds one pool connection and the message row lock through its retries, up to about
+ * 33 s at the defaults (3 x 10 s timeout plus backoff): fine for one or two workers, move the send out of
+ * the transaction (a lease column) before running many.
  */
 export function createNotifications(
   db: Db,
@@ -147,6 +190,8 @@ export function createNotifications(
     log,
   }: NotificationsDeps,
 ): Notifications {
+  class Refused extends Error {}
+
   const post = async (kind: MessageKind, payload: object): Promise<void> => {
     const res = await fetchImpl(webhook.url, {
       method: 'POST',
@@ -155,25 +200,34 @@ export function createNotifications(
       redirect: 'error',
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-    if (!res.ok) throw new Error(`webhook answered ${String(res.status)}`);
+    if (res.ok) return;
+    const reason = `webhook answered ${String(res.status)}`;
+    // A 4xx (not a timeout or a rate limit) is about this message: retrying cannot help.
+    if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429)
+      throw new Refused(reason);
+    throw new Error(reason);
   };
 
-  /** Sends with growing backoff; returns how many sends it made and whether the last one landed. */
+  /**
+   * Sends with growing backoff. `refused` means the webhook rejected this message itself, so the next
+   * message may still go; otherwise the webhook is down and the pass stops.
+   */
   const sendWithRetries = async (
     kind: MessageKind,
     payload: object,
-  ): Promise<{ ok: boolean; tries: number }> => {
+  ): Promise<{ ok: boolean; tries: number; refused: boolean }> => {
     for (let tries = 1; ; tries += 1) {
       try {
         await post(kind, payload);
-        return { ok: true, tries };
+        return { ok: true, tries, refused: false };
       } catch (err) {
         // The URL is a secret: log the reason only, never the address.
         log?.warn(
           { attempt: tries, reason: err instanceof Error ? err.message : 'unknown' },
           'webhook send failed',
         );
-        if (tries >= maxAttempts) return { ok: false, tries };
+        const refused = err instanceof Refused;
+        if (refused || tries >= maxAttempts) return { ok: false, tries, refused };
         await sleep(backoffMs * 2 ** (tries - 1));
       }
     }
@@ -182,37 +236,65 @@ export function createNotifications(
   const queueAlert = (tx: Pick<Db, 'insert'>, userId: string, text: string) =>
     tx.insert(messages).values({ userId, kind: 'alert', payload: { text } });
 
-  /** Opens the failing types and closes the recovered ones; the row insert or delete makes each alert fire once. */
+  /** The row insert makes the "Failing" alert fire once, however many workers race. True when this call opened it. */
+  const openFailure = (userId: string, key: string): Promise<boolean> =>
+    db.transaction(async (tx) => {
+      const opened = await tx
+        .insert(openFailures)
+        .values({ userId, key })
+        .onConflictDoNothing()
+        .returning({ id: openFailures.id });
+      if (opened.length === 0) return false;
+      await queueAlert(tx, userId, `Failing: ${humanize(key)}`);
+      return true;
+    });
+
+  /** The row delete makes the "Recovered" alert fire once. True when this call closed it. */
+  const closeFailure = (userId: string, key: string): Promise<boolean> =>
+    db.transaction(async (tx) => {
+      const closed = await tx
+        .delete(openFailures)
+        .where(and(eq(openFailures.userId, userId), eq(openFailures.key, key)))
+        .returning({ id: openFailures.id });
+      if (closed.length === 0) return false;
+      await queueAlert(tx, userId, `Recovered: ${humanize(key)}`);
+      return true;
+    });
+
+  /** Opens the failing types and closes the recovered ones. */
   const syncFailures = async (userId: string, { failing, checked }: RunReport): Promise<void> => {
-    for (const key of new Set(failing)) {
-      await db.transaction(async (tx) => {
-        const opened = await tx
-          .insert(openFailures)
-          .values({ userId, key })
-          .onConflictDoNothing()
-          .returning({ id: openFailures.id });
-        if (opened.length > 0) await queueAlert(tx, userId, `Failing: ${humanize(key)}`);
-      });
-    }
+    for (const key of new Set(failing)) await openFailure(userId, key);
     const open = await db
       .select({ key: openFailures.key })
       .from(openFailures)
       .where(eq(openFailures.userId, userId));
-    for (const { key } of open) {
-      if (key === WEBHOOK_KEY || failing.includes(key) || !covers(checked, key)) continue;
-      await db.transaction(async (tx) => {
-        const closed = await tx
-          .delete(openFailures)
-          .where(and(eq(openFailures.userId, userId), eq(openFailures.key, key)))
-          .returning({ id: openFailures.id });
-        if (closed.length > 0) await queueAlert(tx, userId, `Recovered: ${humanize(key)}`);
-      });
-    }
+    for (const { key } of open)
+      if (key !== WEBHOOK_KEY && !failing.includes(key) && covers(checked, key))
+        await closeFailure(userId, key);
   };
 
-  /** Stores a digest of the pairs no digest has listed yet, with the unsent digests folded in. */
+  /**
+   * Stores a digest of the pairs no digest has listed yet, with the unsent digest messages folded in and
+   * everything re-split. The watermark moves only once the digest is stored, so a crash before that lists
+   * the same pairs on the next run instead of losing them.
+   */
   const storeDigest = async (userId: string, since: Date): Promise<void> => {
-    const found = await newTags(userId, since);
+    const [clock] = await db.execute<{ t: Date }>(sql`select now() as t`);
+    const asOf = new Date(new Date(clock?.t ?? Date.now()).getTime() - WATERMARK_LAG_MS);
+    await db.insert(watermarks).values({ userId, through: since }).onConflictDoNothing();
+    const [mark] = await db
+      .select({ through: watermarks.through })
+      .from(watermarks)
+      .where(eq(watermarks.userId, userId));
+    await listNew(userId, mark?.through ?? since);
+    await db
+      .update(watermarks)
+      .set({ through: sql`greatest(${watermarks.through}, ${asOf.toISOString()}::timestamptz)` })
+      .where(eq(watermarks.userId, userId));
+  };
+
+  const listNew = async (userId: string, from: Date): Promise<void> => {
+    const found = await newTags(userId, from);
     if (found.length === 0) return;
     const jobIds = [...new Set(found.map((t) => t.jobId))];
     const claimed = await db
@@ -226,6 +308,8 @@ export function createNotifications(
       const info = await jobInfo(userId, id);
       if (info?.active === true) infos.set(id, info);
     }
+    // A Job that is Dismissed or Expired when its pair is looked at is skipped for good, unless the user
+    // later overrides its tag.
     const candidates = fresh.filter((t) => infos.has(t.jobId));
     if (candidates.length === 0) return;
     const waiting = await pendingReviews(userId);
@@ -255,7 +339,7 @@ export function createNotifications(
           override: t.override,
         });
       }
-      // Row locks: a second worker folding the same digests waits, then finds them folded.
+      // Row locks: a second worker folding the same messages waits, then finds them folded.
       const earlier = await tx
         .select()
         .from(messages)
@@ -279,26 +363,41 @@ export function createNotifications(
               earlier.map((m) => m.id),
             ),
           );
-      const payload: DigestPayload = {
-        entries: all,
-        pendingReviews: waiting,
-        text: renderDigest(all, waiting),
-      };
-      await tx.insert(messages).values({ userId, kind: 'digest', payload });
+      // One outbox row per message: its pairs count as sent only when that row got a 2xx.
+      // Distinct created times keep the parts in order (one transaction shares one now()).
+      const parts = renderDigest(all, waiting);
+      const base = Date.now();
+      await tx.insert(messages).values(
+        parts.map((p, i) => ({
+          createdAt: new Date(base + i),
+          userId,
+          kind: 'digest' as const,
+          payload: {
+            entries: p.entries,
+            pendingReviews: waiting,
+            text: p.text,
+          } satisfies DigestPayload,
+        })),
+      );
     });
   };
 
-  /** Sends the pending messages oldest first; stops at the first one the webhook refuses. */
+  /**
+   * Sends the pending messages, alerts first (a digest never holds one back), each kind oldest first. A
+   * message the webhook rejects (4xx) stays pending and the pass goes on; a webhook that is down stops it.
+   */
   const flush = async (userId: string): Promise<{ digestSent: boolean; alertsSent: number }> => {
     const sent = { digestSent: false, alertsSent: 0 };
+    const skip = new Set<string>();
     for (let restart = true; restart;) {
       restart = false;
       const ids = await db
         .select({ id: messages.id })
         .from(messages)
         .where(and(eq(messages.userId, userId), eq(messages.status, 'pending')))
-        .orderBy(asc(messages.createdAt), asc(messages.id));
+        .orderBy(sql`${messages.kind} = 'digest'`, asc(messages.createdAt), asc(messages.id));
       for (const { id } of ids) {
+        if (skip.has(id)) continue;
         // The row lock stays through the send, so two workers never send one message twice.
         const outcome = await db.transaction(async (tx) => {
           const [m] = await tx
@@ -307,7 +406,7 @@ export function createNotifications(
             .where(and(eq(messages.id, id), eq(messages.status, 'pending')))
             .for('update', { skipLocked: true });
           if (m === undefined) return 'skipped' as const;
-          const { ok, tries } = await sendWithRetries(m.kind, m.payload as object);
+          const { ok, tries, refused } = await sendWithRetries(m.kind, m.payload as object);
           await tx
             .update(messages)
             .set(
@@ -320,33 +419,16 @@ export function createNotifications(
             if (m.kind === 'digest') sent.digestSent = true;
             else sent.alertsSent += 1;
           }
-          return ok ? ('sent' as const) : ('failed' as const);
+          return ok ? ('sent' as const) : refused ? ('refused' as const) : ('down' as const);
         });
-        if (outcome === 'failed') {
-          await db.transaction(async (tx) => {
-            const opened = await tx
-              .insert(openFailures)
-              .values({ userId, key: WEBHOOK_KEY })
-              .onConflictDoNothing()
-              .returning({ id: openFailures.id });
-            if (opened.length > 0) await queueAlert(tx, userId, `Failing: ${WEBHOOK_KEY}`);
-          });
+        if (outcome === 'down') {
+          await openFailure(userId, WEBHOOK_KEY);
           return sent;
         }
-        if (outcome === 'sent') {
-          const recovered = await db.transaction(async (tx) => {
-            const closed = await tx
-              .delete(openFailures)
-              .where(and(eq(openFailures.userId, userId), eq(openFailures.key, WEBHOOK_KEY)))
-              .returning({ id: openFailures.id });
-            if (closed.length === 0) return false;
-            await queueAlert(tx, userId, `Recovered: ${WEBHOOK_KEY}`);
-            return true;
-          });
-          if (recovered) {
-            restart = true;
-            break;
-          }
+        if (outcome === 'refused') skip.add(id);
+        if (outcome === 'sent' && (await closeFailure(userId, WEBHOOK_KEY))) {
+          restart = true;
+          break;
         }
       }
     }
