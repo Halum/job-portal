@@ -395,7 +395,7 @@ export function createMatching(
           .where(and(eq(targets.id, targetId), eq(targets.userId, userId)));
         if (!t) return [];
         const threshold = thresholdOf(await getGlobals(userId), read(t.criteria));
-        // A rescued Job (an override) is tagged whatever its score.
+        // A Job with a tag override (the user disagreed with its rejection) is tagged whatever its score.
         conditions.push(
           tagged
             ? or(gte(scores.score, threshold), isNotNull(tagOverrides.id))
@@ -454,7 +454,7 @@ export function createMatching(
         redFlags: s?.redFlags ?? [],
         languages: s?.languages ?? [],
         languageMet: s?.languageMet ?? null,
-        tagged: s !== null && (o !== null || s.score >= thresholdOf(globals, read(t.criteria))),
+        tagged: o !== null || (s !== null && s.score >= thresholdOf(globals, read(t.criteria))),
       }));
     },
 

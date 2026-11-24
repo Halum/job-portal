@@ -79,6 +79,7 @@ export const tagOverrides = matchingSchema.table(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    // No user id in the key: a Target belongs to one user, so (target, job) is already per user.
     unique('tag_overrides_target_job').on(t.targetId, t.jobId),
     index('tag_overrides_user_idx').on(t.userId, t.createdAt),
   ],
