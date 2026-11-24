@@ -30,9 +30,9 @@ const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1]);
 
 /** A one-entry stored zip, enough to look like a DOCX (or like a zip that is not one). */
-function zip(entryName: string): Buffer {
+function zip(entryName: string, content = '<w:document/>'): Buffer {
   const name = Buffer.from(entryName);
-  const data = Buffer.from('<w:document/>');
+  const data = Buffer.from(content);
   const crc = crc32(data);
   const local = Buffer.alloc(30);
   local.writeUInt32LE(0x04034b50, 0);
@@ -126,6 +126,7 @@ describe('Documents through the API', () => {
       const back = await fetch(`${base}/files/${String(info.id)}`, { headers: auth });
       expect(back.status).toBe(200);
       expect(back.headers.get('content-type')).toBe('text/markdown');
+      expect(back.headers.get('x-content-type-options')).toBe('nosniff');
       expect(await back.text()).toBe(RESUME_MD);
     });
 
@@ -153,6 +154,8 @@ describe('Documents through the API', () => {
       const refused: [string, string, Uint8Array | string][] = [
         ['master_resume', 'cv.pdf', Buffer.from([0x00, 0x01, 0x02, 0x03])],
         ['master_resume', 'cv.docx', zip('notes/readme.txt')],
+        // the Word part's name inside a stored file's content is not a Word part
+        ['master_resume', 'cv.docx', zip('notes/readme.txt', 'see word/document.xml')],
         ['master_resume', 'cv.md', Buffer.from([0xff, 0xfe, 0x00, 0x80])],
         ['master_resume', 'cv.png', PNG],
         ['photo', 'foto.pdf', PDF],
@@ -181,6 +184,25 @@ describe('Documents through the API', () => {
       expect(res.status).toBe(413);
     });
 
+    it('refuses a body over 10 MB that declares no length, and the next upload still works', async () => {
+      const chunk = Buffer.alloc(1024 * 1024, 0x61);
+      let sent = 0;
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (sent++ >= 11) controller.close();
+          else controller.enqueue(chunk);
+        },
+      });
+      const res = await fetch(`${base}/files?kind=master_resume&filename=stream.txt`, {
+        method: 'POST',
+        headers: auth,
+        body,
+        duplex: 'half',
+      });
+      expect(res.status).toBe(413);
+      expect((await upload('master_resume', 'after.md', RESUME_MD)).status).toBe(201);
+    });
+
     it('needs the bearer token on both routes', async () => {
       expect((await upload('master_resume', 'cv.md', RESUME_MD, {} as typeof auth)).status).toBe(
         401,
@@ -206,6 +228,9 @@ describe('Documents through the API', () => {
       ).toBe(404);
       expect((await fetch(`${base}/files/not-a-uuid`, { headers: auth })).status).toBe(404);
       expect((await fetch(`${base}/files`, { headers: auth })).status).toBe(405);
+      expect(
+        (await fetch(`${base}/files/${stored.id}`, { method: 'POST', headers: auth })).status,
+      ).toBe(405);
     });
   });
   describe('MCP tools', () => {
@@ -384,10 +409,8 @@ describe('Documents through the API', () => {
         { workExperiences: [] },
       ];
       for (const args of bad) {
-        const r = await client
-          .callTool({ name: 'save_career_bank', arguments: args })
-          .catch(() => ({ isError: true }));
-        expect(r.isError).toBe(true);
+        const r = await client.callTool({ name: 'save_career_bank', arguments: args });
+        expect(r.isError, JSON.stringify(args).slice(0, 80)).toBe(true);
       }
       expect((await readBank()).workExperiences).toHaveLength(3);
     });

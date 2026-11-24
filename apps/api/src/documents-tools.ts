@@ -96,7 +96,13 @@ export function registerDocumentsTools(
       outputSchema: careerBankOut,
     },
     async () => {
-      const bank = await documents.getCareerBank(user.id);
+      let bank;
+      try {
+        bank = await documents.getCareerBank(user.id);
+      } catch (err) {
+        logger.error({ err }, 'get_career_bank failed');
+        return refusal('get_career_bank failed');
+      }
       return ok({
         masterDocuments: {
           masterResume: bank.masterDocuments.masterResume
