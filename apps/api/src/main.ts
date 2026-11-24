@@ -19,7 +19,7 @@ const accounts = createAccounts(db, config.mcpBearerToken);
 await accounts.seedUser(config.seedUserEmail);
 
 // The API only reads: it has no sources, so it can show runs and jobs but never polls.
-const discovery = createDiscovery(db, []);
+const discovery = createDiscovery(db, [], logger);
 const pipeline = createPipeline(db, discovery);
 // add_board's verification fetch shares the per-host rate limit with the workers through Redis.
 const boards = {

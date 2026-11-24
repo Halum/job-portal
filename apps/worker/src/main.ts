@@ -56,7 +56,7 @@ for (const ats of ATS_IDS) {
   );
   scheduled.push({ sourceId: ats, intervalMinutes: source.intervalMinutes });
 }
-const pipeline = createPipeline(db, createDiscovery(db, sources));
+const pipeline = createPipeline(db, createDiscovery(db, sources, logger));
 
 const worker = await startWorker({
   redisUrl: config.redisUrl,

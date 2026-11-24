@@ -28,6 +28,48 @@ describe('companyKey', () => {
   });
 });
 
+describe('companyKey normalization', () => {
+  const key = (over: { company?: string; title?: string; location?: string }): string | null =>
+    companyKey({ company: 'Beispiel AG', title: 'Koch', location: 'Bamberg', ...over });
+
+  it('keeps C++ and C# apart, and from plain C', () => {
+    const keys = new Set([
+      key({ title: 'C++ Developer' }),
+      key({ title: 'C# Developer' }),
+      key({ title: 'C Developer' }),
+    ]);
+    expect(keys.size).toBe(3);
+  });
+
+  it('folds the sharp s to ss', () => {
+    expect(key({ location: 'Straßburg' })).toBe(key({ location: 'Strassburg' }));
+    expect(key({ company: 'Weiß AG' })).toBe(key({ company: 'Weiss AG' }));
+  });
+
+  it('strips e.V. as a legal suffix in its spellings', () => {
+    const plain = key({ company: 'Sportverein Beispiel' });
+    expect(key({ company: 'Sportverein Beispiel e.V.' })).toBe(plain);
+    expect(key({ company: 'Sportverein Beispiel e. V.' })).toBe(plain);
+    expect(key({ company: 'Sportverein Beispiel EV' })).toBe(plain);
+  });
+
+  it.each([
+    'Koch m/w/d',
+    'Koch w/m/d',
+    'Koch d/m/w',
+    'Koch (m/w/d)',
+    'Koch M/W/D',
+    'Koch m / w / d',
+  ])('removes the gender marker from %j', (title) => {
+    expect(key({ title })).toBe(key({ title: 'Koch' }));
+  });
+
+  it('strips a leading German postcode from the city, but not a trailing one', () => {
+    expect(key({ location: '96047 Bamberg' })).toBe(key({ location: 'Bamberg' }));
+    expect(key({ location: 'Bamberg 96047' })).not.toBe(key({ location: 'Bamberg' }));
+  });
+});
+
 describe('urlKey', () => {
   it('drops scheme, www, fragment, tracking parameters and trailing slash', () => {
     const a = urlKey('https://www.Example.invalid/jobs/42/?utm_source=x&gclid=1&id=7#apply');
