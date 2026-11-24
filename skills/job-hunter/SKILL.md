@@ -29,6 +29,7 @@ Never invent a job, a status, a date or a score: read it with a tool. Ids are UU
 - `list_targets`: the Targets with their own criteria and the criteria they end up using.
 - `upsert_target`: create a Target or change the one with that name. Only the keys you pass change and null clears one. The Target is matched over all stored Jobs at once. Editing criteria never rescores a scored Job; only the alert threshold changes what is tagged.
 - `get_global_defaults` and `update_global_defaults`: the settings every Target falls back to, including `goneColdDays` (days of silence before an application goes Gone cold; null turns it off). Changing a default changes every Target that inherits it, so say so to the user first.
+- `bundesagenturSearches` (a criteria field of Global defaults and of a Target): a list of up to 20 saved Bundesagentur search URLs, for example `https://www.arbeitsagentur.de/jobsuche/suche?wo=Musterstadt&umkreis=15&arbeitszeit=tz&angebotsart=1`. Every run fetches each one with its own town, radius and work-time filter, before the searches built from keywords and locations (50 searches at most per run). A Target that sets its own list replaces the Global one, null inherits, and a Target with only URLs still searches. Only https URLs on `www.arbeitsagentur.de` under `/jobsuche/suche` are accepted, only the parameters `was`, `wo`, `umkreis`, `arbeitszeit`, `angebotsart` and `sort` are kept, and a URL with none of them is refused. Ask the user for the URLs; never invent one.
 
 ## Watchlist and boards
 

@@ -4,11 +4,21 @@ import type { FetchResult, NormalizedPosting, Source } from '../source';
 export const BUNDESAGENTUR = 'bundesagentur';
 
 /** Builds the API query string of one search from the parameters Matching hands out. */
-export const bundesagenturQuery = (q: { was?: string; wo?: string; umkreis?: number }): string => {
+export const bundesagenturQuery = (q: {
+  was?: string;
+  wo?: string;
+  umkreis?: number;
+  arbeitszeit?: string;
+  angebotsart?: string;
+  sort?: string;
+}): string => {
   const p = new URLSearchParams();
   if (q.was !== undefined) p.set('was', q.was);
   if (q.wo !== undefined) p.set('wo', q.wo);
   if (q.umkreis !== undefined) p.set('umkreis', String(q.umkreis));
+  if (q.arbeitszeit !== undefined) p.set('arbeitszeit', q.arbeitszeit);
+  if (q.angebotsart !== undefined) p.set('angebotsart', q.angebotsart);
+  if (q.sort !== undefined) p.set('sort', q.sort);
   return p.toString();
 };
 

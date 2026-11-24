@@ -175,6 +175,15 @@ describe('bundesagentur source', () => {
 
     it('builds the query string from Matching parameters', () => {
       expect(bundesagenturQuery({})).toBe('');
+      expect(
+        bundesagenturQuery({
+          wo: 'Musterstadt',
+          umkreis: 15,
+          arbeitszeit: 'tz',
+          angebotsart: '1',
+          sort: 'veroeffdatum',
+        }),
+      ).toBe('wo=Musterstadt&umkreis=15&arbeitszeit=tz&angebotsart=1&sort=veroeffdatum');
       expect(bundesagenturQuery({ was: 'Alpha & Küche', wo: '50667', umkreis: 7 })).toBe(
         'was=Alpha+%26+K%C3%BCche&wo=50667&umkreis=7',
       );
