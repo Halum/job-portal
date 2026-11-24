@@ -46,15 +46,19 @@ The system raises a Review item when it is not sure: an AI fit rejection (a job 
 
 ## Career bank (resume and cover letter material)
 
-The Career bank holds the user's Master resume as Work experiences with Experience points. Files never travel through MCP. Upload one with curl (the same bearer token as the MCP endpoint) and pass the returned id to a tool:
+The Career bank holds the user's Master resume and Master cover letter as small items: Work experiences with Experience points, Resume entries (education, skill, language, certificate), Cover letter outline sections with Cover letter paragraphs, one Writing style profile and the contact details (with an optional photo). Files never travel through MCP. Upload one with curl (the same bearer token as the MCP endpoint) and pass the returned id to a tool:
 
 `curl -sS -X POST -H "Authorization: Bearer $TOKEN" --data-binary @cv.pdf "$BASE/files?kind=master_resume&filename=cv.pdf"`
 
 `kind` is `master_resume`, `master_cover_letter` or `photo`. PDF, DOCX, Markdown and UTF-8 text are accepted for the Master files and PNG or JPEG for the photo, up to 10 MB; the type is checked from the content. `GET $BASE/files/<id>` returns the stored file again. Replacing a Master keeps the older upload.
 
 - `register_master_document`: mark an uploaded file id as the current Master resume or Master cover letter.
-- `save_career_bank`: import a parse of the Master resume (Work experiences with role, organisation, start, end or null, place, and their Experience points with skills). Parse the file yourself, show the result to the user and call this only after they reviewed it. It adds to what is stored, so do not import the same resume twice.
-- `get_career_bank`: the current Master files and the Work experiences in order, each with its Experience points.
+- `save_career_bank`: import a parse of the Master files: Work experiences (role, organisation, start, end or null, place) with Experience points (text, skills), `resumeEntries`, `coverLetterOutline` (sections with their paragraphs: text, themes, skills), `writingStyle` and `contact`. Every part is optional. Parse the files yourself, show the result to the user and call this only after they reviewed it. It adds to what is stored, so do not import the same resume twice; a stored writing style or contact is updated instead.
+- `get_career_bank`: the whole Career bank in one call: Master files, Work experiences with points, Resume entries, the outline with paragraphs, the writing style and the contact details. Hidden items are listed with `hidden: true`.
+- `upsert_career_item`: add or edit one item of any kind (the tool description lists each kind's value). Edits replace the whole value. Give the reason: `coaching` for a better sentence the user accepted, `enrichment` for an answer to an Enrichment question, `user_edit` for the user's own change; `actor` is `user` when the user dictated it. The photo is set here, on the contact details, by an uploaded photo file id.
+- `hide_career_item`: the delete. The item is hidden and a revision recorded, never removed.
+- `restore_career_item`: unhide an item, or with a `revisionId` set it back to an earlier text. Either is a new revision.
+- `list_career_revisions`: the history of one item (old and new text, reason, actor, time), to show the user how a line changed or to pick a `revisionId`.
 
 ## How the system is running
 
