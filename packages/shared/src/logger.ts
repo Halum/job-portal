@@ -2,7 +2,10 @@ import { pino, type Logger } from 'pino';
 
 export type { Logger } from 'pino';
 
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'silent';
+/** Levels a process may be configured with (LOG_LEVEL). */
+export const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
+/** 'silent' is logger-only, for tests. */
+export type LogLevel = (typeof LOG_LEVELS)[number] | 'silent';
 
 export interface CreateLoggerOptions {
   level?: LogLevel;

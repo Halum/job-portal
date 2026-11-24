@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LOG_LEVELS } from '@job-portal/shared';
 
 export class ConfigError extends Error {
   override name = 'ConfigError';
@@ -14,7 +15,7 @@ const envSchema = z.object({
   // Loopback by default; set 0.0.0.0 only when something in front of it needs the port.
   HOST: z.string().min(1).default('127.0.0.1'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
-  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  LOG_LEVEL: z.enum(LOG_LEVELS).default('info'),
 });
 
 export interface Config {
