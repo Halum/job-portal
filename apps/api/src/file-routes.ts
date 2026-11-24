@@ -15,17 +15,29 @@ export function isFilePath(pathname: string): boolean {
   return pathname === '/files' || FILE_ID.test(pathname);
 }
 
-class TooLargeError extends Error {}
-
-async function readBody(req: IncomingMessage): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > MAX_FILE_BYTES) throw new TooLargeError();
-    chunks.push(chunk as Buffer);
-  }
-  return Buffer.concat(chunks);
+/**
+ * Reads the body; null as soon as it passes the limit. Past that the rest is drained and dropped (so the client
+ * can read the answer), and a client that keeps sending beyond twice the limit is cut off.
+ */
+function readBody(req: IncomingMessage, limit: number): Promise<Buffer | null> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size <= limit) {
+        chunks.push(chunk);
+        return;
+      }
+      chunks.length = 0;
+      resolve(null);
+      if (size > 2 * MAX_FILE_BYTES) req.destroy();
+    });
+    req.on('end', () => {
+      resolve(Buffer.concat(chunks));
+    });
+    req.on('error', reject);
+  });
 }
 
 function send(
@@ -59,21 +71,12 @@ export async function handleFileRoute(
       json(res, 400, { error: 'kind and filename are required' });
       return;
     }
-    // A declared size over the limit is refused unread; the body is drained so the client sees the answer.
-    if (Number(req.headers['content-length']) > MAX_FILE_BYTES) {
+    // A declared size over the limit is refused unread: limit 0 stores nothing and only drains.
+    const declaredTooLarge = Number(req.headers['content-length']) > MAX_FILE_BYTES;
+    const bytes = await readBody(req, declaredTooLarge ? 0 : MAX_FILE_BYTES);
+    if (bytes === null) {
       send(res, 413, {});
-      req.resume();
       return;
-    }
-    let bytes: Buffer;
-    try {
-      bytes = await readBody(req);
-    } catch (err) {
-      if (err instanceof TooLargeError) {
-        send(res, 413, { Connection: 'close' });
-        return;
-      }
-      throw err;
     }
     try {
       const info = await documents.storeFile(user.id, { ...query.data, bytes });
@@ -102,6 +105,7 @@ export async function handleFileRoute(
     {
       'Content-Type': file.info.mediaType,
       'Content-Length': String(file.bytes.length),
+      'X-Content-Type-Options': 'nosniff',
       'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.info.filename)}`,
     },
     file.bytes,

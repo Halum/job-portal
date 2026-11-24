@@ -103,6 +103,24 @@ function isUtf8Text(bytes: Buffer): boolean {
   }
 }
 
+/** True when the zip's central directory lists an entry with exactly this name (file content is never searched). */
+function zipHasEntry(zip: Buffer, name: string): boolean {
+  // The end-of-central-directory record is within the last 22 + 65535 bytes.
+  const end = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]), zip.length - 22);
+  if (end < 0 || end < zip.length - 22 - 0xffff) return false;
+  const count = zip.readUInt16LE(end + 10);
+  let at = zip.readUInt32LE(end + 16);
+  for (let i = 0; i < count; i++) {
+    if (at + 46 > zip.length || zip.readUInt32LE(at) !== 0x02014b50) return false;
+    const nameLength = zip.readUInt16LE(at + 28);
+    const next = at + 46 + nameLength + zip.readUInt16LE(at + 30) + zip.readUInt16LE(at + 32);
+    if (next > zip.length) return false;
+    if (zip.toString('utf8', at + 46, at + 46 + nameLength) === name) return true;
+    at = next;
+  }
+  return false;
+}
+
 /** The media type of an upload, decided from its content alone; null when the kind does not allow it. */
 export function detectMediaType(kind: FileKind, filename: string, bytes: Buffer): string | null {
   if (kind === 'photo') {
@@ -111,9 +129,8 @@ export function detectMediaType(kind: FileKind, filename: string, bytes: Buffer)
     return null;
   }
   if (startsWith(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d])) return 'application/pdf';
-  // A DOCX is a zip with a word/document.xml entry; zip entry names are stored uncompressed.
   if (startsWith(bytes, [0x50, 0x4b, 0x03, 0x04])) {
-    return bytes.includes('word/document.xml', 0, 'latin1') ? DOCX : null;
+    return zipHasEntry(bytes, 'word/document.xml') ? DOCX : null;
   }
   if (isUtf8Text(bytes)) return /\.(md|markdown)$/i.test(filename) ? 'text/markdown' : 'text/plain';
   return null;
