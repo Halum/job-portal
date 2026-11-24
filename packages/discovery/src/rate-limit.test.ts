@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createRateLimitedFetch } from './rate-limit';
+import { createMemorySlots, createRateLimitedFetch } from './rate-limit';
 
 /** A virtual clock: sleeping advances time, so the test never waits. */
 function setup(requestsPerSecond: number): {
@@ -14,7 +14,7 @@ function setup(requestsPerSecond: number): {
     return Promise.resolve(new Response('{}'));
   };
   const limited = createRateLimitedFetch(requestsPerSecond, inner, {
-    now: () => t,
+    slots: createMemorySlots(() => t),
     sleep: (ms) => {
       t += ms;
       return Promise.resolve();

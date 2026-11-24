@@ -1,4 +1,5 @@
 import type { FetchResult, NormalizedPosting, Source } from '../source';
+import { isValidBoardToken } from './board-url';
 
 export const ATS_IDS = ['greenhouse', 'lever', 'ashby'] as const;
 export type Ats = (typeof ATS_IDS)[number];
@@ -151,6 +152,10 @@ export function fetchBoardPostings(
   board: BoardRef,
   fetchImpl: typeof fetch = fetch,
 ): Promise<NormalizedPosting[]> {
+  // The one guard every caller routes through: a token is never trusted into a URL path.
+  if (!isValidBoardToken(board.token)) {
+    return Promise.reject(new Error(`invalid board token: ${JSON.stringify(board.token)}`));
+  }
   return adapters[ats](board, fetchImpl);
 }
 

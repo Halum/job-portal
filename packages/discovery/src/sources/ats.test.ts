@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { createRateLimitedFetch } from '../rate-limit';
+import { createMemorySlots, createRateLimitedFetch } from '../rate-limit';
 import { createAtsSource, fetchBoardPostings, type BoardRef } from './ats';
 
 const fixture = (name: string): string =>
@@ -137,7 +137,7 @@ describe('createAtsSource', () => {
       return Promise.resolve(new Response(url.includes('lever') ? '[]' : '{"jobs":[]}'));
     };
     const limited = createRateLimitedFetch(2, inner, {
-      now: () => t,
+      slots: createMemorySlots(() => t),
       sleep: (ms) => {
         t += ms;
         return Promise.resolve();
