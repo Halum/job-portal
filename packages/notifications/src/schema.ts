@@ -15,7 +15,8 @@ import {
 /** Each module owns one Postgres schema; no other module queries it. */
 export const notificationsSchema = pgSchema('notifications');
 
-export const MESSAGE_KINDS = ['digest', 'alert'] as const;
+export const MESSAGE_KINDS = ['digest', 'alert', 'line'] as const;
+/** digest: new matches; alert: a failure or recovery; line: one short status line (Gone cold, a Gmail status change). */
 export type MessageKind = (typeof MESSAGE_KINDS)[number];
 /** pending: not delivered yet; sent: delivered; folded: merged into a later digest. */
 export const MESSAGE_STATUSES = ['pending', 'sent', 'folded'] as const;

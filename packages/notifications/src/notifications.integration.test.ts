@@ -417,6 +417,32 @@ describe('notifications against real Postgres and a fake webhook', () => {
     expect((sinces[2] ?? first).getTime()).toBeGreaterThan(first.getTime());
   });
 
+  it('sendLines sends each short line as its own message of kind line, before a waiting digest', async () => {
+    const user = newUser();
+    rejectKinds.add('digest');
+    tags = [tag(1)];
+    await make().afterRun(user, { since, ...NONE });
+    rejectKinds.clear();
+    received = [];
+    await make().sendLines(user, ['Gone cold: Role A at Firma X, 14 days', 'Rejected: Role B']);
+    expect(received.map((m) => [m.kind, m.text, m.topicId])).toEqual([
+      ['line', 'Gone cold: Role A at Firma X, 14 days', TOPIC],
+      ['line', 'Rejected: Role B', TOPIC],
+      ['digest', expect.stringContaining('New matches') as string, TOPIC],
+    ]);
+  });
+
+  it('keeps a line the webhook did not take and sends it, once, on the next flush', async () => {
+    const user = newUser();
+    statuses = [503];
+    await make(1).sendLines(user, ['Gone cold: Role C']);
+    expect(received.filter((m) => m.kind === 'line')).toEqual([]);
+    statuses = [200];
+    await make().afterRun(user, { since, ...NONE });
+    await make().afterRun(user, { since, ...NONE });
+    expect(received.filter((m) => m.kind === 'line').map((m) => m.text)).toEqual(['Gone cold: Role C']);
+  });
+
   it('treats a webhook-level 4xx (workflow off, bad auth) as the webhook being down: the type opens and the pass stops', async () => {
     const user = newUser();
     statuses = [404];
