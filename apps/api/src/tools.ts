@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { userSchema, type User } from '@job-portal/accounts';
-import { DISCOVERY_STATES, type Discovery } from '@job-portal/discovery';
+import { DISCOVERY_STATES, DiscoveryError, type Discovery } from '@job-portal/discovery';
 import { RUN_STATUSES, type Pipeline } from '@job-portal/pipeline';
 
 export interface ToolDeps {
@@ -73,6 +73,15 @@ const text = (value: unknown): { type: 'text'; text: string } => ({
   text: JSON.stringify(value),
 });
 
+/** A tool error: the message of an expected refusal as it is, a fixed text for anything else (never a raw database error). */
+const failure = (
+  err: unknown,
+  fallback: string,
+): { isError: true; content: { type: 'text'; text: string }[] } => ({
+  isError: true,
+  content: [{ type: 'text', text: err instanceof DiscoveryError ? err.message : fallback }],
+});
+
 export function registerTools(mcp: McpServer, user: User, { discovery, pipeline }: ToolDeps): void {
   mcp.registerTool(
     'whoami',
@@ -134,16 +143,20 @@ export function registerTools(mcp: McpServer, user: User, { discovery, pipeline 
       description:
         'Add a job by hand as a Posting with source manual. It goes through the same dedupe, so a later copy from a board merges with it. Adding the same URL again returns the same Job.',
       inputSchema: {
-        title: z.string().min(1),
-        company: z.string().min(1).optional(),
-        city: z.string().min(1).optional(),
-        url: z.url(),
+        title: z.string().min(1).max(300),
+        company: z.string().min(1).max(200).optional(),
+        city: z.string().min(1).max(100).optional(),
+        url: z.url({ protocol: /^https?$/ }).max(2000),
       },
       outputSchema: { jobId: z.string() },
     },
     async (input) => {
-      const out = await discovery.addJob(user.id, input);
-      return { content: [text(out)], structuredContent: out };
+      try {
+        const out = await discovery.addJob(user.id, input);
+        return { content: [text(out)], structuredContent: out };
+      } catch (err) {
+        return failure(err, 'add_job failed');
+      }
     },
   );
 
@@ -160,10 +173,7 @@ export function registerTools(mcp: McpServer, user: User, { discovery, pipeline 
         const out = await discovery.splitJob(user.id, jobId, postingIds);
         return { content: [text(out)], structuredContent: out };
       } catch (err) {
-        return {
-          isError: true,
-          content: [{ type: 'text', text: err instanceof Error ? err.message : 'split failed' }],
-        };
+        return failure(err, 'split_job failed');
       }
     },
   );

@@ -13,6 +13,11 @@ import {
 
 export const MANUAL_SOURCE = 'manual';
 
+/** A refusal that is safe to show the caller as it is (bad input, unknown id); anything else is internal. */
+export class DiscoveryError extends Error {
+  override name = 'DiscoveryError';
+}
+
 export interface PollResult {
   fetched: number;
   newPostings: number;
@@ -247,14 +252,19 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
       const { postings: fetched, errors } = await source.fetch();
       let newPostings = 0;
       for (const p of fetched) {
-        if ((await ingest(db, userId, sourceId, p)).isNew) newPostings += 1;
+        // One Posting that cannot be stored is an error line; the rest of the poll goes on.
+        try {
+          if ((await ingest(db, userId, sourceId, p)).isNew) newPostings += 1;
+        } catch {
+          errors.push(`posting ${p.sourcePostingId} could not be stored`);
+        }
       }
       return { fetched: fetched.length, newPostings, errors };
     },
 
     async addJob(userId, input) {
       const key = urlKey(input.url);
-      if (!key) throw new Error('url must be an absolute http or https URL');
+      if (!key) throw new DiscoveryError('url must be an absolute http or https URL');
       const { jobId } = await ingest(db, userId, MANUAL_SOURCE, {
         sourcePostingId: key,
         title: input.title,
@@ -268,7 +278,7 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
 
     async splitJob(userId, jobId, postingIds) {
       const ids = [...new Set(postingIds)];
-      if (ids.length === 0) throw new Error('give at least one posting to split off');
+      if (ids.length === 0) throw new DiscoveryError('give at least one posting to split off');
       return db.transaction(async (tx: Tx) => {
         // Locking the Job serializes concurrent splits of it.
         const [job] = await tx
@@ -276,15 +286,16 @@ export function createDiscovery(db: Db, sources: Source[]): Discovery {
           .from(jobs)
           .where(and(eq(jobs.userId, userId), eq(jobs.id, jobId)))
           .for('update');
-        if (!job) throw new Error(`No Job ${jobId}`);
+        if (!job) throw new DiscoveryError(`No Job ${jobId}`);
         const own = await tx
           .select()
           .from(postings)
           .where(and(eq(postings.userId, userId), eq(postings.jobId, jobId)))
           .orderBy(asc(postings.firstSeenAt));
         const moved = own.filter((o) => ids.includes(o.id));
-        if (moved.length !== ids.length) throw new Error('not a posting of this job');
-        if (moved.length === own.length) throw new Error('cannot move every posting out of a Job');
+        if (moved.length !== ids.length) throw new DiscoveryError('not a posting of this job');
+        if (moved.length === own.length)
+          throw new DiscoveryError('cannot move every posting out of a Job');
         const first = moved[0];
         if (!first) throw new Error('nothing to move');
 

@@ -194,6 +194,51 @@ describe('MCP endpoint over real HTTP', () => {
     await client.close();
   });
 
+  it('add_job refuses other schemes and over-long fields', async () => {
+    const client = await connect();
+    const refused = async (args: Record<string, string>): Promise<boolean> => {
+      const outcome = await client
+        .callTool({ name: 'add_job', arguments: args })
+        .catch((err: unknown) => err);
+      return outcome instanceof Error || Boolean((outcome as { isError?: boolean }).isError);
+    };
+    const ok = { title: 'Koch', url: 'https://x.example.invalid/j/77' };
+    expect(await refused({ ...ok, url: 'ftp://x.example.invalid/j' })).toBe(true);
+    expect(await refused({ ...ok, url: 'javascript:alert(1)' })).toBe(true);
+    expect(await refused({ ...ok, title: 'x'.repeat(301) })).toBe(true);
+    expect(await refused({ ...ok, company: 'x'.repeat(201) })).toBe(true);
+    expect(await refused({ ...ok, city: 'x'.repeat(101) })).toBe(true);
+    expect(await refused({ ...ok, url: `https://x.example.invalid/${'a'.repeat(2000)}` })).toBe(
+      true,
+    );
+    expect(await refused(ok)).toBe(false);
+    await client.close();
+  });
+
+  it('add_job and split_job answer with a fixed text, never a raw database error', async () => {
+    const client = await connect();
+    // A NUL byte passes the schema and makes Postgres refuse the insert.
+    const bad = await client.callTool({
+      name: 'add_job',
+      arguments: { title: `Koch${String.fromCharCode(0)}`, url: 'https://x.example.invalid/j/nul' },
+    });
+    expect(bad.isError).toBe(true);
+    expect(JSON.stringify(bad.content)).toBe(
+      JSON.stringify([{ type: 'text', text: 'add_job failed' }]),
+    );
+    // An expected refusal keeps its own message.
+    const missing = await client.callTool({
+      name: 'split_job',
+      arguments: {
+        jobId: '00000000-0000-4000-8000-0000000000ff',
+        postingIds: ['00000000-0000-4000-8000-0000000000fe'],
+      },
+    });
+    expect(missing.isError).toBe(true);
+    expect(JSON.stringify(missing.content)).toContain('No Job');
+    await client.close();
+  });
+
   it('get_run_history returns the recorded runs with their counts', async () => {
     const client = await connect();
     const { runs } = (await client.callTool({ name: 'get_run_history', arguments: {} }))

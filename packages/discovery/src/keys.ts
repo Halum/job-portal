@@ -20,8 +20,15 @@ const LEGAL_TOKENS = new Set([
 ]);
 const TRACKING_PARAM = /^(utm_.*|gclid|fbclid|mc_.*|ref|referrer|trk|trkinfo)$/i;
 
+// "m/w/d" and its variants when not in brackets (brackets are removed before this runs).
+const GENDER_MARKER = /\b[mwdfx]\s*\/\s*[mwdfx]\s*\/\s*[mwdfx]\b/gi;
+
 const fold = (s: string): string =>
   s
+    .replace(/ß/g, 'ss')
+    .replace(/\+/g, ' plus ')
+    .replace(/#/g, ' sharp ')
+    .replace(/\be\.\s?v\b\.?/gi, 'ev')
     .normalize('NFKD')
     .replace(/\p{M}/gu, '')
     .toLowerCase()
@@ -43,8 +50,9 @@ export function companyKey({ company, title, location }: CompanyKeyInput): strin
     .filter(Boolean);
   while (tokens.length > 1 && LEGAL_TOKENS.has(tokens.at(-1) ?? '')) tokens.pop();
   const c = tokens.join(' ');
-  const t = fold((title ?? '').replace(/\([^)]*\)/g, ' '));
-  const l = fold(location ?? '');
+  const t = fold((title ?? '').replace(/\([^)]*\)/g, ' ').replace(GENDER_MARKER, ' '));
+  // A leading German postcode ("96047 Bamberg") is not part of the city.
+  const l = fold((location ?? '').replace(/^\s*\d{5}\s+/, ''));
   return c && t && l ? `${c}|${t}|${l}` : null;
 }
 
