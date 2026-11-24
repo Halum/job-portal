@@ -8,6 +8,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testconta
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createAccounts } from '@job-portal/accounts';
+import { createAiLog } from '@job-portal/ai';
 import {
   createBoardDirectory,
   createWatchlist,
@@ -94,6 +95,7 @@ describe('Watchlist and add_board over MCP (recorded ATS responses, real Postgre
       }),
       pipeline: createPipeline(handle.db, discovery),
       tracker: createTracker(handle.db, discovery),
+      aiLog: createAiLog(handle.db),
       boards: {
         watchlist: guarded,
         fetch: fakeFetch,

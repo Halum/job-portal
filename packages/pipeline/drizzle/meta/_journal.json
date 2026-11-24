@@ -15,6 +15,13 @@
       "when": 1795539536328,
       "tag": "0001_wakeful_scrambler",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795542030506,
+      "tag": "0002_unique_dragon_lord",
+      "breakpoints": true
     }
   ]
 }

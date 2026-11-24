@@ -1,5 +1,7 @@
+import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -10,6 +12,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import type { Criteria } from './criteria';
+import type { LanguageRequirement } from './scoring';
 
 /** Each module owns one Postgres schema; no other module queries it. */
 export const matchingSchema = pgSchema('matching');
@@ -54,5 +57,34 @@ export const candidates = matchingSchema.table(
   (t) => [
     unique('candidates_target_job').on(t.targetId, t.jobId),
     index('candidates_user_idx').on(t.userId, t.targetId),
+  ],
+);
+
+/** The AI fit score of one Job against one Target. A pair with no row here is unscored. */
+export const scores = matchingSchema.table(
+  'scores',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull(),
+    targetId: uuid('target_id')
+      .notNull()
+      .references(() => targets.id),
+    jobId: uuid('job_id').notNull(),
+    /** 0 to 100, after the language cap. */
+    score: integer('score').notNull(),
+    reasons: jsonb('reasons').$type<string[]>().notNull(),
+    redFlags: jsonb('red_flags').$type<string[]>().notNull(),
+    /** What the posting demands, as the model extracted it. */
+    languages: jsonb('languages').$type<LanguageRequirement[]>().notNull(),
+    /** Judged in code against the Target's language ability; null when the Target sets none. */
+    languageMet: boolean('language_met'),
+    /** Score at or above the alert threshold when it was scored. */
+    tagged: boolean('tagged').notNull(),
+    scoredAt: timestamp('scored_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('scores_target_job').on(t.targetId, t.jobId),
+    index('scores_user_idx').on(t.userId, t.targetId),
+    check('scores_range', sql`${t.score} between 0 and 100`),
   ],
 );

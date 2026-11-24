@@ -18,6 +18,9 @@ Terms name things in code, database, tests and issues. Source of truth: the spec
 - **Prerank**: the keyword score per Target that keeps only the top prerank_top_n Postings for the AI.
 - **Fit score**: the AI's 0 to 100 rating of a Job against one Target, with reasons and red flags.
 - **AI runner**: the one interface for calling an AI, with an OpenRouter and a `claude -p` implementation.
+- **AI call log**: one row per AI call (runner, model, feature, tokens, cost where reported, duration, outcome, error class), table `ai.calls`; its totals show in `get_run_history`.
+- **Tag**: a Job scored at or above the alert threshold for a Target; stored with the score at scoring time.
+- **Language requirement**: what a posting demands of the applicant's language (language, CEFR level, required or not), extracted by the AI and judged in code against the Target's language ability.
 - **Pipeline**: the worker module that owns Runs: it schedules and executes them, from fetching a Source to scoring Jobs.
 - **Run**: one execution of the Pipeline for one Source, with its counts and errors.
 - **Digest**: the notification message listing Jobs that newly gained a Target tag in a Run.

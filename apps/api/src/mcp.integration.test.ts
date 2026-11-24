@@ -6,6 +6,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testconta
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createAccounts } from '@job-portal/accounts';
+import { createAiLog } from '@job-portal/ai';
 import { createWatchlist } from '@job-portal/boards';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import { ADD_JOB_LIMITS, createBundesagenturSource, createDiscovery } from '@job-portal/discovery';
@@ -61,6 +62,7 @@ describe('MCP endpoint over real HTTP', () => {
       matching,
       pipeline,
       tracker,
+      aiLog: createAiLog(handle.db),
       boards: {
         watchlist: createWatchlist(handle.db),
         fetch: () => Promise.reject(new Error('no network in tests')),
@@ -490,6 +492,7 @@ describe('MCP endpoint over real HTTP', () => {
         }),
         pipeline: createPipeline(handle.db, discovery),
         tracker: createTracker(handle.db, discovery),
+        aiLog: createAiLog(handle.db),
         boards: {
           watchlist: createWatchlist(handle.db),
           fetch: () => Promise.reject(new Error('no network in tests')),

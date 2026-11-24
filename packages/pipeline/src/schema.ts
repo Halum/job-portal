@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   check,
+  doublePrecision,
   integer,
   jsonb,
   pgSchema,
@@ -28,6 +29,13 @@ export const runs = pipelineSchema.table(
     newPostings: integer('new_postings').notNull().default(0),
     /** Job and Target pairs that passed the hard filters and the prerank in this run. */
     prerankPassed: integer('prerank_passed').notNull().default(0),
+    /** Job and Target pairs that got an AI fit score in this run (any candidate, not only new ones). */
+    scored: integer('scored').notNull().default(0),
+    /** Of those, the pairs at or above the alert threshold. */
+    tagged: integer('tagged').notNull().default(0),
+    aiCalls: integer('ai_calls').notNull().default(0),
+    /** US dollars the runner reported for this run's AI calls. */
+    aiCostUsd: doublePrecision('ai_cost_usd').notNull().default(0),
     errors: jsonb('errors').$type<string[]>().notNull().default([]),
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp('finished_at', { withTimezone: true }),

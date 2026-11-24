@@ -7,6 +7,7 @@ import {
   DiscoveryError,
   type Discovery,
 } from '@job-portal/discovery';
+import type { AiLog } from '@job-portal/ai';
 import { criteriaPatchSchema, criteriaSchema, type Matching } from '@job-portal/matching';
 import { RUN_STATUSES, type Pipeline } from '@job-portal/pipeline';
 import type { Logger } from '@job-portal/shared';
@@ -24,6 +25,8 @@ export interface ToolDeps {
   discovery: Discovery;
   matching: Matching;
   pipeline: Pipeline;
+  /** The AI call log, for the totals in get_run_history. */
+  aiLog: Pick<AiLog, 'totals'>;
   boards: BoardToolDeps;
   tracker: Tracker;
   logger: Logger;
@@ -78,6 +81,35 @@ const jobSchema = z.object({
   postings: z.array(postingSchema),
 });
 
+const scoreSchema = z.object({
+  targetId: z.string(),
+  targetName: z.string(),
+  prerankScore: z.number(),
+  unknownLocation: z
+    .boolean()
+    .describe('The place could not be resolved, so the radius was not checked.'),
+  score: z.number().nullable().describe('AI fit score 0 to 100; null while unscored.'),
+  reasons: z.array(z.string()),
+  redFlags: z.array(z.string()),
+  languages: z
+    .array(
+      z.object({
+        language: z.string(),
+        required: z.enum(['none', 'optional', 'required']),
+        level: z.string().nullable(),
+        phrase: z.string().nullable(),
+      }),
+    )
+    .describe('What the posting demands, as the AI extracted it.'),
+  languageMet: z
+    .boolean()
+    .nullable()
+    .describe(
+      'Judged in code against the Target language ability; null when the Target sets none.',
+    ),
+  tagged: z.boolean().describe('Scored at or above the alert threshold.'),
+});
+
 const runSchema = z.object({
   id: z.string(),
   sourceId: z.string(),
@@ -85,6 +117,10 @@ const runSchema = z.object({
   fetched: z.number(),
   newPostings: z.number(),
   prerankPassed: z.number().describe('Job and Target pairs that passed the filters and prerank'),
+  scored: z.number().describe('Job and Target pairs that got an AI fit score in this run'),
+  tagged: z.number().describe('Of those, the pairs at or above the alert threshold'),
+  aiCalls: z.number(),
+  aiCostUsd: z.number().describe('US dollars the runner reported for this run'),
   errors: z.array(z.string()),
   errorCount: z.number().describe('Length of errors'),
   startedAt: isoDate,
@@ -169,7 +205,7 @@ async function refusable<T>(
 export function registerTools(
   mcp: McpServer,
   user: User,
-  { discovery, matching, pipeline, tracker, boards, logger }: ToolDeps,
+  { discovery, matching, pipeline, tracker, aiLog, boards, logger }: ToolDeps,
 ): void {
   registerBoardTools(mcp, user, boards, logger);
 
@@ -194,6 +230,15 @@ export function registerTools(
           .uuid()
           .optional()
           .describe('Only Jobs that passed the hard filters and prerank of this Target.'),
+        minScore: z
+          .number()
+          .int()
+          .min(0)
+          .max(100)
+          .optional()
+          .describe(
+            'With targetId: only Jobs whose AI fit score for that Target is at least this. Unscored Jobs never match, not even 0.',
+          ),
         discoveryState: z.enum(DISCOVERY_STATES).optional(),
         applicationStatus: z.enum(APPLICATION_STATUSES).optional(),
         discoveredSince: z.iso
@@ -210,18 +255,29 @@ export function registerTools(
       limit,
       cursor,
       targetId,
+      minScore,
       discoveryState,
       applicationStatus,
       discoveredSince,
       applyByBefore,
     }) => {
+      if (minScore !== undefined && targetId === undefined) {
+        return {
+          isError: true,
+          content: [
+            { type: 'text' as const, text: 'minScore needs targetId: scores are per Target' },
+          ],
+        };
+      }
       const filtered = await refusable(async () =>
         applicationStatus || applyByBefore
           ? tracker.findJobIds(user.id, { applicationStatus, applyByOnOrBefore: applyByBefore })
           : null,
       );
       if (!filtered.ok) return filtered.error;
-      const byTarget = targetId ? new Set(await matching.listJobIds(user.id, { targetId })) : null;
+      const byTarget = targetId
+        ? new Set(await matching.listJobIds(user.id, { targetId, minScore }))
+        : null;
       const jobIds =
         filtered.value && byTarget
           ? filtered.value.filter((id) => byTarget.has(id))
@@ -252,22 +308,24 @@ export function registerTools(
     'get_job',
     {
       description:
-        'Get one Job with all its postings (each as the source gave it), its tracking, its Timeline (oldest first) and its notes.',
+        'Get one Job with all its postings (each as the source gave it), its tracking, its Timeline (oldest first), its notes and, for each Target it is a candidate for, its AI fit score, reasons, red flags, language judgement, tag and unknown-location flag.',
       inputSchema: { jobId: z.uuid() },
       outputSchema: {
         job: jobSchema.extend({
           postings: z.array(postingSchema.extend({ raw: z.unknown() })),
           timeline: z.array(timelineSchema),
           notes: z.array(noteSchema),
+          scores: z.array(scoreSchema),
         }),
       },
     },
     async ({ jobId }) => {
       const job = await discovery.getJob(user.id, jobId);
       if (!job) return { isError: true, content: [{ type: 'text', text: `No Job ${jobId}` }] };
-      const [states, { events, notes }] = await Promise.all([
+      const [states, { events, notes }, scores] = await Promise.all([
         tracker.getStates(user.id, [jobId]),
         tracker.getTimeline(user.id, jobId),
+        matching.listScores(user.id, jobId),
       ]);
       const out = {
         job: {
@@ -280,6 +338,7 @@ export function registerTools(
           },
           timeline: events.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() })),
           notes: notes.map((n) => ({ ...n, createdAt: n.createdAt.toISOString() })),
+          scores,
         },
       };
       return { content: [text(out)], structuredContent: out };
@@ -476,13 +535,26 @@ export function registerTools(
     'get_run_history',
     {
       description:
-        'List recent Runs, newest first: source, status, counts fetched and new postings, errors.',
+        'List recent Runs, newest first: source, status, counts (fetched, new postings, prerank passed, scored, tagged, AI calls, AI cost in US dollars) and errors, plus aiTotals: every AI call ever logged for the user (calls, failures, tokens, cost where reported).',
       inputSchema: { limit: z.number().int().min(1).max(100).optional() },
-      outputSchema: { runs: z.array(runSchema) },
+      outputSchema: {
+        runs: z.array(runSchema),
+        aiTotals: z.object({
+          calls: z.number(),
+          failures: z.number(),
+          inputTokens: z.number(),
+          outputTokens: z.number(),
+          costUsd: z.number().describe('Sum of the costs the runners reported.'),
+        }),
+      },
     },
     async ({ limit }) => {
-      const runs = await pipeline.listRuns(user.id, limit ?? 20);
+      const [runs, aiTotals] = await Promise.all([
+        pipeline.listRuns(user.id, limit ?? 20),
+        aiLog.totals(user.id),
+      ]);
       const out = {
+        aiTotals,
         runs: runs.map((r) => ({
           ...r,
           errorCount: r.errors.length,

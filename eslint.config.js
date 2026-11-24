@@ -4,7 +4,15 @@ import tseslint from 'typescript-eslint';
 import eslintConfigPrettier from 'eslint-config-prettier';
 
 export default tseslint.config(
-  { ignores: ['**/node_modules/**', '**/coverage/**', '**/drizzle/**', '**/dist/**'] },
+  {
+    ignores: [
+      '**/node_modules/**',
+      '**/coverage/**',
+      '**/drizzle/**',
+      '**/dist/**',
+      '**/test-fixtures/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   {

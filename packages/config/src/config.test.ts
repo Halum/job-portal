@@ -20,6 +20,8 @@ describe('loadConfig', () => {
       sources: { bundesagentur: null, bambase: null, greenhouse: null, lever: null, ashby: null },
       prerankTopN: 20,
       boardRequestsPerSecond: 2,
+      ai: null,
+      alertThreshold: 70,
     });
   });
 
@@ -128,6 +130,75 @@ describe('loadConfig', () => {
         expect(() => loadConfig({ ...valid, BOARD_REQUESTS_PER_SECOND: bad })).toThrow(
           'BOARD_REQUESTS_PER_SECOND',
         );
+      }
+    });
+  });
+
+  describe('AI runner', () => {
+    it('is off until AI_RUNNER is set, and an empty value counts as unset', () => {
+      expect(loadConfig(valid).ai).toBeNull();
+      expect(loadConfig({ ...valid, AI_RUNNER: '' }).ai).toBeNull();
+    });
+
+    it('reads the OpenRouter runner with its key and model', () => {
+      const env = {
+        ...valid,
+        AI_RUNNER: 'openrouter',
+        OPENROUTER_API_KEY: 'placeholder-key',
+        OPENROUTER_MODEL: 'vendor/model',
+      };
+      expect(loadConfig(env).ai).toEqual({
+        runner: 'openrouter',
+        apiKey: 'placeholder-key',
+        model: 'vendor/model',
+      });
+    });
+
+    it('reads the claude runner with binary path (default claude), model and effort (default low)', () => {
+      expect(loadConfig({ ...valid, AI_RUNNER: 'claude', CLAUDE_MODEL: 'sonnet' }).ai).toEqual({
+        runner: 'claude',
+        binaryPath: 'claude',
+        model: 'sonnet',
+        effort: 'low',
+      });
+      const env = {
+        ...valid,
+        AI_RUNNER: 'claude',
+        CLAUDE_MODEL: 'opus',
+        CLAUDE_BINARY_PATH: '/opt/claude',
+        CLAUDE_EFFORT: 'high',
+      };
+      expect(loadConfig(env).ai).toEqual({
+        runner: 'claude',
+        binaryPath: '/opt/claude',
+        model: 'opus',
+        effort: 'high',
+      });
+    });
+
+    it('does not need the settings of the other runner', () => {
+      const env = { ...valid, AI_RUNNER: 'claude', CLAUDE_MODEL: 'sonnet', OPENROUTER_API_KEY: '' };
+      expect(loadConfig(env).ai?.runner).toBe('claude');
+    });
+
+    it.each([
+      [{ AI_RUNNER: 'openrouter', OPENROUTER_MODEL: 'm' }, 'OPENROUTER_API_KEY'],
+      [{ AI_RUNNER: 'openrouter', OPENROUTER_API_KEY: 'k' }, 'OPENROUTER_MODEL'],
+      [{ AI_RUNNER: 'claude' }, 'CLAUDE_MODEL'],
+      [{ AI_RUNNER: 'claude', CLAUDE_MODEL: 'm', CLAUDE_EFFORT: 'huge' }, 'CLAUDE_EFFORT'],
+      [{ AI_RUNNER: 'gpt' }, 'AI_RUNNER'],
+    ])('rejects %j, naming %s', (extra, name) => {
+      expect(() => loadConfig({ ...valid, ...extra })).toThrow(name);
+    });
+  });
+
+  describe('alert threshold default', () => {
+    it('defaults to 70, reads 0 to 100 and rejects the rest', () => {
+      expect(loadConfig(valid).alertThreshold).toBe(70);
+      expect(loadConfig({ ...valid, ALERT_THRESHOLD: '0' }).alertThreshold).toBe(0);
+      expect(loadConfig({ ...valid, ALERT_THRESHOLD: '100' }).alertThreshold).toBe(100);
+      for (const bad of ['101', '-1', '1.5', 'abc']) {
+        expect(() => loadConfig({ ...valid, ALERT_THRESHOLD: bad })).toThrow('ALERT_THRESHOLD');
       }
     });
   });

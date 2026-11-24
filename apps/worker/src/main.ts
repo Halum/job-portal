@@ -1,4 +1,11 @@
 import { createAccounts } from '@job-portal/accounts';
+import {
+  createAi,
+  createAiLog,
+  createClaudeRunner,
+  createOpenRouterRunner,
+  type AiRunner,
+} from '@job-portal/ai';
 import { createWatchlist } from '@job-portal/boards';
 import { loadConfig } from '@job-portal/config';
 import { createDb, runMigrationsWithLock } from '@job-portal/db';
@@ -21,7 +28,17 @@ const user = await createAccounts(db, config.mcpBearerToken).seedUser(config.see
 // Targets decide what the Bundesagentur search asks for; Discovery supplies the Jobs Matching may look at.
 // A Job with any application status is skipped by matching (hasApplication, from the Tracker).
 // (`discovery` and `tracker` are created below; the callbacks only run during a run, after they exist.)
+// The AI runner is chosen by config, with no fallback to the other one; without one nothing is scored.
+const runner: AiRunner | null =
+  config.ai === null
+    ? null
+    : config.ai.runner === 'openrouter'
+      ? createOpenRouterRunner({ apiKey: config.ai.apiKey, model: config.ai.model })
+      : createClaudeRunner(config.ai);
+const ai = runner === null ? undefined : createAi(createAiLog(db), runner);
 const matching = createMatching(db, {
+  ...(ai ? { ai } : {}),
+  defaultAlertThreshold: config.alertThreshold,
   loadJobs: (userId, ids) => discovery.listMatchable(userId, ids),
   hasApplication: async (userId, ids) => {
     const states = await tracker.getStates(userId, ids);
@@ -48,7 +65,7 @@ const { sources, scheduled } = buildSources(config, {
 // Discovery snapshots its Sources, so it is created only now, with every one of them in the list.
 const discovery = createDiscovery(db, sources, logger);
 const tracker = createTracker(db, discovery);
-const pipeline = createPipeline(db, discovery, { matching });
+const pipeline = createPipeline(db, discovery, { matching, ...(ai ? { scoring: matching } : {}) });
 
 const worker = await startWorker({
   redisUrl: config.redisUrl,

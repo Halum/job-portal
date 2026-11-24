@@ -1,4 +1,5 @@
 import { createAccounts } from '@job-portal/accounts';
+import { createAiLog } from '@job-portal/ai';
 import { createWatchlist } from '@job-portal/boards';
 import { loadConfig } from '@job-portal/config';
 import { createDb, runMigrationsWithLock } from '@job-portal/db';
@@ -50,6 +51,7 @@ const server = createApiServer({
   matching,
   pipeline,
   tracker,
+  aiLog: createAiLog(db),
   boards: { watchlist: createWatchlist(db), fetch: limiter.fetch, allowAddBoard },
   logger,
 }).listen(config.port, config.host, () => {

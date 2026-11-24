@@ -70,6 +70,72 @@ describe('pipeline against real Postgres', () => {
     });
   });
 
+  it('scores after matching, even when the poll found nothing new, and records the counts', async () => {
+    poll = () => Promise.resolve({ fetched: 0, newPostings: 0, jobIds: [], errors: [] });
+    const scored = createPipeline(
+      handle.db,
+      { poll: (u, s) => poll(u, s) },
+      {
+        scoring: {
+          score: () =>
+            Promise.resolve({ scored: 3, tagged: 2, calls: 4, costUsd: 0.07, errors: [] }),
+        },
+      },
+    );
+    const run = await scored.execute(USER, 'src-s1');
+    expect(run).toMatchObject({
+      status: 'completed',
+      scored: 3,
+      tagged: 2,
+      aiCalls: 4,
+      aiCostUsd: 0.07,
+    });
+    expect((await scored.listRuns(USER, 50)).find((r) => r.sourceId === 'src-s1')).toMatchObject({
+      scored: 3,
+      aiCalls: 4,
+    });
+  });
+
+  it('a failed AI call ends the run completed with errors and keeps the other counts', async () => {
+    poll = () => Promise.resolve({ fetched: 1, newPostings: 1, jobIds: ['j1'], errors: [] });
+    const scored = createPipeline(
+      handle.db,
+      { poll: (u, s) => poll(u, s) },
+      {
+        scoring: {
+          score: () =>
+            Promise.resolve({
+              scored: 1,
+              tagged: 0,
+              calls: 2,
+              costUsd: 0,
+              errors: ['fit score failed (rate_limit) for a Job and Target'],
+            }),
+        },
+      },
+    );
+    const run = await scored.execute(USER, 'src-s2');
+    expect(run).toMatchObject({
+      status: 'completed_with_errors',
+      fetched: 1,
+      scored: 1,
+      aiCalls: 2,
+    });
+    expect(run?.errors).toEqual(['fit score failed (rate_limit) for a Job and Target']);
+  });
+
+  it('a scoring crash is an error line, not a failed run', async () => {
+    poll = () => Promise.resolve({ fetched: 2, newPostings: 1, jobIds: [], errors: [] });
+    const scored = createPipeline(
+      handle.db,
+      { poll: (u, s) => poll(u, s) },
+      { scoring: { score: () => Promise.reject(new Error('db down')) } },
+    );
+    const run = await scored.execute(USER, 'src-s3');
+    expect(run).toMatchObject({ status: 'completed_with_errors', fetched: 2, scored: 0 });
+    expect(run?.errors).toEqual(['scoring failed: db down']);
+  });
+
   it('a Matching failure is an error line: the run keeps its fetch counts and ends with errors', async () => {
     poll = () => Promise.resolve({ fetched: 3, newPostings: 2, jobIds: ['j1'], errors: [] });
     const matched = createPipeline(

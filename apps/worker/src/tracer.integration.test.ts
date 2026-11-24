@@ -7,6 +7,7 @@ import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redi
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createAccounts } from '@job-portal/accounts';
+import { createAi, createAiLog, createOpenRouterRunner } from '@job-portal/ai';
 import { createWatchlist } from '@job-portal/boards';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import {
@@ -40,6 +41,29 @@ const fakeFetch = ((input: string) => {
   return Promise.resolve(new Response(fixtureText, { status: 200 }));
 }) as unknown as typeof fetch;
 
+// OpenRouter is faked at HTTP level: the real runner posts to a stand-in fetch.
+const fakeOpenRouter = (() =>
+  Promise.resolve(
+    Response.json({
+      model: 'vendor/model',
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              score: 85,
+              reasons: ['kitchen role'],
+              redFlags: [],
+              languages: [
+                { language: 'de', required: 'required', level: 'B1', phrase: 'Deutsch B1' },
+              ],
+            }),
+          },
+        },
+      ],
+      usage: { prompt_tokens: 50, completion_tokens: 10, cost: 0.001 },
+    }),
+  )) as unknown as typeof fetch;
+
 describe('Bundesagentur source to MCP list_jobs', () => {
   let pg: StartedPostgreSqlContainer;
   let redis: StartedRedisContainer;
@@ -57,8 +81,17 @@ describe('Bundesagentur source to MCP list_jobs', () => {
     handle = createDb(pg.getConnectionUri());
     const accounts = createAccounts(handle.db, TOKEN);
     const user = await accounts.seedUser('user@example.invalid');
+    const aiLog = createAiLog(handle.db);
     const matching = createMatching(handle.db, {
       loadJobs: (u, ids) => discovery.listMatchable(u, ids),
+      ai: createAi(
+        aiLog,
+        createOpenRouterRunner({
+          apiKey: 'placeholder-key',
+          model: 'vendor/model',
+          fetch: fakeOpenRouter,
+        }),
+      ),
     });
     const discovery = createDiscovery(handle.db, [
       createBundesagenturSource({
@@ -69,10 +102,15 @@ describe('Bundesagentur source to MCP list_jobs', () => {
     // Placeholder search: "Musterstadt" is not in the place table, so the radius cannot be checked.
     await matching.upsertTarget(user.id, {
       name: 'odd minijob',
-      criteria: { keywords: ['koch'], locations: ['Musterstadt'], radiusKm: 7 },
+      criteria: {
+        keywords: ['koch'],
+        locations: ['Musterstadt'],
+        radiusKm: 7,
+        languageAbility: ['de:B2'],
+      },
     });
     const tracker = createTracker(handle.db, discovery);
-    const pipeline = createPipeline(handle.db, discovery, { matching });
+    const pipeline = createPipeline(handle.db, discovery, { matching, scoring: matching });
     const logger = createLogger({ level: 'silent' });
 
     worker = await startWorker({
@@ -88,6 +126,7 @@ describe('Bundesagentur source to MCP list_jobs', () => {
       matching,
       pipeline,
       tracker,
+      aiLog: createAiLog(handle.db),
       boards: {
         watchlist: createWatchlist(handle.db),
         fetch: () => Promise.reject(new Error('no network in tests')),
@@ -135,6 +174,9 @@ describe('Bundesagentur source to MCP list_jobs', () => {
         fetched: 5,
         newPostings: 5,
         prerankPassed: 1, // only the Koch posting matches the keyword
+        scored: 1,
+        tagged: 1,
+        aiCalls: 1,
       }),
     ]);
 
@@ -172,5 +214,31 @@ describe('Bundesagentur source to MCP list_jobs', () => {
       await client.callTool({ name: 'list_jobs', arguments: { targetId: target?.id } })
     ).structuredContent as { jobs: { id: string }[] };
     expect(byTarget.jobs.map((j) => j.id)).toEqual([koch?.id]);
+
+    // The AI score, its tag and the language judgement show in get_job; minScore filters list_jobs.
+    expect(detail.structuredContent).toMatchObject({
+      job: {
+        scores: [
+          {
+            targetId: target?.id,
+            score: 85,
+            tagged: true,
+            languageMet: true,
+            unknownLocation: true,
+            reasons: ['kitchen role'],
+          },
+        ],
+      },
+    });
+    const high = (
+      await client.callTool({
+        name: 'list_jobs',
+        arguments: { targetId: target?.id, minScore: 86 },
+      })
+    ).structuredContent as { jobs: unknown[] };
+    expect(high.jobs).toEqual([]);
+    const history = (await client.callTool({ name: 'get_run_history', arguments: {} }))
+      .structuredContent as { aiTotals: { calls: number; failures: number; inputTokens: number } };
+    expect(history.aiTotals).toMatchObject({ calls: 1, failures: 0, inputTokens: 50 });
   });
 });
