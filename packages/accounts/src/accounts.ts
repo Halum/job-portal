@@ -1,4 +1,4 @@
-import { asc, eq, getTableColumns } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '@job-portal/db';
 import { users } from './schema';
@@ -15,8 +15,8 @@ export interface Accounts {
   authenticate: (authorizationHeader: string | undefined) => Promise<User | null>;
 }
 
-// Every table column except the internal createdAt; rows are checked against User on use.
-const { createdAt: _createdAt, ...columns } = getTableColumns(users);
+// The columns selected as a User. Keep in step with userSchema; the compiler rejects a mismatch in the row type.
+const columns = { id: users.id, email: users.email, timezone: users.timezone };
 
 /**
  * ponytail: one user, one env token. A token table per user arrives with multi-user, which is out of scope.
