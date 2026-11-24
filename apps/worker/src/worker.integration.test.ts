@@ -16,8 +16,11 @@ describe('worker against real Redis', () => {
 
   it('connects to Redis through BullMQ, reports ready and closes cleanly', async () => {
     const lines: string[] = [];
-    const logger = createLogger({ level: 'info', name: 'worker' });
-    logger.info = (...args: unknown[]) => lines.push(JSON.stringify(args));
+    const logger = createLogger({
+      level: 'info',
+      name: 'worker',
+      destination: { write: (line: string) => void lines.push(line) },
+    });
 
     const worker = await startWorker(redis.getConnectionUrl(), logger);
     expect(lines.some((l) => l.includes('worker ready'))).toBe(true);
