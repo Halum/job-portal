@@ -85,6 +85,7 @@ const envSchema = z
     ),
     // Most mail AI calls one poll makes. A throughput limit, not a spend cap: the rest waits for the next poll.
     AI_MAIL_MAX_CALLS_PER_RUN: z.coerce.number().int().min(1).default(20),
+    GMAIL_MAX_READ_FAILURES: z.coerce.number().int().min(1).default(3),
     ALERT_THRESHOLD: z.coerce.number().int().min(0).max(100).default(70),
     // How often the Gone cold check runs, in minutes (default daily). The check itself is idempotent.
     GONE_COLD_INTERVAL_MINUTES: z.preprocess(
@@ -169,6 +170,8 @@ export interface Config {
   gmail: GmailConfig | null;
   /** Most mail AI calls one poll makes, an integer of at least 1. */
   aiMailMaxCallsPerRun: number;
+  /** Failed reads of one Gmail message before it is given up on. */
+  gmailMaxReadFailures: number;
   /** Default alert threshold, 0 to 100. */
   alertThreshold: number;
   /** null means no webhook is configured and nothing is sent. */
@@ -259,6 +262,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
               e.GMAIL_START_DATE === undefined ? null : new Date(`${e.GMAIL_START_DATE}T00:00:00Z`),
           },
     aiMailMaxCallsPerRun: e.AI_MAIL_MAX_CALLS_PER_RUN,
+    gmailMaxReadFailures: e.GMAIL_MAX_READ_FAILURES,
     // superRefine has already made sure the two settings come together.
     notifications:
       e.NOTIFY_WEBHOOK_URL === undefined || e.NOTIFY_TOPIC_ID === undefined

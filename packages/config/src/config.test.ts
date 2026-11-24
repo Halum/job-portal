@@ -28,6 +28,7 @@ describe('loadConfig', () => {
       notifications: null,
       gmail: null,
       aiMailMaxCallsPerRun: 20,
+      gmailMaxReadFailures: 3,
       goneColdIntervalMinutes: 1440,
     });
   });
@@ -343,12 +344,14 @@ describe('loadConfig', () => {
         GMAIL_INTERVAL_MINUTES: '5',
         GMAIL_START_DATE: '2026-11-01',
         AI_MAIL_MAX_CALLS_PER_RUN: '3',
+        GMAIL_MAX_READ_FAILURES: '5',
       });
       expect(gmail.gmail).toMatchObject({
         intervalMinutes: 5,
         startDate: new Date('2026-11-01T00:00:00Z'),
       });
       expect(gmail.aiMailMaxCallsPerRun).toBe(3);
+      expect(gmail.gmailMaxReadFailures).toBe(5);
       expect(() => loadConfig({ ...valid, ...creds, GMAIL_INTERVAL_MINUTES: '0' })).toThrow(
         'GMAIL_INTERVAL_MINUTES',
       );

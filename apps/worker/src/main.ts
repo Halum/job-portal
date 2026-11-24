@@ -109,6 +109,7 @@ const mail = createMail(db, {
   ...(notifications ? { notify: notifications } : {}),
   ...(config.gmail?.startDate ? { startDate: config.gmail.startDate } : {}),
   maxCallsPerPass: config.aiMailMaxCallsPerRun,
+  maxReadFailures: config.gmailMaxReadFailures,
   log: logger,
 });
 const mailSchedule =

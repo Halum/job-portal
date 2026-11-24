@@ -37,6 +37,8 @@ export interface MailDeps {
   startDate?: Date;
   /** Most AI calls one poll makes; the rest of the mail waits for the next poll. */
   maxCallsPerPass: number;
+  /** Failed reads of one message before it is given up on. Default 3. */
+  maxReadFailures?: number;
   log: Pick<Logger, 'info' | 'warn' | 'error'>;
 }
 
@@ -405,7 +407,7 @@ export function createMail(db: Db, deps: MailDeps): Mail {
           set: { failures: sql`${readFailures.failures} + 1` },
         })
         .returning({ failures: readFailures.failures });
-      if ((row?.failures ?? 0) < MAX_READ_FAILURES) return false;
+      if ((row?.failures ?? 0) < (deps.maxReadFailures ?? MAX_READ_FAILURES)) return false;
       log.warn(
         { messageId },
         'Gmail never served this mail: given up, it is kept in the ledger as failed',

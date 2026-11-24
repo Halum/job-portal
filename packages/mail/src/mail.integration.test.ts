@@ -69,7 +69,14 @@ describe('Mail against real Postgres, a fake Gmail API and a scripted AI runner'
     },
   };
 
-  const make = (over: { maxCallsPerPass?: number; gmail?: false; maxPages?: number } = {}): Mail =>
+  const make = (
+    over: {
+      maxCallsPerPass?: number;
+      gmail?: false;
+      maxPages?: number;
+      maxReadFailures?: number;
+    } = {},
+  ): Mail =>
     createMail(handle.db, {
       tracker,
       discovery,
@@ -89,6 +96,7 @@ describe('Mail against real Postgres, a fake Gmail API and a scripted AI runner'
       notify,
       startDate: new Date('2026-01-01T00:00:00Z'),
       maxCallsPerPass: over.maxCallsPerPass ?? 50,
+      ...(over.maxReadFailures === undefined ? {} : { maxReadFailures: over.maxReadFailures }),
       log: createLogger({ level: 'silent' }),
     });
 
@@ -632,7 +640,7 @@ describe('Mail against real Postgres, a fake Gmail API and a scripted AI runner'
     expect(await Promise.all(jobs.map((j) => status(j)))).toEqual(Array(5).fill('screening'));
   });
 
-  it('gives up on a mail Gmail never serves after three polls, so the cursor moves again', async () => {
+  it('gives up on a mail Gmail never serves after the configured number of reads, so the cursor moves again', async () => {
     const job = await applied('Poisonco');
     const good = await applied('Goodco');
     reset([
@@ -641,8 +649,8 @@ describe('Mail against real Postgres, a fake Gmail API and a scripted AI runner'
     ]);
     say('good1', verdict('screening', good));
     fake.notFoundIds = ['bad1'];
-    const mailer = make();
-    for (let i = 0; i < 2; i += 1) await mailer.poll(USER);
+    const mailer = make({ maxReadFailures: 2 });
+    await mailer.poll(USER);
     expect(await ledger('bad1')).toBeUndefined();
     await mailer.poll(USER);
     expect(await ledger('bad1')).toBe('failed');
