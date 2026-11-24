@@ -9,7 +9,7 @@ import {
 } from '@job-portal/ai';
 import { createWatchlist, type Watchlist } from '@job-portal/boards';
 import type { Config } from '@job-portal/config';
-import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
+import { createDb, runMigrationsWithLock } from '@job-portal/db';
 import { createGmailClient, createMail, type Mail } from '@job-portal/mail';
 import {
   connectRateLimiter,
@@ -30,7 +30,6 @@ import { buildSources } from './sources';
 import type { ScheduledCheck, ScheduledSource } from './worker';
 
 export interface App {
-  handle: DbHandle;
   accounts: Accounts;
   user: User;
   review: Review;
@@ -68,8 +67,6 @@ export async function composeApp(
   const user = await accounts.seedUser(config.seedUserEmail);
 
   // Targets decide what the Bundesagentur search asks for; Discovery supplies the Jobs Matching may look at.
-  // A Job with any application status is skipped by matching (hasApplication, from the Tracker).
-  // (`discovery` and `tracker` are created below; the callbacks only run during a run, after they exist.)
   // The AI runner is chosen by config, with no fallback to the other one; without one nothing is scored.
   const runner: AiRunner | null =
     config.ai === null
@@ -80,6 +77,8 @@ export async function composeApp(
   const aiLog = createAiLog(db);
   const ai = runner === null ? undefined : createAi(aiLog, runner);
   const review = createReview(db);
+  // A Job with any application status is skipped by matching (hasApplication, from the Tracker).
+  // (`discovery` and `tracker` are created below; the callbacks only run during a run, after they exist.)
   const hasApplication = async (userId: string, ids: string[]): Promise<Set<string>> => {
     const states = await tracker.getStates(userId, ids);
     return new Set(ids.filter((id) => states.get(id)?.applicationStatus != null));
@@ -183,7 +182,6 @@ export async function composeApp(
   });
 
   return {
-    handle,
     accounts,
     user,
     review,

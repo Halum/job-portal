@@ -4,8 +4,8 @@ import { composeApp } from './compose';
 import { smokeRefusal } from './smoke-guard';
 
 // Manual live check: one cycle against the real sources and the configured AI runner for the configured user.
-// Read-only toward external services except the AI calls (and the Gmail token refresh); it writes to the
-// configured database like a normal run. No digest or alert is sent (notifications are switched off here).
+// Read-only toward external services except the AI calls; Gmail is never read. It writes to the configured
+// database like a normal run, so its Jobs show up in the next real digest. No digest or alert is sent (notifications are switched off here).
 // Prints counts and cost only, never settings or secrets. Not run by CI or any test.
 const refusal = smokeRefusal(process.env);
 if (refusal !== null) {
@@ -41,8 +41,8 @@ try {
       `${sourceId}: ${JSON.stringify({ status, fetched, newPostings, prerankPassed, scored, tagged, aiRejections, aiCalls, aiCostUsd, errorCount: errors.length })}`,
     );
   }
-  if (app.mailSchedule) console.log(`mail: ${JSON.stringify(await app.mail.poll(app.user.id))}`);
-  else console.log('mail: skipped (Gmail or AI runner not configured)');
+  // No mail poll: it would claim real replies in the ledger and change real statuses, and the Telegram line would never be sent.
+  console.log('mail: not polled by the smoke run');
   console.log(`ai totals: ${JSON.stringify(await app.aiLog.totals(app.user.id))}`);
 } finally {
   await app.close();
