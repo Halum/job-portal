@@ -4,6 +4,7 @@ import type { ModuleMigrations } from '@job-portal/db';
 
 export * from './directory';
 export * from './mark';
+export * from './watchlist';
 export * from './data';
 
 export const boardsMigrations: ModuleMigrations = {

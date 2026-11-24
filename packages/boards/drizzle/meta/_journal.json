@@ -8,6 +8,13 @@
       "when": 1795539107420,
       "tag": "0000_small_leech",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795540500645,
+      "tag": "0001_cooing_talos",
+      "breakpoints": true
     }
   ]
 }

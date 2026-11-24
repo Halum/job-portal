@@ -1,6 +1,12 @@
+import { Redis } from 'ioredis';
 import { loadConfig } from '@job-portal/config';
 import { createDb, runMigrationsWithLock } from '@job-portal/db';
-import { ATS_IDS, createRateLimitedFetch, fetchBoardPostings } from '@job-portal/discovery';
+import {
+  ATS_IDS,
+  createRateLimitedFetch,
+  createRedisSlots,
+  fetchBoardPostings,
+} from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
 import { createLogger } from '@job-portal/shared';
 import { createBoardDirectory, loadBundledBoards, markBoards } from '@job-portal/boards';
@@ -18,13 +24,18 @@ if (command === 'import') {
   const added = await directory.importBoards(loadBundledBoards());
   logger.info({ added }, 'board directory imported');
 } else if (command === 'mark') {
-  const limited = createRateLimitedFetch(config.boardRequestsPerSecond);
+  // Same Redis-shared limit as the workers, so a mark run during a poll cannot double the rate.
+  const redis = new Redis(config.redisUrl);
+  const limited = createRateLimitedFetch(config.boardRequestsPerSecond, fetch, {
+    slots: createRedisSlots(redis),
+  });
   for (const ats of ATS_IDS) {
     const result = await markBoards(directory, ats, async (board) =>
       (await fetchBoardPostings(ats, board, limited)).map((p) => p.location),
     );
     logger.info({ ats, ...result, failed: result.failed.length }, 'boards marked');
   }
+  redis.disconnect();
 } else {
   logger.error('usage: main.ts import | mark');
   process.exitCode = 1;

@@ -21,6 +21,8 @@ export interface BoardDirectory {
   listMarked: (ats: string) => Promise<Board[]>;
   /** The boards of one ATS not marked yet, which the mark script checks. */
   listUnmarked: (ats: string) => Promise<Board[]>;
+  /** Adds a verified board marked, or marks a listed one; a listed board keeps its name and host. */
+  addMarked: (entry: BoardEntry) => Promise<Board>;
   /** Sets the mark of the given boards; touches nothing else. */
   mark: (ats: string, tokens: string[]) => Promise<void>;
 }
@@ -58,6 +60,15 @@ export function createBoardDirectory(db: Db): BoardDirectory {
     },
     listMarked: (ats) => list(ats, true),
     listUnmarked: (ats) => list(ats, false),
+    async addMarked(entry) {
+      const [row] = await db
+        .insert(directory)
+        .values({ ...entry, host: entry.host ?? null, marked: true })
+        .onConflictDoUpdate({ target: [directory.ats, directory.token], set: { marked: true } })
+        .returning(columns);
+      if (!row) throw new Error('board insert returned no row');
+      return row;
+    },
     async mark(ats, tokens) {
       for (let i = 0; i < tokens.length; i += CHUNK) {
         await db

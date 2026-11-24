@@ -6,6 +6,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testconta
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createAccounts } from '@job-portal/accounts';
+import { createBoardDirectory, createWatchlist } from '@job-portal/boards';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import { createBundesagenturSource, createDiscovery } from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
@@ -48,6 +49,7 @@ describe('MCP endpoint over real HTTP', () => {
       accounts,
       discovery,
       pipeline,
+      boards: { directory: createBoardDirectory(handle.db), watchlist: createWatchlist(handle.db) },
       logger: createLogger({ level: 'silent' }),
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -74,11 +76,14 @@ describe('MCP endpoint over real HTTP', () => {
     const client = await connect();
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      'add_board',
       'add_job',
       'get_job',
       'get_run_history',
+      'get_watchlist',
       'list_jobs',
       'split_job',
+      'update_watchlist',
       'whoami',
     ]);
     await client.close();

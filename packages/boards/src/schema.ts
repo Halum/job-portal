@@ -21,3 +21,16 @@ export const directory = boardsSchema.table(
   },
   (t) => [unique('directory_board').on(t.ats, t.token)],
 );
+
+/** The Watchlist: boards one user narrows the fetch to. Owned by the user, so every query carries the user id. */
+export const watchlist = boardsSchema.table(
+  'watchlist',
+  {
+    userId: uuid('user_id').notNull(),
+    ats: text('ats').notNull(),
+    token: text('token').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  // the unique index leads with user_id, so it also serves the per-user lookups
+  (t) => [unique('watchlist_board').on(t.userId, t.ats, t.token)],
+);

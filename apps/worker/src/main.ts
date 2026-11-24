@@ -1,5 +1,6 @@
+import { Redis } from 'ioredis';
 import { createAccounts } from '@job-portal/accounts';
-import { createBoardDirectory } from '@job-portal/boards';
+import { createWatchlist } from '@job-portal/boards';
 import { loadConfig } from '@job-portal/config';
 import { createDb, runMigrationsWithLock } from '@job-portal/db';
 import {
@@ -11,6 +12,7 @@ import {
   createBundesagenturSource,
   createDiscovery,
   createRateLimitedFetch,
+  createRedisSlots,
   type Source,
 } from '@job-portal/discovery';
 import { allMigrations } from '@job-portal/migrations';
@@ -36,14 +38,21 @@ if (bambase) {
   sources.push(createBambaseSource());
   scheduled.push({ sourceId: BAMBASE, intervalMinutes: bambase.intervalMinutes });
 }
-// Company boards: only marked boards of the Board directory are fetched, at a bounded rate per ATS host.
-const directory = createBoardDirectory(db);
-const limitedFetch = createRateLimitedFetch(config.boardRequestsPerSecond);
+// Company boards: only marked boards of the Board directory (narrowed by the user's Watchlist) are fetched,
+// at a bounded rate per ATS host that every worker and the API share through Redis.
+const watchlist = createWatchlist(db);
+const limiterRedis = new Redis(config.redisUrl);
+const limitedFetch = createRateLimitedFetch(config.boardRequestsPerSecond, fetch, {
+  slots: createRedisSlots(limiterRedis),
+});
 for (const ats of ATS_IDS) {
   const source = config.sources[ats];
   if (!source) continue;
   sources.push(
-    createAtsSource(ats, { listBoards: () => directory.listMarked(ats), fetch: limitedFetch }),
+    createAtsSource(ats, {
+      listBoards: () => watchlist.listBoards(user.id, ats),
+      fetch: limitedFetch,
+    }),
   );
   scheduled.push({ sourceId: ats, intervalMinutes: source.intervalMinutes });
 }
@@ -59,6 +68,9 @@ const worker = await startWorker({
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
-    void worker.close().then(() => process.exit(0));
+    void worker.close().then(() => {
+      limiterRedis.disconnect();
+      process.exit(0);
+    });
   });
 }

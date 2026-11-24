@@ -3,10 +3,12 @@ import { z } from 'zod';
 import { userSchema, type User } from '@job-portal/accounts';
 import { DISCOVERY_STATES, type Discovery } from '@job-portal/discovery';
 import { RUN_STATUSES, type Pipeline } from '@job-portal/pipeline';
+import { registerBoardTools, type BoardToolDeps } from './board-tools';
 
 export interface ToolDeps {
   discovery: Discovery;
   pipeline: Pipeline;
+  boards: BoardToolDeps;
 }
 
 const isoDate = z.string().describe('ISO 8601 timestamp, UTC');
@@ -73,7 +75,13 @@ const text = (value: unknown): { type: 'text'; text: string } => ({
   text: JSON.stringify(value),
 });
 
-export function registerTools(mcp: McpServer, user: User, { discovery, pipeline }: ToolDeps): void {
+export function registerTools(
+  mcp: McpServer,
+  user: User,
+  { discovery, pipeline, boards }: ToolDeps,
+): void {
+  registerBoardTools(mcp, user, boards);
+
   mcp.registerTool(
     'whoami',
     {
