@@ -1,0 +1,74 @@
+name: CI automation
+
+on:
+  push:
+    branches: [develop-automation, 'feature/**', 'hotfix/**']
+    paths-ignore: ['**/*.md', 'docs/**']
+  pull_request:
+    branches: [develop-automation, main-automation]
+    paths-ignore: ['**/*.md', 'docs/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-automation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format:check
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # Docker is preinstalled on ubuntu runners; Testcontainers uses it.
+      - run: pnpm test:coverage
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  osv-scanner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: google/osv-scanner-action/osv-scanner-action@v2.7.1
+        with:
+          scan-args: |-
+            --lockfile=pnpm-lock.yaml
+
+  semgrep:
+    runs-on: ubuntu-latest
+    container: { image: semgrep/semgrep:latest }
+    steps:
+      - uses: actions/checkout@v5
+      - run: semgrep scan --config auto --error --quiet apps packages
