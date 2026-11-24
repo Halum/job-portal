@@ -202,6 +202,7 @@ describe('Bundesagentur source to MCP list_jobs', () => {
     server = createApiServer({
       review: createReview(handle.db),
       mail,
+      ...(notifications ? { notify: notifications } : {}),
       accounts,
       discovery,
       matching,
@@ -364,7 +365,25 @@ describe('Bundesagentur source to MCP list_jobs', () => {
         receivedAt: new Date(),
       },
     );
-    expect(await mail.poll(userId)).toMatchObject({ status: 'done', applied: 1, unmatched: 1 });
+    // The sender is not on the Job's own posting domain, so the reply waits for the user's decision.
+    expect(await mail.poll(userId)).toMatchObject({
+      status: 'done',
+      applied: 0,
+      review: 1,
+      unmatched: 1,
+    });
+    const pending = await client.callTool({
+      name: 'list_reviews',
+      arguments: { kind: 'mail_match' },
+    });
+    const decided = await client.callTool({
+      name: 'decide_review',
+      arguments: {
+        id: (pending.structuredContent as { items: { id: string }[] }).items[0]?.id,
+        decision: 'confirm',
+      },
+    });
+    expect(decided.isError).not.toBe(true);
 
     const detail = await client.callTool({ name: 'get_job', arguments: { jobId: mailJobId } });
     expect(detail.structuredContent).toMatchObject({

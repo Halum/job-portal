@@ -56,7 +56,7 @@ export interface KindModelCount {
 
 export class ReviewError extends Error {
   constructor(
-    readonly code: 'not_found' | 'already_decided' | 'unsupported_kind',
+    readonly code: 'not_found' | 'already_decided' | 'unsupported_kind' | 'invalid_argument',
     message: string,
   ) {
     super(message);

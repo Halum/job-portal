@@ -21,10 +21,10 @@ export interface GmailMessage {
   id: string;
   from: string;
   /**
-   * The domain Gmail itself authenticated for the From address (its own Authentication-Results header says
-   * dmarc=pass for that header.from), or null. Nothing else in a mail proves who sent it.
+   * The domain whose DKIM signature Gmail verified (the topmost Authentication-Results header, added by
+   * mx.google.com, has a dkim=pass clause with that header.d), or null. Nothing else in a mail proves who sent it.
    */
-  authenticatedDomain: string | null;
+  dkimDomain: string | null;
   subject: string;
   /** The text body (plain, else html turned to text); attachments are never read. */
   text: string;
@@ -74,14 +74,25 @@ const partSchema: z.ZodType<Part> = z.lazy(() =>
 );
 const messageSchema = z.object({ id: z.string(), internalDate: z.string(), payload: partSchema });
 
-/** Gmail's own verdict (it writes the topmost Authentication-Results header): dmarc=pass and for which domain. */
-function authenticatedDomain(
-  headers: { name: string; value: string }[] | undefined,
-): string | null {
+/**
+ * Gmail's own verdict (it writes the topmost Authentication-Results header): the domain of a passing DKIM
+ * signature. Read clause by clause: the spf clause carries the envelope sender and other clauses carry text an
+ * outside sender controls, so only the clause that starts with dkim=pass counts.
+ */
+function dkimDomain(headers: { name: string; value: string }[] | undefined): string | null {
   const own = headers?.find((h) => h.name.toLowerCase() === 'authentication-results')?.value;
   // ponytail: trusts the topmost header to be Gmail's; a header an outside sender plants sits below it.
-  if (!own || !/^\s*mx\.google\.com\b/i.test(own) || !/\bdmarc=pass\b/i.test(own)) return null;
-  return /header\.from=([a-z0-9.-]+)/i.exec(own)?.[1]?.toLowerCase() ?? null;
+  if (!own) return null;
+  const [id, ...clauses] = own.split(/;(?=(?:[^"]*"[^"]*")*[^"]*$)/);
+  if (!/^\s*mx\.google\.com\s*$/i.test(id ?? '')) return null;
+  for (const clause of clauses) {
+    if (!/^\s*dkim=pass\b/i.test(clause)) continue;
+    const d =
+      /\bheader\.d=([a-z0-9.-]+)/i.exec(clause)?.[1] ??
+      /\bheader\.i=@([a-z0-9.-]+)/i.exec(clause)?.[1];
+    if (d) return d.toLowerCase();
+  }
+  return null;
 }
 
 const decode = (data: string): string => Buffer.from(data, 'base64url').toString('utf8');
@@ -237,7 +248,7 @@ export function createGmailClient({
       return {
         id: parsed.data.id,
         from: header('from'),
-        authenticatedDomain: authenticatedDomain(payload.headers),
+        dkimDomain: dkimDomain(payload.headers),
         subject: header('subject'),
         text: plain ?? (html === null ? '' : htmlToText(html)),
         receivedAt: new Date(Number(parsed.data.internalDate)),

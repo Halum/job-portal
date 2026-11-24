@@ -102,7 +102,7 @@ describe('Mail against real Postgres, a fake Gmail API and a scripted AI runner'
     const { jobId } = await discovery.addJob(user, {
       title: `Role ${String(n)}`,
       company,
-      url: `https://jobs.example.invalid/${String(n)}`,
+      url: `https://careers.${company.toLowerCase().replace(/\s+/g, '')}.example/${String(n)}`,
     });
     await tracker.setApplicationStatus(user, jobId, {
       to: 'applied',
@@ -491,6 +491,40 @@ describe('Mail against real Postgres, a fake Gmail API and a scripted AI runner'
       expect(await status(none)).toBe('applied');
     });
 
+    it('sends a mail from an ATS sender, a lookalike domain or a forged From to Review, and one DKIM-signed for another domain', async () => {
+      const ats = await applied('Atsfirma');
+      const look = await applied('Lookfirma');
+      const forged = await applied('Forgefirma');
+      const other = await applied('Otherfirma');
+      reset([
+        mail('m1', 'Atsfirma', { from: 'Jobs <no-reply@us.greenhouse-mail.io>' }),
+        mail('m2', 'Lookfirma', { from: 'HR <hr@lookfirma-hr.example>' }),
+        mail('m3', 'Forgefirma', { from: '"hr@forgefirma.example" <x@attacker.example>' }),
+        mail('m4', 'Otherfirma', {
+          authResults: 'mx.google.com; dkim=pass header.d=elsewhere.example',
+        }),
+      ]);
+      say('m1', verdict('offer', ats));
+      say('m2', verdict('offer', look));
+      say('m3', verdict('offer', forged));
+      say('m4', verdict('offer', other));
+      expect(await make().poll(USER)).toMatchObject({ applied: 0, review: 4 });
+      for (const j of [ats, look, forged, other]) expect(await status(j)).toBe('applied');
+    });
+
+    it('applies a mail from a subdomain of the posting domain, DKIM-signed by the parent domain', async () => {
+      const job = await applied('Subfirma');
+      reset([
+        mail('m1', 'Subfirma', {
+          from: 'HR <hr@mail.subfirma.example>',
+          authResults: 'mx.google.com; dkim=pass header.d=subfirma.example',
+        }),
+      ]);
+      say('m1', verdict('offer', job));
+      expect(await make().poll(USER)).toMatchObject({ applied: 1, review: 0 });
+      expect(await status(job)).toBe('offer');
+    });
+
     it('sends a high answer to Review when narrowing left several Jobs', async () => {
       const a = await applied('Dualfirma');
       await applied('Dualfirma Services');
@@ -542,6 +576,60 @@ describe('Mail against real Postgres, a fake Gmail API and a scripted AI runner'
     });
     expect(await make({ maxPages: 1 }).poll(USER)).toMatchObject({ status: 'done', applied: 5 });
     for (const j of jobs) expect(await status(j)).toBe('screening');
+  });
+
+  it('a backlog the page cap and the call cap both cut is finished over the next polls, never stuck', async () => {
+    const mails: FakeMail[] = [];
+    const jobs: string[] = [];
+    for (let i = 1; i <= 5; i += 1) {
+      const company = `Cutco${'abcde'[i - 1] ?? 'z'}`;
+      jobs.push(await applied(company));
+      mails.push(
+        mail(`c${String(i)}`, company, { receivedAt: new Date(`2026-11-0${String(i)}T10:00:00Z`) }),
+      );
+    }
+    reset(mails);
+    mails.forEach((m, i) => {
+      say(m.id, verdict('screening', jobs[i] ?? null));
+    });
+    const mailer = make({ maxPages: 1, maxCallsPerPass: 2 });
+    await mailer.poll(USER);
+    expect(await Promise.all(jobs.map((j) => status(j)))).toEqual([
+      'screening',
+      'screening',
+      'applied',
+      'applied',
+      'applied',
+    ]);
+    await mailer.poll(USER);
+    await mailer.poll(USER);
+    expect(await Promise.all(jobs.map((j) => status(j)))).toEqual(Array(5).fill('screening'));
+  });
+
+  it('skips a mail Gmail cannot serve and a list page that fails, and finishes them on a later poll', async () => {
+    const mails: FakeMail[] = [];
+    const jobs: string[] = [];
+    for (let i = 1; i <= 5; i += 1) {
+      const company = `Failco${'abcde'[i - 1] ?? 'z'}`;
+      jobs.push(await applied(company));
+      mails.push(
+        mail(`f${String(i)}`, company, { receivedAt: new Date(`2026-11-0${String(i)}T10:00:00Z`) }),
+      );
+    }
+    reset(mails);
+    mails.forEach((m, i) => {
+      say(m.id, verdict('screening', jobs[i] ?? null));
+    });
+    fake.failIds = ['f5'];
+    fake.failBefore = true;
+    const mailer = make({ maxPages: 1 });
+    // The newest window is read, f5 cannot be served and the older list fails: f4 is applied, nothing else.
+    expect(await mailer.poll(USER)).toMatchObject({ status: 'done', applied: 1 });
+    expect(await ledger('f5')).toBeUndefined();
+    fake.failIds = [];
+    fake.failBefore = false;
+    await mailer.poll(USER);
+    expect(await Promise.all(jobs.map((j) => status(j)))).toEqual(Array(5).fill('screening'));
   });
 
   it('a poll that lost its lease does not clear the lease of the worker that took it over', async () => {

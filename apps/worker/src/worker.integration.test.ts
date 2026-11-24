@@ -200,7 +200,7 @@ describe('worker against real Postgres and Redis', () => {
       sources: [],
       mail: {
         intervalMinutes: 10,
-        poll: () => {
+        run: () => {
           polls += 1;
           return Promise.resolve();
         },

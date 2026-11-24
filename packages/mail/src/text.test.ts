@@ -38,6 +38,9 @@ describe('senderDomain', () => {
     );
     expect(senderDomain('a@b.example')).toBe('b.example');
     expect(senderDomain('not an address')).toBeNull();
+    // The display name is never the address.
+    expect(senderDomain('"hr@victim.example" <x@attacker.example>')).toBe('attacker.example');
+    expect(senderDomain('hr@victim.example <not an address>')).toBeNull();
   });
 });
 
@@ -85,8 +88,11 @@ describe('narrow strong flag', () => {
   ];
   const mail = (from: string, subject: string, body = '') => ({ from, subject, body });
 
-  it('is strong for a sender domain that fits the Job, and weak for a name in the text only', () => {
+  it('is strong for a sender domain under the Job posting host domain, and weak for a name in the text only', () => {
     expect(narrow(mail('hr@beispiel-firma.example', 'Hi'), jobs)).toEqual([
+      expect.objectContaining({ id: '1', strong: true }),
+    ]);
+    expect(narrow(mail('hr@mail.careers.beispiel-firma.example', 'Hi'), jobs)).toEqual([
       expect.objectContaining({ id: '1', strong: true }),
     ]);
     expect(narrow(mail('x@gmail.example', 'Hi', 'I write about Beispiel Firma'), jobs)).toEqual([
@@ -94,10 +100,33 @@ describe('narrow strong flag', () => {
     ]);
   });
 
-  it('is strong for an ATS sender, which says the company only in its text', () => {
+  it('is weak for an ATS sender, which anyone with an account can use to name a company', () => {
     expect(
       narrow(mail('no-reply@us.greenhouse-mail.io', 'Update', 'Beispiel Firma'), jobs),
-    ).toEqual([expect.objectContaining({ id: '1', strong: true })]);
+    ).toEqual([expect.objectContaining({ id: '1', strong: false })]);
+  });
+
+  it('is weak for a lookalike domain, a display name that holds the address, and a Job with no own host', () => {
+    expect(narrow(mail('hr@beispiel-firma-hr.example', 'Hi'), jobs)).toEqual([
+      expect.objectContaining({ id: '1', strong: false }),
+    ]);
+    expect(
+      narrow(
+        mail('"hr@beispiel-firma.example" <x@attacker.example>', 'Hi', 'Beispiel Firma'),
+        jobs,
+      ),
+    ).toEqual([expect.objectContaining({ id: '1', strong: false })]);
+    expect(
+      narrow(mail('hr@board-owner.example', 'Hi', 'Muster AG'), [
+        job('9', 'Muster AG', ['boards.greenhouse.io']),
+      ]),
+    ).toEqual([expect.objectContaining({ id: '9', strong: false })]);
+  });
+
+  it('does not treat a country second level as a company domain', () => {
+    const co = [job('5', 'Beispiel Firma', ['careers.beispiel-firma.co.uk'])];
+    expect(narrow(mail('hr@beispiel-firma.co.uk', 'Hi'), co)[0]?.strong).toBe(true);
+    expect(narrow(mail('x@attacker.co.uk', 'Hi', 'Beispiel Firma'), co)[0]?.strong).toBe(false);
   });
 });
 

@@ -13,6 +13,7 @@ import {
   isJobLike,
   narrow,
   senderDomain,
+  withinDomain,
   type MailText,
   type ReplyCandidate,
 } from './text';
@@ -327,16 +328,18 @@ export function createMail(db: Db, deps: MailDeps): Mail {
         throw err;
       }
       const { kind, jobId, confidence, summary } = answer.value;
-      // The code decides what is clear, never the model: exactly one Job left after narrowing, backed by the
-      // sender's own domain, from a sender Gmail authenticated (dmarc pass for that domain), and picked with
-      // high confidence. Anyone can write a company name or claim "high" in a mail; everything else with a
-      // picked Job is the user's decision.
+      // The code decides what is clear, never the model: exactly one Job left after narrowing, whose own
+      // posting domain the sender's address belongs to, from mail whose DKIM signature Gmail verified for that
+      // address's domain, and picked with high confidence. Anyone can write a company name or claim "high" in a
+      // mail; everything else with a picked Job is the user's decision.
       const [only] = narrowed;
+      const from = senderDomain(m.from);
       const trusted =
         narrowed.length === 1 &&
         only?.strong === true &&
-        m.authenticatedDomain !== null &&
-        m.authenticatedDomain === senderDomain(m.from);
+        from !== null &&
+        m.dkimDomain !== null &&
+        withinDomain(from, m.dkimDomain);
       if (kind === 'other') {
         out.ignored += Number(await keep(m, text, 'ignored', summary));
       } else if (jobId === null) {
@@ -383,49 +386,78 @@ export function createMail(db: Db, deps: MailDeps): Mail {
       }
     }
 
+    // A failing page or mail is logged and skipped, never fatal: the poll goes on with the rest and the cursor
+    // stays put, so the next poll retries what failed. Only a refused token stops it.
+    const failed = (what: string, err: unknown): void => {
+      if (err instanceof GmailAuthError) throw err;
+      log.warn({ err }, `Gmail ${what} failed; the poll goes on and retries it next time`);
+      run.complete = false;
+    };
     try {
+      // List every id of the window first (ids are cheap): when the page cap cuts a list, the next list starts
+      // below the oldest id seen, known ones included, so a backlog is walked to its end whatever the ledger holds.
+      const listed = new Set<string>();
       let before: Date | undefined;
       for (let first = true; ; first = false) {
-        const { ids: listed, truncated } = await client.listIds(since, before);
+        let page: { ids: string[]; truncated: boolean };
+        try {
+          page = await client.listIds(since, before);
+        } catch (err) {
+          if (first) throw err;
+          failed('list', err);
+          break;
+        }
         // The token works: close the failure type if it was open.
         if (first) {
           await notify?.setFailure(userId, GMAIL_TOKEN, false).catch((err: unknown) => {
             log.warn({ err }, 'could not close the gmail_token failure');
           });
         }
-        const known = listed.length
-          ? await db
-              .select({ id: processed.messageId })
-              .from(processed)
-              .where(and(eq(processed.userId, userId), inArray(processed.messageId, listed)))
-          : [];
-        const handled = new Set(known.map((r) => r.id));
-        // Gmail lists newest first; the oldest mail goes first, so a Screening reply is applied before the
-        // Interview that followed it.
-        const fresh = listed.filter((id) => !handled.has(id)).reverse();
-        out.seen += fresh.length;
-        let oldest: Date | null = null;
-        for (const id of fresh) {
-          if (!(await renew(userId, token))) {
-            log.warn('mail poll lost its lease to another worker and stops');
+        for (const id of page.ids) listed.add(id);
+        if (!page.truncated) break;
+        const last = page.ids[page.ids.length - 1];
+        if (last === undefined) break;
+        try {
+          const next = new Date((await client.get(last)).receivedAt.getTime() + 1000);
+          if (before !== undefined && next >= before) {
+            // ponytail: more than a list of mails in one second cannot be walked further; retried next poll.
+            log.warn('the Gmail window cannot be walked further: set GMAIL_START_DATE later');
             run.complete = false;
             break;
           }
-          const m = await client.get(id);
-          if (oldest === null || m.receivedAt < oldest) oldest = m.receivedAt;
-          await handle(m);
-          if (!run.complete) break;
+          before = next;
+        } catch (err) {
+          failed('read', err);
+          break;
         }
-        if (!run.complete || !truncated) break;
-        if (oldest === null) {
-          // ponytail: a window the page cap cuts and that holds nothing new cannot be walked further.
-          log.warn('the Gmail window is larger than the page cap: set GMAIL_START_DATE later');
+      }
+      const ids = [...listed];
+      const known = ids.length
+        ? await db
+            .select({ id: processed.messageId })
+            .from(processed)
+            .where(and(eq(processed.userId, userId), inArray(processed.messageId, ids)))
+        : [];
+      const handled = new Set(known.map((r) => r.id));
+      // Gmail lists newest first; the oldest mail goes first, so a Screening reply is applied before the
+      // Interview that followed it.
+      const fresh = ids.filter((id) => !handled.has(id)).reverse();
+      out.seen += fresh.length;
+      for (const id of fresh) {
+        if (!(await renew(userId, token))) {
+          log.warn('mail poll lost its lease to another worker and stops');
           run.complete = false;
           break;
         }
-        // The list was cut: older mail of the window is still unread, so look again below what this batch
-        // reached (ponytail: a truncated backlog is read newest window first, oldest first within a window).
-        before = new Date(oldest.getTime() + 1000);
+        let m: GmailMessage;
+        try {
+          m = await client.get(id);
+        } catch (err) {
+          failed('read', err);
+          continue;
+        }
+        await handle(m);
+        if (!run.complete) break;
       }
       if (run.complete) {
         // Held an hour behind so a mail that reached the inbox late is still listed; the ledger skips the rest.

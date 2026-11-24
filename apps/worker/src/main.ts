@@ -113,7 +113,7 @@ const mail = createMail(db, {
 });
 const mailSchedule =
   config.gmail && ai
-    ? { intervalMinutes: config.gmail.intervalMinutes, poll: () => mail.poll(user.id) }
+    ? { intervalMinutes: config.gmail.intervalMinutes, run: () => mail.poll(user.id) }
     : null;
 if (mailSchedule === null) {
   logger.info(

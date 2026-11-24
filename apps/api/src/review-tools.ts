@@ -232,7 +232,10 @@ export function registerReviewTools(
             );
           }
           if (jobId !== undefined && item.kind !== 'mail_match') {
-            throw new ReviewError('unsupported_kind', 'jobId applies to mail_match items only');
+            throw new ReviewError('invalid_argument', 'jobId applies to mail_match items only');
+          }
+          if (jobId !== undefined && d !== 'confirm') {
+            throw new ReviewError('invalid_argument', 'jobId applies to a confirm decision only');
           }
           return apply(item, tx, d);
         });

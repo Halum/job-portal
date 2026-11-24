@@ -22,6 +22,10 @@ export interface FakeGmail {
   mails: FakeMail[];
   /** How the token endpoint answers: ok, an invalid_grant 400, any other 400, or a 503. */
   tokenMode: 'ok' | 'invalid_grant' | 'bad_request' | 'unavailable';
+  /** Ids whose message read answers 500, as a mail Gmail cannot serve right now. */
+  failIds: string[];
+  /** When true, a list that asks for older mail (a before: bound) answers 500. */
+  failBefore: boolean;
   /** When set, the Gmail API answers every request with this status and Google-style error reason. */
   apiError: { status: number; reason: string } | null;
   /** When true the API answers 401 to every request, whatever the token. */
@@ -36,10 +40,12 @@ export interface FakeGmail {
 const b64 = (s: string): string => Buffer.from(s, 'utf8').toString('base64url');
 
 const payload = (m: FakeMail): object => {
-  const domain = /@([a-z0-9.-]+)/i.exec(m.from)?.[1]?.toLowerCase() ?? 'unknown.invalid';
+  const address = /<([^<>]*)>\s*$/.exec(m.from)?.[1] ?? m.from;
+  const domain =
+    /@([a-z0-9.-]+)\s*$/i.exec(address.trim())?.[1]?.toLowerCase() ?? 'unknown.invalid';
   const auth =
     m.authResults === undefined
-      ? `mx.google.com; dkim=pass header.i=@${domain}; spf=pass; dmarc=pass (p=NONE) header.from=${domain}`
+      ? `mx.google.com; dkim=pass header.i=@${domain} header.d=${domain}; spf=pass; dmarc=pass (p=NONE) header.from=${domain}`
       : m.authResults;
   const headers = [
     ...(auth === null ? [] : [{ name: 'Authentication-Results', value: auth }]),
@@ -69,6 +75,8 @@ export function createFakeGmail(mails: FakeMail[] = []): FakeGmail {
     mails,
     tokenMode: 'ok',
     apiError: null,
+    failIds: [],
+    failBefore: false,
     rejectAccessTokens: false,
     requests: [],
     fetched: [],
@@ -106,6 +114,9 @@ export function createFakeGmail(mails: FakeMail[] = []): FakeGmail {
       }
       const single = /\/messages\/([^/]+)$/.exec(url.pathname);
       if (single?.[1]) {
+        if (fake.failIds.includes(single[1])) {
+          return Promise.resolve(new Response('', { status: 500 }));
+        }
         const m = fake.mails.find((x) => x.id === single[1]);
         if (!m) return Promise.resolve(new Response('', { status: 404 }));
         fake.fetched.push(m.id);
@@ -116,6 +127,9 @@ export function createFakeGmail(mails: FakeMail[] = []): FakeGmail {
             payload: payload(m),
           }),
         );
+      }
+      if (fake.failBefore && /before:/.test(url.searchParams.get('q') ?? '')) {
+        return Promise.resolve(new Response('', { status: 500 }));
       }
       const after = /after:(\d+)/.exec(url.searchParams.get('q') ?? '');
       const since = after?.[1] ? Number(after[1]) * 1000 : 0;

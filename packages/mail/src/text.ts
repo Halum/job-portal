@@ -70,10 +70,30 @@ export function cleanBody(raw: string): string {
   return kept.join('\n').trim().slice(0, MAX_BODY);
 }
 
-/** The lower-cased domain of the address in a From header, or null. */
+/** The lower-cased domain of the address in a From header (the one inside <...>, never the display name), or null. */
 export function senderDomain(from: string): string | null {
-  const m = /@([a-z0-9.-]+\.[a-z]{2,})/i.exec(from);
+  const address = /<([^<>]*)>\s*$/.exec(from)?.[1] ?? from;
+  const m = /@([a-z0-9.-]+\.[a-z]{2,})\s*$/i.exec(address.trim());
   return m?.[1] ? m[1].toLowerCase() : null;
+}
+
+/** True when `domain` is `parent` or one of its subdomains. */
+export const withinDomain = (domain: string, parent: string): boolean =>
+  domain === parent || domain.endsWith(`.${parent}`);
+
+const SECOND_LEVEL = new Set(['co', 'com', 'org', 'net', 'ac', 'gov', 'edu']);
+
+/**
+ * The domain a company owns behind a host: its last two labels, three under a country second level such as
+ * co.uk. ponytail: no public suffix list; an unlisted multi-part suffix is the known ceiling.
+ */
+function ownedDomain(host: string): string {
+  const labels = host.toLowerCase().split('.');
+  const n =
+    labels[labels.length - 1]?.length === 2 && SECOND_LEVEL.has(labels[labels.length - 2] ?? '')
+      ? 3
+      : 2;
+  return labels.slice(-n).join('.');
 }
 
 const isAts = (domain: string): boolean =>
@@ -93,7 +113,7 @@ const companyKey = (company: string | null): string | null => {
 
 const displayName = (from: string): string => from.replace(/<[^>]*>/g, ' ');
 
-/** A reply candidate with whether the sender's own domain fits it (not only a name in the text). */
+/** A reply candidate with whether the sender's own domain belongs to the Job's company (not only a name in the text). */
 export type NarrowedCandidate = ReplyCandidate & { strong: boolean };
 
 /**
@@ -113,8 +133,12 @@ export function narrow(mail: MailText, jobs: ReplyCandidate[]): NarrowedCandidat
       senderBrand.length >= MIN_KEY &&
       ((key !== null && (key.includes(senderBrand) || senderBrand.includes(key))) ||
         job.hosts.some((h) => !isAts(h) && brand(h) === senderBrand));
-    // An ATS sender says nothing of the company in its address, so a name in its text is what ties it to a Job.
-    const strong = byDomain || (ats && byName);
+    // Strong (what may apply without a human) is stricter than a fit: the sender's domain is, or sits under, a
+    // domain the Job's own non-ATS posting host belongs to. A lookalike domain or an ATS sender is never strong.
+    const strong =
+      !ats &&
+      domain !== null &&
+      job.hosts.some((h) => !isAts(h) && withinDomain(domain, ownedDomain(h)));
     return byName || byDomain ? [{ job, strong, score: Number(byName) + Number(byDomain) }] : [];
   });
   if (scored.length === 0 && ats) {

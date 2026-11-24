@@ -13,12 +13,6 @@ export interface ScheduledSource {
   intervalMinutes: number;
 }
 
-export interface MailSchedule {
-  intervalMinutes: number;
-  /** One poll of the Gmail inbox for the user; never throws for a Gmail, AI or token failure. */
-  poll: () => Promise<unknown>;
-}
-
 /** A check that runs on its own schedule next to the sources, such as the daily Gone cold check. */
 export interface ScheduledCheck {
   /** Integer of at least 1; validated by loadConfig. */
@@ -32,8 +26,8 @@ export interface WorkerOptions {
   userId: string;
   sources: ScheduledSource[];
   goneCold?: ScheduledCheck;
-  /** The Gmail poll; null or unset means it is not scheduled. */
-  mail?: MailSchedule | null;
+  /** The Gmail poll (run never throws for a Gmail, AI or token failure); null or unset means it is not scheduled. */
+  mail?: ScheduledCheck | null;
   logger: Logger;
   connectTimeoutMs?: number;
 }
@@ -110,7 +104,7 @@ export async function startWorker({
       QUEUE,
       async (job) => {
         if (job.name === MAIL_JOB) {
-          await mail?.poll();
+          await mail?.run();
           return;
         }
         if (job.name === GONE_COLD) {

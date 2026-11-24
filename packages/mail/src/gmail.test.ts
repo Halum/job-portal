@@ -43,7 +43,7 @@ describe('Gmail client against a fake Gmail API', () => {
     expect(await gmail.get('b')).toEqual({
       id: 'b',
       from: 'Hiring <hr@example.invalid>',
-      authenticatedDomain: 'example.invalid',
+      dkimDomain: 'example.invalid',
       subject: 'Subject b',
       text: 'Body b',
       receivedAt: new Date('2026-11-20T10:00:00Z'),
@@ -111,17 +111,27 @@ describe('Gmail client against a fake Gmail API', () => {
     expect(await gmail.listIds(new Date(0), at(2))).toEqual({ ids: ['a'], truncated: false });
   });
 
-  it('reports the domain Gmail authenticated for From, and none for a failed or missing check', async () => {
+  it('reports the domain of the DKIM signature Gmail verified, and none for a failed, missing or forged check', async () => {
     const fake = createFakeGmail([
       mail('pass'),
-      mail('fail', { authResults: 'mx.google.com; dmarc=fail header.from=example.invalid' }),
+      mail('fail', { authResults: 'mx.google.com; dkim=fail header.d=example.invalid' }),
       mail('none', { authResults: null }),
-      mail('planted', { authResults: 'evil.example; dmarc=pass header.from=example.invalid' }),
+      mail('planted', { authResults: 'evil.example; dkim=pass header.d=example.invalid' }),
+      // The envelope sender is copied into the spf clause: text an outside sender controls.
+      mail('forged-spf', {
+        authResults:
+          'mx.google.com; spf=pass smtp.mailfrom=dkim=pass.header.d=victim.example@attacker.example; dkim=fail header.d=attacker.example',
+      }),
+      mail('forged-quote', {
+        authResults: 'mx.google.com; spf=pass smtp.mailfrom="x; dkim=pass header.d=victim.example"',
+      }),
+      mail('by-i', { authResults: 'mx.google.com; dkim=pass header.i=@signer.example' }),
     ]);
     const gmail = client(fake);
-    expect((await gmail.get('pass')).authenticatedDomain).toBe('example.invalid');
-    for (const id of ['fail', 'none', 'planted']) {
-      expect((await gmail.get(id)).authenticatedDomain).toBeNull();
+    expect((await gmail.get('pass')).dkimDomain).toBe('example.invalid');
+    expect((await gmail.get('by-i')).dkimDomain).toBe('signer.example');
+    for (const id of ['fail', 'none', 'planted', 'forged-spf', 'forged-quote']) {
+      expect((await gmail.get(id)).dkimDomain).toBeNull();
     }
   });
 

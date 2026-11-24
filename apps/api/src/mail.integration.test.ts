@@ -214,6 +214,13 @@ describe('Gmail replies over MCP', () => {
       jobId: '00000000-0000-4000-8000-0000000000ff',
     });
     expect(refused.isError).toBe(true);
+    // A jobId only goes with a confirm.
+    const withDisagree = await call('decide_review', {
+      id: item?.id,
+      decision: 'disagree',
+      jobId: item?.mail?.suggestedJobId,
+    });
+    expect(withDisagree.isError).toBe(true);
     const stillPending = await call('list_reviews', { kind: 'mail_match' });
     expect((stillPending.out as { items: unknown[] }).items).toHaveLength(1);
     const decided = await call('decide_review', {
