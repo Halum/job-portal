@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { userSchema, type User } from '@job-portal/accounts';
-import type { Discovery } from '@job-portal/discovery';
+import { DISCOVERY_STATES, type Discovery } from '@job-portal/discovery';
 import { RUN_STATUSES, type Pipeline } from '@job-portal/pipeline';
 
 export interface ToolDeps {
@@ -12,6 +12,7 @@ export interface ToolDeps {
 const isoDate = z.string().describe('ISO 8601 timestamp, UTC');
 
 const postingSchema = z.object({
+  id: z.string(),
   sourceId: z.string(),
   sourcePostingId: z.string(),
   title: z.string(),
@@ -28,6 +29,7 @@ const jobSchema = z.object({
   title: z.string(),
   company: z.string().nullable(),
   location: z.string().nullable(),
+  discoveryState: z.enum(DISCOVERY_STATES),
   createdAt: isoDate,
   postings: z.array(postingSchema),
 });
@@ -123,6 +125,46 @@ export function registerTools(mcp: McpServer, user: User, { discovery, pipeline 
         },
       };
       return { content: [text(out)], structuredContent: out };
+    },
+  );
+
+  mcp.registerTool(
+    'add_job',
+    {
+      description:
+        'Add a job by hand as a Posting with source manual. It goes through the same dedupe, so a later copy from a board merges with it. Adding the same URL again returns the same Job.',
+      inputSchema: {
+        title: z.string().min(1),
+        company: z.string().min(1).optional(),
+        city: z.string().min(1).optional(),
+        url: z.url(),
+      },
+      outputSchema: { jobId: z.string() },
+    },
+    async (input) => {
+      const out = await discovery.addJob(user.id, input);
+      return { content: [text(out)], structuredContent: out };
+    },
+  );
+
+  mcp.registerTool(
+    'split_job',
+    {
+      description:
+        'Undo a wrong merge: move the given postings (ids from get_job) of a Job into a new Job. Rule and AI merges never put them back. At least one posting must stay in the original Job.',
+      inputSchema: { jobId: z.uuid(), postingIds: z.array(z.uuid()).min(1) },
+      outputSchema: { jobId: z.string(), splitCount: z.number() },
+    },
+    async ({ jobId, postingIds }) => {
+      try {
+        const out = await discovery.splitJob(user.id, jobId, postingIds);
+        return { content: [text(out)], structuredContent: out };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: err instanceof Error ? err.message : 'split failed' }],
+        };
+      }
     },
   );
 

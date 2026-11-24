@@ -73,7 +73,14 @@ describe('MCP endpoint over real HTTP', () => {
   it('lists the tools', async () => {
     const client = await connect();
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(names).toEqual(['get_job', 'get_run_history', 'list_jobs', 'whoami']);
+    expect(names).toEqual([
+      'add_job',
+      'get_job',
+      'get_run_history',
+      'list_jobs',
+      'split_job',
+      'whoami',
+    ]);
     await client.close();
   });
 
@@ -139,6 +146,51 @@ describe('MCP endpoint over real HTTP', () => {
       arguments: { jobId: '00000000-0000-4000-8000-0000000000ff' },
     });
     expect(missing.isError).toBe(true);
+    await client.close();
+  });
+
+  it('add_job creates a manual Job, a repeat merges, and split_job undoes a merge', async () => {
+    const client = await connect();
+    const add = (args: Record<string, string>) =>
+      client.callTool({ name: 'add_job', arguments: args });
+    const input = { title: 'Koch', company: 'Beispiel GmbH', city: 'Musterstadt' };
+    const first = (await add({ ...input, url: 'https://x.example.invalid/j/1' }))
+      .structuredContent as { jobId: string };
+    // A different URL but the same company key merges into the same Job.
+    const second = (await add({ ...input, url: 'https://y.example.invalid/j/9' }))
+      .structuredContent as { jobId: string };
+    expect(second.jobId).toBe(first.jobId);
+
+    const job = (await client.callTool({ name: 'get_job', arguments: { jobId: first.jobId } }))
+      .structuredContent as { job: { postings: { id: string; sourceId: string }[] } };
+    expect(job.job.postings.map((p) => p.sourceId)).toEqual(['manual', 'manual']);
+
+    const moved = job.job.postings[1]?.id ?? '';
+    const split = await client.callTool({
+      name: 'split_job',
+      arguments: { jobId: first.jobId, postingIds: [moved] },
+    });
+    const { jobId: newJobId, splitCount } = split.structuredContent as {
+      jobId: string;
+      splitCount: number;
+    };
+    expect(newJobId).not.toBe(first.jobId);
+    expect(splitCount).toBe(1);
+
+    const refused = await client.callTool({
+      name: 'split_job',
+      arguments: { jobId: newJobId, postingIds: [moved] },
+    });
+    expect(refused.isError).toBe(true);
+    await client.close();
+  });
+
+  it('add_job refuses a URL that is not http(s)', async () => {
+    const client = await connect();
+    const outcome = await client
+      .callTool({ name: 'add_job', arguments: { title: 'Koch', url: 'not a url' } })
+      .catch((err: unknown) => err);
+    expect(JSON.stringify(outcome instanceof Error ? outcome.message : outcome)).toMatch(/url/i);
     await client.close();
   });
 
