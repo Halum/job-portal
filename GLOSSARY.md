@@ -43,3 +43,19 @@ Terms name things in code, database, tests and issues. Source of truth: the spec
 - **Never-merge pair**: a recorded (Posting, Job) pair that rule and AI merges must skip, created by a Split.
 - **Manual job**: a Job the user adds by hand (add_job) as a Posting with source `manual`, which still goes through dedupe.
 - **Board URL resolver**: `resolveBoardUrl`, the pure first step of add_board: it recognises a Greenhouse, Lever or Ashby careers URL (https, exact host, no credentials) and extracts the ATS, the board id and Lever's EU host, or returns null. Verifying the board with one fetch and adding it to the directory and Watchlist are the later steps of add_board.
+
+- **Master resume**: the one resume file the user uploads that holds everything they want to share.
+- **Master cover letter**: the one cover letter file the user uploads that shows how they write letters.
+- **Career bank**: the user's global resume and cover letter material, broken into Work experiences, Experience points, Resume entries, the Cover letter outline, Cover letter paragraphs, the Writing style profile and contact details.
+- **Work experience**: one role at one organisation, with its dates and place.
+- **Experience point**: one achievement line inside a Work experience, tagged with the skills it shows.
+- **Resume entry**: one education, skill, language or certificate item in the Career bank.
+- **Cover letter outline**: the user's own cover letter sections, in their order.
+- **Cover letter paragraph**: one paragraph for a section of the Cover letter outline, tagged by theme or skill.
+- **Writing style profile**: how the user writes: tone, sentence length, words used and avoided, salutation and sign-off.
+- **Target career bank**: one Target's view of the Career bank: everything inherited, changed only by Career bank overrides.
+- **Career bank override**: a change one Target makes to its Target career bank: hide an item, replace its text, or add a Target-only item.
+- **Career bank revision**: one recorded change to a Career bank item, with old text, new text and reason; a delete is a revision that hides the item.
+- **Requirement gap**: something a posting asks for that no Experience point covers.
+- **Enrichment question**: a question asked while preparing an application to close a Requirement gap; a confirmed answer goes into the Career bank.
+- **Application packet**: one prepared version of the tailored resume and cover letter for one Job, with the Target, the items used, the Requirement gaps and the PDFs.
