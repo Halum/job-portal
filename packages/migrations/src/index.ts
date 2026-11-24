@@ -3,6 +3,7 @@ import { aiMigrations } from '@job-portal/ai';
 import type { ModuleMigrations } from '@job-portal/db';
 import { boardsMigrations } from '@job-portal/boards';
 import { discoveryMigrations } from '@job-portal/discovery';
+import { mailMigrations } from '@job-portal/mail';
 import { matchingMigrations } from '@job-portal/matching';
 import { notificationsMigrations } from '@job-portal/notifications';
 import { pipelineMigrations } from '@job-portal/pipeline';
@@ -15,6 +16,7 @@ export const allMigrations: ModuleMigrations[] = [
   aiMigrations,
   discoveryMigrations,
   boardsMigrations,
+  mailMigrations,
   matchingMigrations,
   notificationsMigrations,
   pipelineMigrations,
