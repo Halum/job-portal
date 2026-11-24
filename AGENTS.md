@@ -10,6 +10,7 @@ Search and tracking system for job postings: sources are polled on a schedule, p
 
 - `pnpm install`, then `docker compose up -d` and `cp .env.example .env`
 - `pnpm dev:api` (MCP at http://localhost:3000/mcp), `pnpm dev:worker` (both load `.env` through `tsx --env-file-if-exists=.env`; without it `loadConfig` fails with ConfigError, because it reads only `process.env`)
+- `pnpm verify`: the CI gate run locally (typecheck, lint, format check, then coverage under `TZ=UTC CI=true`); "done" means it passed. Use root `pnpm typecheck`, never `pnpm -r typecheck` (no package defines it, so it checks nothing).
 - `pnpm typecheck`, `pnpm lint`, `pnpm format:check`
 - `pnpm test:fast` (unit only), `pnpm test` (adds Testcontainers integration, needs Docker), `pnpm test:coverage` (CI gate)
 - `pnpm db:generate` after changing a module schema
