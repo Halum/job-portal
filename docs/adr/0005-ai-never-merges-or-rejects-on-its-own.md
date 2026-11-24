@@ -1,0 +1,3 @@
+# AI never merges or rejects on its own
+
+A rule merge (exactly one Job matches the company key or the cleaned URL key) attaches a Posting automatically, but an AI-judged near match only creates an ai_merge Review item, and nothing merges until it is confirmed. Likewise an AI fit score below threshold creates an ai_fit_rejection item rather than silently hiding the Job. A wrong merge loses a job and a wrong rejection hides one, so the AI proposes and the user decides, and agreement stats show when that could be loosened. A split records never-merge pairs so rules and the AI never redo a merge the user undid.

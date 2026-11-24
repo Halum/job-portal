@@ -26,7 +26,7 @@ Search and tracking system for job postings: sources are polled on a schedule, p
 - Coverage gate: statements, lines, functions 80%, branches 70%.
 - Hooks are per worktree: `pnpm install` runs `scripts/prepare-hooks.sh`, which sets `core.hooksPath` with `git config --worktree` (never the shared `.git/config`). Run it in every new worktree.
 - Pre-commit runs typecheck, lint, fast tests, and gitleaks, osv-scanner, semgrep when installed. CI runs all of them.
-- Agent decisions are in `docs/adr/agent/`.
+- Decisions are in `docs/adr/` (agent decisions awaiting review in `docs/adr/agent/`).
 - Terms in `GLOSSARY.md` name things in code, database, tests and issues.
 
 ## Architecture map
