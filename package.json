@@ -1,0 +1,40 @@
+{
+  "name": "job-portal-automation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:fast": "FAST=1 vitest run",
+    "test:coverage": "vitest run --coverage",
+    "precommit": "sh .husky/pre-commit",
+    "prepare": "husky",
+    "db:generate": "pnpm --filter @job-portal/accounts db:generate",
+    "dev:api": "tsx watch apps/api/src/main.ts",
+    "dev:worker": "tsx watch apps/worker/src/main.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@testcontainers/postgresql": "12.2.2",
+    "@testcontainers/redis": "12.2.2",
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "5.1.1",
+    "eslint": "10.15.0",
+    "eslint-config-prettier": "10.1.8",
+    "husky": "9.1.7",
+    "prettier": "3.10.1",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.74.0",
+    "vitest": "5.1.1"
+  }
+}

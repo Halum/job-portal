@@ -1,0 +1,14 @@
+{
+  "name": "@job-portal/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@job-portal/shared": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "postgres": "4.1.1"
+  }
+}
