@@ -1,0 +1,22 @@
+{
+  "name": "@job-portal/pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@job-portal/db": "workspace:*",
+    "@job-portal/discovery": "workspace:*",
+    "@job-portal/shared": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "drizzle-kit": "0.31.11"
+  }
+}

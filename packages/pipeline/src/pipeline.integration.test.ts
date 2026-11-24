@@ -1,0 +1,99 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
+import type { PollResult } from '@job-portal/discovery';
+import { createPipeline, pipelineMigrations } from './index';
+
+const USER = '00000000-0000-4000-8000-000000000001';
+const OTHER_USER = '00000000-0000-4000-8000-000000000002';
+
+describe('pipeline against real Postgres', () => {
+  let container: StartedPostgreSqlContainer;
+  let handle: DbHandle;
+  let poll: (userId: string, sourceId: string) => Promise<PollResult>;
+  const pipeline = (): ReturnType<typeof createPipeline> =>
+    createPipeline(handle.db, { poll: (u, s) => poll(u, s) });
+
+  beforeAll(async () => {
+    container = await new PostgreSqlContainer('postgres:16-alpine').start();
+    await runMigrationsWithLock(container.getConnectionUri(), [pipelineMigrations]);
+    handle = createDb(container.getConnectionUri());
+  });
+
+  afterAll(async () => {
+    await handle.close();
+    await container.stop();
+  });
+
+  it('records a completed run with its counts', async () => {
+    poll = () => Promise.resolve({ fetched: 5, newPostings: 3, errors: [] });
+    const run = await pipeline().execute(USER, 'src-a');
+    expect(run).toMatchObject({
+      sourceId: 'src-a',
+      status: 'completed',
+      fetched: 5,
+      newPostings: 3,
+      errors: [],
+    });
+    expect(run?.finishedAt).toBeInstanceOf(Date);
+    expect(await pipeline().listRuns(USER, 10)).toContainEqual(run);
+  });
+
+  it('ends "completed with errors" when the source reports errors', async () => {
+    poll = () => Promise.resolve({ fetched: 2, newPostings: 1, errors: ['bad entry'] });
+    const run = await pipeline().execute(USER, 'src-b');
+    expect(run).toMatchObject({ status: 'completed_with_errors', errors: ['bad entry'] });
+  });
+
+  it('ends "failed" with the error message when the poll throws', async () => {
+    poll = () => Promise.reject(new Error('HTTP 503'));
+    const run = await pipeline().execute(USER, 'src-c');
+    expect(run).toMatchObject({
+      status: 'failed',
+      fetched: 0,
+      newPostings: 0,
+      errors: ['HTTP 503'],
+    });
+  });
+
+  it('allows one active run per source: a second run while one is running is skipped', async () => {
+    let release: () => void = () => undefined;
+    poll = () =>
+      new Promise((resolve) => {
+        release = () => {
+          resolve({ fetched: 1, newPostings: 1, errors: [] });
+        };
+      });
+    const first = pipeline().execute(USER, 'src-d');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(await pipeline().execute(USER, 'src-d')).toBeNull();
+    release();
+    expect((await first)?.status).toBe('completed');
+    // Once finished, the source can run again.
+    poll = () => Promise.resolve({ fetched: 0, newPostings: 0, errors: [] });
+    expect((await pipeline().execute(USER, 'src-d'))?.status).toBe('completed');
+  });
+
+  it('marks runs left running as failed on start, and leaves finished runs alone', async () => {
+    poll = () => new Promise(() => undefined); // never finishes: simulates a crashed worker
+    void pipeline().execute(USER, 'src-e');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(await pipeline().failStaleRuns()).toBe(1);
+
+    const runs = await pipeline().listRuns(USER, 50);
+    const stale = runs.find((r) => r.sourceId === 'src-e');
+    expect(stale).toMatchObject({ status: 'failed', errors: ['worker stopped during the run'] });
+    expect(stale?.finishedAt).toBeInstanceOf(Date);
+    expect(runs.find((r) => r.sourceId === 'src-a')?.status).toBe('completed');
+    // The source is free again.
+    poll = () => Promise.resolve({ fetched: 0, newPostings: 0, errors: [] });
+    expect((await pipeline().execute(USER, 'src-e'))?.status).toBe('completed');
+  });
+
+  it('lists the newest runs first, limited, scoped to the user', async () => {
+    const runs = await pipeline().listRuns(USER, 2);
+    expect(runs).toHaveLength(2);
+    expect(runs[0]?.startedAt.getTime()).toBeGreaterThanOrEqual(runs[1]?.startedAt.getTime() ?? 0);
+    expect(await pipeline().listRuns(OTHER_USER, 10)).toEqual([]);
+  });
+});
