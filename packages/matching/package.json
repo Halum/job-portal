@@ -12,6 +12,7 @@
   "dependencies": {
     "@job-portal/ai": "workspace:*",
     "@job-portal/db": "workspace:*",
+    "@job-portal/review": "workspace:*",
     "drizzle-orm": "0.45.4",
     "zod": "4.6.7"
   },

@@ -25,6 +25,7 @@ Terms name things in code, database, tests and issues. Source of truth: the spec
 - **Run**: one execution of the Pipeline for one Source, with its counts and errors.
 - **Digest**: the notification message listing Jobs that newly gained a Target tag in a Run.
 - **Review item**: a question the system cannot settle alone (ai_merge, ai_fit_rejection, mail_match) that waits for the user's decision.
+- **AI fit rejection**: a Review item raised when a Job's fit score for a Target lands below the threshold; disagreeing with it tags the Job with that Target (a tag override).
 - **Discovery state**: where a Job stands before applying: New, Shortlisted, Dismissed or Expired.
 - **Application status**: where an application stands: Applied, Screening, Interview, Offer, Accepted, Declined, Rejected, Withdrawn or Gone cold.
 - **Furthest stage**: the highest of Applied, Screening, Interview, Offer, Accepted a Job has reached; it only moves forward except by undo.

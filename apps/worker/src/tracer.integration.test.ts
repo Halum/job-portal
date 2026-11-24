@@ -18,6 +18,7 @@ import {
 import { allMigrations } from '@job-portal/migrations';
 import { createMatching } from '@job-portal/matching';
 import { createPipeline } from '@job-portal/pipeline';
+import { createReview } from '@job-portal/review';
 import { createLogger } from '@job-portal/shared';
 import { createApiServer } from '@job-portal/api';
 import { createTracker } from '@job-portal/tracker';
@@ -121,6 +122,7 @@ describe('Bundesagentur source to MCP list_jobs', () => {
       logger,
     });
     server = createApiServer({
+      review: createReview(handle.db),
       accounts,
       discovery,
       matching,

@@ -78,7 +78,14 @@ describe('pipeline against real Postgres', () => {
       {
         scoring: {
           score: () =>
-            Promise.resolve({ scored: 3, tagged: 2, calls: 4, costUsd: 0.07, errors: [] }),
+            Promise.resolve({
+              scored: 3,
+              tagged: 2,
+              rejections: 1,
+              calls: 4,
+              costUsd: 0.07,
+              errors: [],
+            }),
         },
       },
     );
@@ -87,11 +94,13 @@ describe('pipeline against real Postgres', () => {
       status: 'completed',
       scored: 3,
       tagged: 2,
+      aiRejections: 1,
       aiCalls: 4,
       aiCostUsd: 0.07,
     });
     expect((await scored.listRuns(USER, 50)).find((r) => r.sourceId === 'src-s1')).toMatchObject({
       scored: 3,
+      aiRejections: 1,
       aiCalls: 4,
     });
   });
@@ -107,6 +116,7 @@ describe('pipeline against real Postgres', () => {
             Promise.resolve({
               scored: 1,
               tagged: 0,
+              rejections: 0,
               calls: 2,
               costUsd: 0,
               errors: ['fit score failed (rate_limit) for a Job and Target'],
@@ -132,7 +142,14 @@ describe('pipeline against real Postgres', () => {
       {
         scoring: {
           score: () =>
-            Promise.resolve({ scored: 1, tagged: 0, calls: 1, costUsd: null, errors: [] }),
+            Promise.resolve({
+              scored: 1,
+              tagged: 0,
+              rejections: 0,
+              calls: 1,
+              costUsd: null,
+              errors: [],
+            }),
         },
       },
     );

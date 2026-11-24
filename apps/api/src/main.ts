@@ -7,6 +7,7 @@ import { connectRateLimiter, createDiscovery, createRedisLimit } from '@job-port
 import { allMigrations } from '@job-portal/migrations';
 import { createMatching } from '@job-portal/matching';
 import { createPipeline } from '@job-portal/pipeline';
+import { createReview } from '@job-portal/review';
 import { createTracker } from '@job-portal/tracker';
 import { createLogger } from '@job-portal/shared';
 import { createApiServer } from './server';
@@ -51,6 +52,7 @@ const server = createApiServer({
   matching,
   pipeline,
   tracker,
+  review: createReview(db),
   aiLog: createAiLog(db),
   boards: { watchlist: createWatchlist(db), fetch: limiter.fetch, allowAddBoard },
   logger,

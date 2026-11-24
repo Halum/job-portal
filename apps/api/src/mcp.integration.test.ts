@@ -14,6 +14,7 @@ import { allMigrations } from '@job-portal/migrations';
 import { createMatching } from '@job-portal/matching';
 import { createPipeline } from '@job-portal/pipeline';
 import { createTracker } from '@job-portal/tracker';
+import { createReview } from '@job-portal/review';
 import { createLogger } from '@job-portal/shared';
 import { createApiServer } from './server';
 
@@ -57,6 +58,7 @@ describe('MCP endpoint over real HTTP', () => {
       },
     });
     server = createApiServer({
+      review: createReview(handle.db),
       accounts,
       discovery,
       matching,
@@ -99,12 +101,15 @@ describe('MCP endpoint over real HTTP', () => {
       'add_board',
       'add_job',
       'add_note',
+      'decide_review',
       'get_global_defaults',
       'get_job',
       'get_run_history',
       'get_watchlist',
       'list_jobs',
+      'list_reviews',
       'list_targets',
+      'review_stats',
       'set_status',
       'split_job',
       'undo_last_change',
@@ -481,6 +486,7 @@ describe('MCP endpoint over real HTTP', () => {
     if (!serverB) {
       const discovery = createDiscovery(handle.db, []);
       serverB = createApiServer({
+        review: createReview(handle.db),
         accounts: {
           authenticate: () =>
             Promise.resolve({ id: USER_B, email: 'b@example.invalid', timezone: 'UTC' }),

@@ -15,6 +15,13 @@
       "when": 1795542820569,
       "tag": "0001_supreme_darkstar",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795543580312,
+      "tag": "0002_dusty_energizer",
+      "breakpoints": true
     }
   ]
 }

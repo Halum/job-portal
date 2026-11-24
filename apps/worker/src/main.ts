@@ -13,6 +13,7 @@ import { connectRateLimiter, createDiscovery } from '@job-portal/discovery';
 import { createMatching } from '@job-portal/matching';
 import { allMigrations } from '@job-portal/migrations';
 import { createPipeline } from '@job-portal/pipeline';
+import { createReview } from '@job-portal/review';
 import { createTracker } from '@job-portal/tracker';
 import { createLogger } from '@job-portal/shared';
 import { buildSources } from './sources';
@@ -38,6 +39,7 @@ const runner: AiRunner | null =
 const ai = runner === null ? undefined : createAi(createAiLog(db), runner);
 const matching = createMatching(db, {
   ...(ai ? { ai } : {}),
+  review: createReview(db),
   defaultAlertThreshold: config.alertThreshold,
   maxCallsPerPass: config.aiMaxCallsPerRun,
   loadJobs: (userId, ids) => discovery.listMatchable(userId, ids),

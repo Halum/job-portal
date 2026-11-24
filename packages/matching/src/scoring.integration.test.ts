@@ -30,7 +30,7 @@ describe('fit scoring against real Postgres', () => {
     async run(_user, _feature, prompt, parse) {
       prompts.push(prompt);
       const text = await respond(prompt);
-      return { value: parse(text), costUsd: cost };
+      return { value: parse(text), model: 'vendor/model', costUsd: cost };
     },
   };
   const make = (deps: { ai?: Ai | null; maxCallsPerPass?: number } = {}): Matching =>
@@ -288,6 +288,7 @@ describe('fit scoring against real Postgres', () => {
     expect(await plain.score(USER)).toEqual({
       scored: 0,
       tagged: 0,
+      rejections: 0,
       calls: 0,
       costUsd: null,
       errors: [],

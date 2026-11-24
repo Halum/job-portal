@@ -12,6 +12,7 @@ import { createDiscovery } from '@job-portal/discovery';
 import { createMatching } from '@job-portal/matching';
 import { allMigrations } from '@job-portal/migrations';
 import { createPipeline } from '@job-portal/pipeline';
+import { createReview } from '@job-portal/review';
 import { createLogger } from '@job-portal/shared';
 import { createTracker } from '@job-portal/tracker';
 import { createApiServer } from './server';
@@ -62,6 +63,7 @@ describe('fit scores over MCP', () => {
     });
     const pipeline = createPipeline(handle.db, discovery, { matching, scoring: matching });
     server = createApiServer({
+      review: createReview(handle.db),
       accounts,
       discovery,
       matching,
