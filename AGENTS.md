@@ -29,6 +29,7 @@ Search and tracking system for job postings: sources are polled on a schedule, p
 - Pre-commit runs typecheck, lint, fast tests, and gitleaks, osv-scanner, semgrep when installed. CI runs all of them.
 - Decisions are in `docs/adr/` (agent decisions awaiting review in `docs/adr/agent/`).
 - Terms in `GLOSSARY.md` name things in code, database, tests and issues.
+- After each spec is implemented (its tickets merged), update the feature backlog note `job-automation-feature-backlog` in the owner's knowledge vault (path in the global agent instructions, never named here, the repo is public): set Status on every row the spec touched to Built, Partly built, Built differently (the need met another way) or Pending, with a short reason, and fill the Issues column.
 
 ## Architecture map
 
