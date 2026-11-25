@@ -5,8 +5,10 @@ import {
   CAREER_EDIT_REASONS,
   CAREER_ITEM_KINDS,
   DocumentsError,
+  ITEM_SOURCES,
   OVERRIDE_ACTIONS,
   OVERRIDE_ITEM_KINDS,
+  REVISION_ITEM_KINDS,
   REVISION_REASONS,
   MASTER_KINDS,
   REVISION_ACTORS,
@@ -38,7 +40,7 @@ const fileOut = z.object({
 const stored = z.object({
   id: z.string(),
   hidden: z.boolean(),
-  source: z.enum(['inherited', 'replaced', 'added', 'hidden']).optional(),
+  source: z.enum(ITEM_SOURCES).optional(),
   overrideId: z.string().nullable().optional(),
   stale: z.boolean().optional(),
 });
@@ -309,7 +311,7 @@ export function registerDocumentsTools(
         revisions: z.array(
           z.object({
             id: z.string(),
-            itemKind: z.enum([...CAREER_ITEM_KINDS, 'override']),
+            itemKind: z.enum(REVISION_ITEM_KINDS),
             itemId: z.string(),
             oldValue: z.record(z.string(), z.unknown()).nullable(),
             newValue: z.record(z.string(), z.unknown()),

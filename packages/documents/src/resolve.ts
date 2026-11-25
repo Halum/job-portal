@@ -26,7 +26,8 @@ export interface CareerOverride {
   createdAt: Date;
 }
 
-export type ItemSource = 'inherited' | 'replaced' | 'added' | 'hidden';
+export const ITEM_SOURCES = ['inherited', 'replaced', 'added', 'hidden'] as const;
+export type ItemSource = (typeof ITEM_SOURCES)[number];
 
 /** An item of a Target career bank: its value, where it came from and, when an override made it, which one. */
 export type Marked<T> = T & {
@@ -42,16 +43,17 @@ type Item = { id: string; hidden: boolean };
 type WE = Omit<CareerBank['workExperiences'][number], 'points'>;
 type EP = CareerBank['workExperiences'][number]['points'][number];
 type RE = CareerBank['resumeEntries'][number];
+type OS = Omit<CareerBank['coverLetterOutline'][number], 'paragraphs'>;
 type CLP = CareerBank['coverLetterOutline'][number]['paragraphs'][number];
 
 export interface TargetCareerBank {
   masterDocuments: CareerBank['masterDocuments'];
-  workExperiences: (Marked<Omit<CareerBank['workExperiences'][number], 'points'>> & {
-    points: Marked<CareerBank['workExperiences'][number]['points'][number]>[];
+  workExperiences: (Marked<WE> & {
+    points: Marked<EP>[];
   })[];
-  resumeEntries: Marked<CareerBank['resumeEntries'][number]>[];
-  coverLetterOutline: (Marked<Omit<CareerBank['coverLetterOutline'][number], 'paragraphs'>> & {
-    paragraphs: Marked<CareerBank['coverLetterOutline'][number]['paragraphs'][number]>[];
+  resumeEntries: Marked<RE>[];
+  coverLetterOutline: (Marked<OS> & {
+    paragraphs: Marked<CLP>[];
   })[];
   writingStyle: Marked<NonNullable<CareerBank['writingStyle']>> | null;
   contact: Marked<NonNullable<CareerBank['contact']>> | null;
@@ -82,7 +84,7 @@ export function resolveCareerBank(
   const added = <T extends Item>(o: CareerOverride, parentHidden = false): Marked<T> => ({
     ...(o.value as unknown as T),
     id: o.id,
-    hidden: false,
+    hidden: parentHidden,
     source: parentHidden ? 'hidden' : 'added',
     overrideId: o.id,
     stale: false,
@@ -91,7 +93,13 @@ export function resolveCareerBank(
   const mark = <T extends Item>(item: T, parentHidden = false): Marked<T> => {
     const hide = hides.get(item.id);
     if (hide || parentHidden) {
-      return { ...item, source: 'hidden', overrideId: hide?.id ?? null, stale: false };
+      return {
+        ...item,
+        hidden: true,
+        source: 'hidden',
+        overrideId: hide?.id ?? null,
+        stale: false,
+      };
     }
     const replace = replaces.get(item.id);
     if (replace?.value) {

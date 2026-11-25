@@ -300,6 +300,20 @@ describe('Target career banks through the Documents interface', () => {
     expect(ids).not.toContain(p.id);
   });
 
+  it('refuses a hide or replace of an item the Career bank itself hid', async () => {
+    const job = await add(USER, 'work_experience', work);
+    const p = await add(USER, 'experience_point', point('T'), job.id);
+    await docs.hideItem(USER, p.id, 'user');
+    expect(await code(set(USER, { targetId: TARGET, action: 'hide', itemId: p.id }))).toBe(
+      'invalid_argument',
+    );
+    expect(
+      await code(
+        set(USER, { targetId: TARGET, action: 'replace', itemId: p.id, value: point('R') }),
+      ),
+    ).toBe('invalid_argument');
+  });
+
   it('edits an added item in place with overrideId and keeps its id', async () => {
     const job = await add(USER, 'work_experience', work);
     const first = await set(USER, {

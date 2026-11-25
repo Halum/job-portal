@@ -29,6 +29,7 @@ export { FILE_KINDS, MASTER_KINDS, type FileKind, type MasterKind } from './sche
 export {
   CAREER_ITEM_KINDS,
   REVISION_ACTORS,
+  REVISION_ITEM_KINDS,
   REVISION_REASONS,
   type CareerItemKind,
   type RevisionActor,
@@ -557,6 +558,42 @@ async function latestRevisionIds(
   return new Map(rows.map((r) => [r.itemId, r.id]));
 }
 
+type OverrideRow = CareerOverride;
+type OverrideFields = Omit<CareerOverride, 'id' | 'targetId' | 'createdAt'>;
+
+/** Updates the override in place, or inserts it, and records the revision of item kind override. */
+async function saveOverride(
+  tx: Tx,
+  userId: string,
+  targetId: string,
+  old: OverrideRow | undefined,
+  fields: OverrideFields,
+  reason: RevisionReason,
+  actor: RevisionActor,
+): Promise<CareerOverride> {
+  if (old) {
+    await tx.update(careerOverrides).set(fields).where(eq(careerOverrides.id, old.id));
+    const next = { ...old, ...fields };
+    await revise(
+      tx,
+      userId,
+      { kind: 'override', id: old.id },
+      snapshot(old),
+      snapshot(next),
+      reason,
+      actor,
+    );
+    return next;
+  }
+  const [row] = await tx
+    .insert(careerOverrides)
+    .values({ userId, targetId, ...fields })
+    .returning(overrideColumns);
+  if (!row) throw new Error('override insert returned no row');
+  await revise(tx, userId, { kind: 'override', id: row.id }, null, snapshot(row), reason, actor);
+  return row;
+}
+
 export function createDocuments(db: Db, deps: DocumentsDeps = {}): Documents {
   const requireTarget = async (userId: string, targetId: string) => {
     if (!(await deps.hasTarget?.(userId, targetId))) {
@@ -904,9 +941,8 @@ export function createDocuments(db: Db, deps: DocumentsDeps = {}): Documents {
       return row ? { info, bytes: row.bytes } : null;
     },
     async setOverride(userId, input) {
-      const { targetId, action } = input;
+      const { targetId, action, reason, actor } = input;
       await requireTarget(userId, targetId);
-      const reason = input.reason;
       return db.transaction(async (tx) => {
         await lockUser(tx, userId);
         if (action === 'add') {
@@ -925,9 +961,9 @@ export function createDocuments(db: Db, deps: DocumentsDeps = {}): Documents {
           }
           const value = parseValue(kind, input.value);
           const parentId = await checkParent(tx, userId, targetId, kind, input.parentId);
-          const fields = { itemKind: kind, parentId, value };
+          let old: OverrideRow | undefined;
           if (input.overrideId !== undefined) {
-            const [old] = await tx
+            [old] = await tx
               .select(overrideColumns)
               .from(careerOverrides)
               .where(
@@ -942,34 +978,16 @@ export function createDocuments(db: Db, deps: DocumentsDeps = {}): Documents {
             if (old.itemKind !== kind) {
               throw new DocumentsError('invalid_argument', 'an added item cannot change its kind');
             }
-            await tx.update(careerOverrides).set(fields).where(eq(careerOverrides.id, old.id));
-            const next = { ...old, ...fields };
-            await revise(
-              tx,
-              userId,
-              { kind: 'override', id: old.id },
-              snapshot(old),
-              snapshot(next),
-              reason,
-              input.actor,
-            );
-            return next;
           }
-          const [row] = await tx
-            .insert(careerOverrides)
-            .values({ userId, targetId, action, ...fields })
-            .returning(overrideColumns);
-          if (!row) throw new Error('override insert returned no row');
-          await revise(
-            tx,
-            userId,
-            { kind: 'override', id: row.id },
-            null,
-            snapshot(row),
-            reason,
-            input.actor,
-          );
-          return row;
+          const fields = {
+            action,
+            itemKind: kind,
+            itemId: null,
+            parentId,
+            value,
+            baseRevisionId: null,
+          };
+          return saveOverride(tx, userId, targetId, old, fields, reason, actor);
         }
 
         if (input.itemId === undefined) {
@@ -985,6 +1003,9 @@ export function createDocuments(db: Db, deps: DocumentsDeps = {}): Documents {
             'invalid_argument',
             `a ${item.kind} cannot be overridden for a Target`,
           );
+        }
+        if (item.hidden) {
+          throw new DocumentsError('invalid_argument', 'the item is hidden, restore it first');
         }
         if (input.itemKind !== undefined && input.itemKind !== kind) {
           throw new DocumentsError(
@@ -1005,7 +1026,6 @@ export function createDocuments(db: Db, deps: DocumentsDeps = {}): Documents {
           action === 'replace'
             ? ((await latestRevisionIds(tx, userId, [item.id])).get(item.id) ?? null)
             : null;
-        const fields = { action, itemKind: kind, value, baseRevisionId };
         const [old] = await tx
           .select(overrideColumns)
           .from(careerOverrides)
@@ -1016,35 +1036,15 @@ export function createDocuments(db: Db, deps: DocumentsDeps = {}): Documents {
               eq(careerOverrides.itemId, item.id),
             ),
           );
-        if (old) {
-          await tx.update(careerOverrides).set(fields).where(eq(careerOverrides.id, old.id));
-          const next = { ...old, ...fields };
-          await revise(
-            tx,
-            userId,
-            { kind: 'override', id: old.id },
-            snapshot(old),
-            snapshot(next),
-            reason,
-            input.actor,
-          );
-          return next;
-        }
-        const [row] = await tx
-          .insert(careerOverrides)
-          .values({ userId, targetId, itemId: item.id, ...fields })
-          .returning(overrideColumns);
-        if (!row) throw new Error('override insert returned no row');
-        await revise(
-          tx,
-          userId,
-          { kind: 'override', id: row.id },
-          null,
-          snapshot(row),
-          reason,
-          input.actor,
-        );
-        return row;
+        const fields = {
+          action,
+          itemKind: kind,
+          itemId: item.id,
+          parentId: null,
+          value,
+          baseRevisionId,
+        };
+        return saveOverride(tx, userId, targetId, old, fields, reason, actor);
       });
     },
 

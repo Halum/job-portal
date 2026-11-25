@@ -62,9 +62,9 @@ describe('resolveCareerBank', () => {
       [override({ id: ID(10), action: 'hide', itemId: POINT_A })],
       new Map(),
     );
-    expect(view.workExperiences[0]?.points.map((p) => [p.id, p.source])).toEqual([
-      [POINT_A, 'hidden'],
-      [POINT_B, 'inherited'],
+    expect(view.workExperiences[0]?.points.map((p) => [p.id, p.source, p.hidden])).toEqual([
+      [POINT_A, 'hidden', true],
+      [POINT_B, 'inherited', false],
     ]);
   });
 
@@ -183,7 +183,12 @@ describe('resolveCareerBank', () => {
     );
     const we = view.workExperiences[0];
     expect(we?.source).toBe('hidden');
-    expect(we?.points.map((p) => p.source)).toEqual(['hidden', 'hidden', 'hidden']);
+    expect(we?.hidden).toBe(true);
+    expect(we?.points.map((p) => [p.source, p.hidden])).toEqual([
+      ['hidden', true],
+      ['hidden', true],
+      ['hidden', true],
+    ]);
   });
 
   it('shows a Target-only Work experience with the points added under it', () => {
