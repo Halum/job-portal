@@ -359,7 +359,7 @@ export function registerTools(
     'get_job',
     {
       description:
-        'Get one Job with all its postings (each as the source gave it), its tracking, its Timeline (oldest first), its notes and, for each Target it is a candidate for, its AI fit score, reasons, red flags, language judgement, tag and unknown-location flag.',
+        'Get one Job with all its postings (each as the source gave it), its tracking, its Timeline (oldest first), its notes, for each Target it is a candidate for its AI fit score, reasons, red flags, language judgement, tag and unknown-location flag, and a packets summary (Application packet count, newest version, version marked sent).',
       inputSchema: { jobId: z.uuid() },
       outputSchema: {
         job: jobSchema.extend({
@@ -367,16 +367,24 @@ export function registerTools(
           timeline: z.array(timelineSchema),
           notes: z.array(noteSchema),
           scores: z.array(scoreSchema),
+          packets: z
+            .object({
+              count: z.number(),
+              currentVersion: z.number().nullable(),
+              sentVersion: z.number().nullable(),
+            })
+            .describe('Application packets: how many versions, the newest and the one marked sent'),
         }),
       },
     },
     async ({ jobId }) => {
       const job = await discovery.getJob(user.id, jobId);
       if (!job) return { isError: true, content: [{ type: 'text', text: `No Job ${jobId}` }] };
-      const [states, { events, notes }, scores] = await Promise.all([
+      const [states, { events, notes }, scores, packets] = await Promise.all([
         tracker.getStates(user.id, [jobId]),
         tracker.getTimeline(user.id, jobId),
         matching.listScores(user.id, jobId),
+        documents.packetsOverview(user.id, jobId),
       ]);
       const out = {
         job: {
@@ -390,6 +398,7 @@ export function registerTools(
           timeline: events.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() })),
           notes: notes.map((n) => ({ ...n, createdAt: n.createdAt.toISOString() })),
           scores,
+          packets,
         },
       };
       return { content: [text(out)], structuredContent: out };

@@ -70,6 +70,16 @@ Every Target inherits the whole Career bank and changes it only through override
 - `get_career_bank` with `targetId`: what that Target sees. Every item has `source`: `inherited`, `replaced`, `added` or `hidden` (use only the items that are not hidden). Items an override made carry `overrideId`. A replacement with `stale: true` was made against an older version of the item than the Career bank has now: tell the user the Career bank version changed and offer to update the Target too (set the replacement again, or clear it). An unknown or foreign `targetId` is refused.
 - Each set, change and clear is a revision of the override (`list_career_revisions` with the `overrideId`), so Target wording is never lost.
 
+### Application packets
+
+A packet is one saved preparation (resume and letter, with PDFs) for one Job. Preparing the same Job again adds a version; nothing is overwritten.
+
+- `save_application_packet`: after the content is final, send `jobId`, `targetId` (the Target the user applies under; any Target of theirs, ask when the Job has several tags or none), the structured `resume` and `letter`, `sources` and the Requirement `gaps` and `questionsAsked`. `sources` repeats the content's shape and order and names, for every line, the item ids it came from: the ids `get_career_bank` with that `targetId` returns (a merged line lists all of them). A letter paragraph you drafted because nothing fit has no ids and `isNew: true`. Ids that are not in that Target's career bank are refused and nothing is saved. The answer has the version, the page counts and `resumeOverCap` (more than 2 pages) and `letterOverCap` (more than 1): when one is true, trim and save again.
+- `list_application_packets`: the versions of a Job with page counts, over-cap flags and which one is sent.
+- `get_application_packet`: one version (the newest without `version`): content, Markdown of both documents, sources, gaps, questions and the two PDF file ids. Download a PDF with `curl -sS -H "Authorization: Bearer $TOKEN" "$BASE/files/<fileId>" -o resume.pdf` and save the Markdown beside it.
+- `mark_packet_sent`: mark the version the user actually sent. Marking another version moves the mark. Ask which version they sent; never guess.
+- `get_job` shows `packets`: how many versions exist, the newest and the sent one.
+
 ## How the system is running
 
 - `get_run_history`: recent Runs per source with counts, errors and the AI totals (calls, failures, tokens, cost). Use it when the user asks why nothing new arrived or what the AI costs.
