@@ -189,7 +189,10 @@ export async function composeApp(
     review,
     matching,
     discovery,
-    documents: createDocuments(db),
+    documents: createDocuments(db, {
+      hasTarget: async (userId, targetId) =>
+        (await matching.listTargets(userId)).some((t) => t.id === targetId),
+    }),
     tracker,
     watchlist,
     aiLog,
