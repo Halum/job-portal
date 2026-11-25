@@ -14,6 +14,8 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
+import type { PacketSources } from './packets';
+
 /** Each module owns one Postgres schema; no other module queries it. */
 export const documentsSchema = pgSchema('documents');
 
@@ -213,7 +215,7 @@ export const applicationPackets = documentsSchema.table(
     version: integer('version').notNull(),
     resume: jsonb('resume').$type<Record<string, unknown>>().notNull(),
     letter: jsonb('letter').$type<Record<string, unknown>>().notNull(),
-    sources: jsonb('sources').$type<Record<string, unknown>>().notNull(),
+    sources: jsonb('sources').$type<PacketSources>().notNull(),
     gaps: jsonb('gaps').$type<string[]>().notNull(),
     questionsAsked: jsonb('questions_asked').$type<string[]>().notNull(),
     resumePdfFileId: uuid('resume_pdf_file_id')

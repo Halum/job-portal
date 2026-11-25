@@ -10,7 +10,13 @@ import {
   resumeContent,
   resumeMarkdown,
 } from './render';
-import { applicationPackets, fileBytes, files, type CareerItemKind } from './schema';
+import {
+  applicationPackets,
+  fileBytes,
+  files,
+  type CareerItemKind,
+  type PacketFileKind,
+} from './schema';
 import type { ItemSource, TargetCareerBank } from './resolve';
 
 // The sources of every line of a packet, named by the ids the Target career bank shows (get_career_bank with targetId):
@@ -60,6 +66,8 @@ export interface PacketSourceRef {
   /** The newest revision of the item (of the override, for an item the Target added) when the packet was saved. */
   revisionId: string | null;
   overrideId: string | null;
+  /** The newest revision of the override when it replaced the item's text, so the wording used stays identifiable; null otherwise. */
+  overrideRevisionId: string | null;
 }
 export interface PacketLineSources {
   items: PacketSourceRef[];
@@ -238,6 +246,8 @@ export function createPacketOps(ctx: PacketContext): PacketOps {
       same('resume.certificates', sources.resume.certificates.length, resume.certificates.length);
       same('letter.paragraphs', sources.letter.paragraphs.length, letter.paragraphs.length);
 
+      // ponytail: the bank and the revisions are read before the packet lock, so an item changed in between is saved
+      // with the revision read here; the content itself is stored, so nothing is lost. Move both inside the lock if it matters.
       const bank = await ctx.targetBank(userId, input.targetId);
       const usable = usableItems(bank);
       const cited = new Set<string>();
@@ -258,6 +268,10 @@ export function createPacketOps(ctx: PacketContext): PacketOps {
           cited.add(id);
         }
       }
+      for (const id of [...cited]) {
+        const overrideId = usable.get(id)?.overrideId;
+        if (overrideId) cited.add(overrideId);
+      }
       const revisions = await ctx.latestRevisions(userId, [...cited]);
       const lineOf = (l: { itemIds: string[]; isNew: boolean }): PacketLineSources => ({
         isNew: l.isNew,
@@ -270,6 +284,10 @@ export function createPacketOps(ctx: PacketContext): PacketOps {
             source: u.source,
             revisionId: revisions.get(itemId) ?? null,
             overrideId: u.overrideId,
+            overrideRevisionId:
+              u.source === 'replaced' && u.overrideId
+                ? (revisions.get(u.overrideId) ?? null)
+                : null,
           };
         }),
       });
@@ -288,10 +306,7 @@ export function createPacketOps(ctx: PacketContext): PacketOps {
       };
 
       // The photo of the Target's contact details, when it has one.
-      const photoId =
-        bank.contact && typeof (bank.contact as { photoFileId?: unknown }).photoFileId === 'string'
-          ? (bank.contact as { photoFileId: string }).photoFileId
-          : null;
+      const photoId = bank.contact?.photoFileId ?? null;
       const photo = photoId ? await photoBytes(db, userId, photoId) : undefined;
       const [resumePdf, letterPdf] = await Promise.all([
         renderResumePdf(resume, photo ? { photo } : {}),
@@ -309,7 +324,7 @@ export function createPacketOps(ctx: PacketContext): PacketOps {
           .orderBy(desc(applicationPackets.version))
           .limit(1);
         const version = (latest?.version ?? 0) + 1;
-        const storePdf = async (kind: 'resume_pdf' | 'letter_pdf', bytes: Buffer) => {
+        const storePdf = async (kind: PacketFileKind, bytes: Buffer) => {
           const [file] = await tx
             .insert(files)
             .values({
@@ -335,7 +350,7 @@ export function createPacketOps(ctx: PacketContext): PacketOps {
             version,
             resume,
             letter,
-            sources: stored as unknown as Record<string, unknown>,
+            sources: stored,
             gaps: input.gaps,
             questionsAsked: input.questionsAsked,
             resumePdfFileId,
@@ -384,7 +399,7 @@ export function createPacketOps(ctx: PacketContext): PacketOps {
       if (!row) throw new DocumentsError('not_found', 'no such Application packet');
       return {
         ...row,
-        sources: row.sources as unknown as PacketSources,
+        sources: row.sources,
         resumeMarkdown: resumeMarkdown(resumeContent.parse(row.resume)),
         letterMarkdown: letterMarkdown(letterContent.parse(row.letter)),
       };

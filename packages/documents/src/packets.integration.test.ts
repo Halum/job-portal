@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { sql } from 'drizzle-orm';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import { DocumentsError, createDocuments, type Documents, type SavePacketInput } from './documents';
 import { documentsMigrations } from './index';
@@ -298,6 +299,7 @@ describe('Application packets through the Documents interface', () => {
         source: 'replaced',
         overrideId: replaced.id,
         revisionId: await revisionsOf(pointIds[0] ?? ''),
+        overrideRevisionId: await revisionsOf(replaced.id),
       },
     ]);
     expect(merged?.items.map((i) => [i.itemId, i.source, i.overrideId])).toEqual([
@@ -314,7 +316,9 @@ describe('Application packets through the Documents interface', () => {
     const saved = await Promise.all(
       [1, 2, 3, 4].map(() => docs.savePacket(USER, packet({ jobId: job }))),
     );
-    expect(saved.map((s) => s.version).sort()).toEqual([1, 2, 3, 4].map((n) => before + n));
+    expect(saved.map((s) => s.version).sort((a, b) => a - b)).toEqual(
+      [1, 2, 3, 4].map((n) => before + n),
+    );
     const list = await docs.listPackets(USER, job);
     expect(list.map((s) => s.version)).toEqual(list.map((_, i) => i + 1));
     expect((await docs.packetsOverview(USER, job)).currentVersion).toBe(list.length);
@@ -391,5 +395,17 @@ describe('Application packets through the Documents interface', () => {
     });
     expect(long.resumeOverCap).toBe(true);
     expect(long.resumePages).toBeGreaterThan(2);
+  });
+
+  it('lets the database alone keep a Job to one sent version', async () => {
+    const job = JOB_2;
+    const list = await docs.listPackets(USER, job);
+    const open = list.find((s) => !s.sent);
+    expect(open).toBeDefined();
+    await expect(
+      handle.db.execute(
+        sql`update documents.application_packets set sent = true where id = ${open?.id ?? ''}`,
+      ),
+    ).rejects.toThrow();
   });
 });
