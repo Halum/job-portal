@@ -22,6 +22,11 @@ const bytea = customType<{ data: Buffer }>({ dataType: () => 'bytea' });
 export const FILE_KINDS = ['master_resume', 'master_cover_letter', 'photo'] as const;
 export type FileKind = (typeof FILE_KINDS)[number];
 
+/** The two PDFs an Application packet stores as files; never uploaded through the route. */
+export const PACKET_FILE_KINDS = ['resume_pdf', 'letter_pdf'] as const;
+export type PacketFileKind = (typeof PACKET_FILE_KINDS)[number];
+export type StoredFileKind = FileKind | PacketFileKind;
+
 export const MASTER_KINDS = ['master_resume', 'master_cover_letter'] as const;
 export type MasterKind = (typeof MASTER_KINDS)[number];
 
@@ -76,7 +81,7 @@ export const files = documentsSchema.table(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     userId: uuid('user_id').notNull(),
-    kind: text('kind').$type<FileKind>().notNull(),
+    kind: text('kind').$type<StoredFileKind>().notNull(),
     filename: text('filename').notNull(),
     mediaType: text('media_type').notNull(),
     size: integer('size').notNull(),
@@ -84,7 +89,7 @@ export const files = documentsSchema.table(
   },
   (t) => [
     index('files_user_kind_idx').on(t.userId, t.kind, t.createdAt),
-    check('files_kind', sql`${t.kind} in (${inList(FILE_KINDS)})`),
+    check('files_kind', sql`${t.kind} in (${inList([...FILE_KINDS, ...PACKET_FILE_KINDS])})`),
   ],
 );
 
@@ -189,5 +194,47 @@ export const careerOverrides = documentsSchema.table(
         or (${t.action} = 'replace' and ${t.itemId} is not null and ${t.value} is not null)
         or (${t.action} = 'add' and ${t.itemId} is null and ${t.value} is not null)`,
     ),
+  ],
+);
+
+/**
+ * Application packets: one prepared resume and cover letter for one Job, a new version per preparation.
+ * `sources` holds, for every resume line and letter paragraph, the Career bank items it came from with the
+ * revision of each and the override id where a Target replacement or addition was used. At most one version
+ * per Job carries the sent mark (partial unique index).
+ */
+export const applicationPackets = documentsSchema.table(
+  'application_packets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull(),
+    jobId: uuid('job_id').notNull(),
+    targetId: uuid('target_id').notNull(),
+    version: integer('version').notNull(),
+    resume: jsonb('resume').$type<Record<string, unknown>>().notNull(),
+    letter: jsonb('letter').$type<Record<string, unknown>>().notNull(),
+    sources: jsonb('sources').$type<Record<string, unknown>>().notNull(),
+    gaps: jsonb('gaps').$type<string[]>().notNull(),
+    questionsAsked: jsonb('questions_asked').$type<string[]>().notNull(),
+    resumePdfFileId: uuid('resume_pdf_file_id')
+      .notNull()
+      .references(() => files.id),
+    letterPdfFileId: uuid('letter_pdf_file_id')
+      .notNull()
+      .references(() => files.id),
+    resumePages: integer('resume_pages').notNull(),
+    letterPages: integer('letter_pages').notNull(),
+    resumeOverCap: boolean('resume_over_cap').notNull(),
+    letterOverCap: boolean('letter_over_cap').notNull(),
+    sent: boolean('sent').notNull().default(false),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('application_packets_version').on(t.userId, t.jobId, t.version),
+    uniqueIndex('application_packets_sent')
+      .on(t.userId, t.jobId)
+      .where(sql`${t.sent}`),
+    check('application_packets_version_positive', sql`${t.version} >= 1`),
   ],
 );

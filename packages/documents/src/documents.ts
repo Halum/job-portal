@@ -1,6 +1,8 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '@job-portal/db';
+import { DocumentsError } from './errors';
+import { createPacketOps, type PacketOps } from './packets';
 import {
   careerItems,
   careerOverrides,
@@ -12,6 +14,7 @@ import {
   type CareerItemKind,
   type FileKind,
   type MasterKind,
+  type StoredFileKind,
   type RevisionActor,
   type RevisionItemKind,
   type RevisionReason,
@@ -184,19 +187,12 @@ export type CareerBankImport = z.infer<typeof careerBankImport>;
 /** The reasons a caller may give to `upsertItem`; import, hide and restore are written by their own calls. */
 export const CAREER_EDIT_REASONS = ['coaching', 'enrichment', 'user_edit'] as const;
 
-export class DocumentsError extends Error {
-  constructor(
-    readonly code: 'not_found' | 'unsupported_type' | 'invalid_argument',
-    message: string,
-  ) {
-    super(message);
-    this.name = 'DocumentsError';
-  }
-}
+export { DocumentsError };
+export * from './packets';
 
 export interface FileInfo {
   id: string;
-  kind: FileKind;
+  kind: StoredFileKind;
   filename: string;
   mediaType: string;
   size: number;
@@ -341,9 +337,11 @@ export interface SetOverrideInput {
 export interface DocumentsDeps {
   /** True when the Target exists and belongs to the user. Left out: every Target call is refused. */
   hasTarget?: (userId: string, targetId: string) => Promise<boolean>;
+  /** True when the Job exists and belongs to the user (Discovery). Left out: every Application packet call is refused. */
+  hasJob?: (userId: string, jobId: string) => Promise<boolean>;
 }
 
-export interface Documents {
+export interface Documents extends PacketOps {
   /** Checks the content type and stores the file; a new upload of a kind never removes an older one. */
   storeFile: (userId: string, file: NewFile) => Promise<FileInfo>;
   /** The file and its bytes, or null when the id is unknown or belongs to another user. */
@@ -653,7 +651,20 @@ export function createDocuments(db: Db, deps: DocumentsDeps = {}): Documents {
     throw new DocumentsError('not_found', NOT_FOUND);
   }
 
+  const requireJob = async (userId: string, jobId: string) => {
+    if (!(await deps.hasJob?.(userId, jobId))) {
+      throw new DocumentsError('not_found', 'no such Job');
+    }
+  };
+
   const api: Documents = {
+    ...createPacketOps({
+      db,
+      requireTarget,
+      requireJob,
+      targetBank: (userId, targetId) => api.getTargetCareerBank(userId, targetId),
+      latestRevisions: (userId, ids) => latestRevisionIds(db, userId, ids),
+    }),
     async storeFile(userId, file) {
       if (file.bytes.length === 0)
         throw new DocumentsError('invalid_argument', 'the file is empty');

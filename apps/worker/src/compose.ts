@@ -192,6 +192,7 @@ export async function composeApp(
     documents: createDocuments(db, {
       hasTarget: async (userId, targetId) =>
         (await matching.listTargets(userId)).some((t) => t.id === targetId),
+      hasJob: async (userId, jobId) => (await discovery.getJob(userId, jobId)) !== null,
     }),
     tracker,
     watchlist,
