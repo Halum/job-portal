@@ -10,7 +10,7 @@ import { createWatchlist } from '@job-portal/boards';
 import { createDb, runMigrationsWithLock, type DbHandle } from '@job-portal/db';
 import { createDiscovery } from '@job-portal/discovery';
 import { createDocuments } from '@job-portal/documents';
-import { extractPages } from '../../../packages/documents/src/render/pdf-text';
+import { extractPages } from '@job-portal/documents/testing';
 import { allMigrations } from '@job-portal/migrations';
 import { createMatching } from '@job-portal/matching';
 import { createPipeline } from '@job-portal/pipeline';

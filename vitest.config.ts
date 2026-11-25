@@ -30,6 +30,7 @@ export default defineConfig({
         // Test-only helpers of the Documents render tests (synthetic fixtures, PDF text extraction).
         'packages/documents/src/render/fixtures.ts',
         'packages/documents/src/render/pdf-text.ts',
+        'packages/documents/src/testing.ts',
       ],
       thresholds: { statements: 80, lines: 80, functions: 80, branches: 70 },
     },
