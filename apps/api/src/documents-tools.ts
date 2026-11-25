@@ -5,6 +5,8 @@ import {
   CAREER_EDIT_REASONS,
   CAREER_ITEM_KINDS,
   DocumentsError,
+  OVERRIDE_ACTIONS,
+  OVERRIDE_ITEM_KINDS,
   REVISION_REASONS,
   MASTER_KINDS,
   REVISION_ACTORS,
@@ -17,6 +19,7 @@ import {
   workExperienceValue,
   writingStyleValue,
   type CareerItem,
+  type CareerOverride,
   type Documents,
   type FileInfo,
 } from '@job-portal/documents';
@@ -31,7 +34,14 @@ const fileOut = z.object({
   createdAt: z.string().describe('ISO 8601 timestamp, UTC'),
 });
 
-const stored = z.object({ id: z.string(), hidden: z.boolean() });
+/** An item of the Career bank; the markers are there only when get_career_bank is asked for a Target. */
+const stored = z.object({
+  id: z.string(),
+  hidden: z.boolean(),
+  source: z.enum(['inherited', 'replaced', 'added', 'hidden']).optional(),
+  overrideId: z.string().nullable().optional(),
+  stale: z.boolean().optional(),
+});
 
 const careerBankOut = {
   masterDocuments: z.object({
@@ -52,6 +62,23 @@ const careerBankOut = {
   writingStyle: stored.extend(writingStyleValue.shape).nullable(),
   contact: stored.extend(contactValue.shape).nullable(),
 };
+
+const overrideOut = {
+  override: z.object({
+    id: z.string(),
+    targetId: z.string(),
+    action: z.enum(OVERRIDE_ACTIONS),
+    itemKind: z.enum(OVERRIDE_ITEM_KINDS),
+    itemId: z.string().nullable(),
+    parentId: z.string().nullable(),
+    value: z.record(z.string(), z.unknown()).nullable(),
+    baseRevisionId: z.string().nullable(),
+    createdAt: z.string().describe('ISO 8601 timestamp, UTC'),
+  }),
+};
+
+const overrideJson = (o: CareerOverride) =>
+  ok({ override: { ...o, createdAt: o.createdAt.toISOString() } });
 
 const itemOut = {
   item: z.object({
@@ -136,16 +163,19 @@ export function registerDocumentsTools(
     'get_career_bank',
     {
       description:
-        'Read the whole Career bank: the current Master files, Work experiences each with Experience points, Resume entries, the Cover letter outline sections each with paragraphs, the Writing style profile and the contact details (null when not set yet). Hidden items are included with hidden true.',
+        'Read the whole Career bank: the current Master files, Work experiences each with Experience points, Resume entries, the Cover letter outline sections each with paragraphs, the Writing style profile and the contact details (null when not set yet). Hidden items are included with hidden true. With targetId it returns what that Target sees instead: the Career bank items that are not hidden there, minus the Target hides, with the Target replacements and Target-only additions, every item marked source inherited, replaced, added or hidden (hidden ones are the Target hides and what hangs under them; use only the others), overrideId for the ones an override made, and stale true on a replacement made against an older version of the item than the Career bank has now (tell the user the Career bank version changed and offer to update the Target). An unknown or foreign targetId is refused.',
+      inputSchema: { targetId: z.uuid().optional() },
       outputSchema: careerBankOut,
     },
-    async () => {
+    async ({ targetId }) => {
       let bank;
       try {
-        bank = await documents.getCareerBank(user.id);
+        bank =
+          targetId === undefined
+            ? await documents.getCareerBank(user.id)
+            : await documents.getTargetCareerBank(user.id, targetId);
       } catch (err) {
-        logger.error({ err }, 'get_career_bank failed');
-        return refusal('get_career_bank failed');
+        return failed(err, 'get_career_bank');
       }
       return ok({
         masterDocuments: {
@@ -226,6 +256,50 @@ export function registerDocumentsTools(
   );
 
   mcp.registerTool(
+    'set_career_override',
+    {
+      description:
+        "Change the Career bank for one Target only (a Career bank override). action hide: itemId of a Work experience, Experience point, Resume entry or Cover letter paragraph. action replace: itemId plus value, the whole new item value in the item's own shape (same as upsert_career_item). action add: itemKind (work_experience, experience_point, resume_entry or cover_letter_paragraph), value, and parentId for an Experience point (a Work experience: a Career bank one or one this Target added) or a Cover letter paragraph (an outline section); pass overrideId to edit an item the Target added. Setting an item again changes its hide or replace in place. Every call records a Career bank revision of item kind override with the reason you give (list_career_revisions with the override id). A replace remembers the item's current version, so a later Career bank edit of that item shows the replacement as stale in get_career_bank. Unknown or foreign Target and item ids are refused.",
+      inputSchema: {
+        targetId: z.uuid(),
+        action: z.enum(OVERRIDE_ACTIONS),
+        itemId: z.uuid().optional(),
+        itemKind: z.enum(OVERRIDE_ITEM_KINDS).optional(),
+        parentId: z.uuid().optional(),
+        overrideId: z.uuid().optional(),
+        value: z.record(z.string(), z.unknown()).optional(),
+        reason: z.enum(CAREER_EDIT_REASONS),
+        actor: actorIn,
+      },
+      outputSchema: overrideOut,
+    },
+    async (input) => {
+      try {
+        return overrideJson(await documents.setOverride(user.id, input));
+      } catch (err) {
+        return failed(err, 'set_career_override');
+      }
+    },
+  );
+
+  mcp.registerTool(
+    'clear_career_override',
+    {
+      description:
+        'Remove one Career bank override (its overrideId is on the item in get_career_bank with a targetId, or in the answer of set_career_override), so the Target follows the Career bank again for that item. Points added under a removed Target-only Work experience go with it. Records a revision of item kind override with reason restore; what the override held stays in its history.',
+      inputSchema: { overrideId: z.uuid(), actor: actorIn },
+      outputSchema: overrideOut,
+    },
+    async ({ overrideId, actor }) => {
+      try {
+        return overrideJson(await documents.clearOverride(user.id, overrideId, actor));
+      } catch (err) {
+        return failed(err, 'clear_career_override');
+      }
+    },
+  );
+
+  mcp.registerTool(
     'list_career_revisions',
     {
       description:
@@ -235,7 +309,7 @@ export function registerDocumentsTools(
         revisions: z.array(
           z.object({
             id: z.string(),
-            itemKind: z.enum(CAREER_ITEM_KINDS),
+            itemKind: z.enum([...CAREER_ITEM_KINDS, 'override']),
             itemId: z.string(),
             oldValue: z.record(z.string(), z.unknown()).nullable(),
             newValue: z.record(z.string(), z.unknown()),

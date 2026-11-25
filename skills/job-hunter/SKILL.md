@@ -55,11 +55,20 @@ The Career bank holds the user's Master resume and Master cover letter as small 
 
 - `register_master_document`: mark an uploaded file id as the current Master resume or Master cover letter.
 - `save_career_bank`: import a parse of the Master files: Work experiences (role, organisation, start, end or null, place) with Experience points (text, skills), `resumeEntries`, `coverLetterOutline` (sections with their paragraphs: text, themes, skills), `writingStyle` and `contact`. Every part is optional. Parse the files yourself, show the result to the user and call this only after they reviewed it. It adds to what is stored, so do not import the same resume twice; a stored writing style or contact is updated instead.
-- `get_career_bank`: the whole Career bank in one call: Master files, Work experiences with points, Resume entries, the outline with paragraphs, the writing style and the contact details. Hidden items are listed with `hidden: true`.
+- `get_career_bank`: the whole Career bank in one call: Master files, Work experiences with points, Resume entries, the outline with paragraphs, the writing style and the contact details. Hidden items are listed with `hidden: true`. With a `targetId` it returns that Target's own view instead (see Target career banks below).
 - `upsert_career_item`: add or edit one item of any kind (the tool description lists each kind's value). Edits replace the whole value. Give the reason: `coaching` for a better sentence the user accepted, `enrichment` for an answer to an Enrichment question, `user_edit` for the user's own change; `actor` is `user` when the user dictated it. The photo is set here, on the contact details, by an uploaded photo file id.
 - `hide_career_item`: the delete. The item is hidden and a revision recorded, never removed.
 - `restore_career_item`: unhide an item, or with a `revisionId` set it back to an earlier text. Either is a new revision.
-- `list_career_revisions`: the history of one item (old and new text, reason, actor, time), to show the user how a line changed or to pick a `revisionId`.
+- `list_career_revisions`: the history of one item or of one override (old and new text, reason, actor, time), to show the user how a line changed or to pick a `revisionId`.
+
+### Target career banks
+
+Every Target inherits the whole Career bank and changes it only through overrides, so a fix in the Career bank reaches every Target at once. Overrides cover Work experiences, Experience points, Resume entries and Cover letter paragraphs.
+
+- `set_career_override`: for one Target, `hide` an item (`itemId`), `replace` it (`itemId` plus the whole new `value`, shaped like the item kind in `upsert_career_item`), or `add` a Target-only item (`itemKind`, `value`, and `parentId` for an Experience point or a Cover letter paragraph; a Target-only Work experience can be a parent too). Pass `overrideId` to edit something the Target added. Give the reason (`user_edit`, `coaching`, `enrichment`). This is the answer "this Target only" to the three-way save question.
+- `clear_career_override`: remove an override by its `overrideId` so the Target follows the Career bank again.
+- `get_career_bank` with `targetId`: what that Target sees. Every item has `source`: `inherited`, `replaced`, `added` or `hidden` (use only the items that are not hidden). Items an override made carry `overrideId`. A replacement with `stale: true` was made against an older version of the item than the Career bank has now: tell the user the Career bank version changed and offer to update the Target too (set the replacement again, or clear it). An unknown or foreign `targetId` is refused.
+- Each set, change and clear is a revision of the override (`list_career_revisions` with the `overrideId`), so Target wording is never lost.
 
 ## How the system is running
 

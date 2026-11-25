@@ -86,7 +86,10 @@ const allowAddBoard = createRedisLimit(limiter.redis, {
 });
 const server = createApiServer({
   accounts,
-  documents: createDocuments(db),
+  documents: createDocuments(db, {
+    hasTarget: async (userId, targetId) =>
+      (await matching.listTargets(userId)).some((t) => t.id === targetId),
+  }),
   discovery,
   matching,
   pipeline,

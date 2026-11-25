@@ -4,6 +4,7 @@ import type { ModuleMigrations } from '@job-portal/db';
 
 export * from './documents';
 export * from './render';
+export * from './resolve';
 
 export const documentsMigrations: ModuleMigrations = {
   name: 'documents',
