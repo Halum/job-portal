@@ -143,6 +143,7 @@ describe('discovery against real Postgres', () => {
     const find = async (title: string) => {
       const { jobs } = await discovery.listJobs(USER, {});
       const job = jobs.find((j) => j.title === title);
+      expect(job).toBeDefined();
       return discovery.getJob(USER, job?.id ?? '');
     };
     expect((await find('With publisher'))?.postings[0]?.publisher).toBe('LinkedIn');

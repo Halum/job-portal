@@ -55,7 +55,7 @@ export const postings = discoverySchema.table(
     company: text('company'),
     location: text('location'),
     url: text('url').notNull(),
-    /** The site the Posting was listed on (JSearch only); null for every other Source. */
+    /** The site the Posting was listed on (set by aggregating Sources such as JSearch); null for every other Source. */
     publisher: text('publisher'),
     /** The cleaned URL (see keys.ts); a later Posting with the same one belongs to this Posting's Job. */
     urlKey: text('url_key'),

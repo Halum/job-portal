@@ -59,7 +59,7 @@ const postingSchema = z.object({
   publisher: z
     .string()
     .nullable()
-    .describe('The site the posting was listed on; null for most Sources'),
+    .describe('The site the posting was listed on; null unless an aggregating Source set it'),
   postedAt: isoDate.nullable(),
   firstSeenAt: isoDate,
   lastSeenAt: isoDate,
