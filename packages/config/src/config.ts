@@ -48,6 +48,8 @@ const publisherList = z
       .filter((p) => p !== '');
     if (list.length === 0)
       ctx.addIssue({ code: 'custom', message: 'must name at least one publisher, or any' });
+    if (list.length > 1 && list.includes('any'))
+      ctx.addIssue({ code: 'custom', message: 'any cannot be combined with other publishers' });
     return list.length === 1 && list[0] === 'any' ? [] : list;
   });
 // An ISO 3166 country or ISO 639 language code, lower case.
@@ -277,6 +279,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     throw new ConfigError(`Invalid environment: ${issues}`);
   }
   const e = result.data;
+  const jsearchKeys = e.JSEARCH_API_KEYS ?? [];
   return {
     databaseUrl: e.DATABASE_URL,
     redisUrl: e.REDIS_URL,
@@ -292,11 +295,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       lever: interval(e.LEVER_INTERVAL_MINUTES),
       ashby: interval(e.ASHBY_INTERVAL_MINUTES),
       jsearch:
-        e.JSEARCH_INTERVAL_MINUTES === undefined || (e.JSEARCH_API_KEYS ?? []).length === 0
+        e.JSEARCH_INTERVAL_MINUTES === undefined || jsearchKeys.length === 0
           ? null
           : {
               intervalMinutes: e.JSEARCH_INTERVAL_MINUTES,
-              apiKeys: e.JSEARCH_API_KEYS ?? [],
+              apiKeys: jsearchKeys,
               publishers: e.JSEARCH_PUBLISHERS,
               country: e.JSEARCH_COUNTRY,
               language: e.JSEARCH_LANGUAGE ?? null,

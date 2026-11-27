@@ -66,16 +66,21 @@ function normalize(r: Result): NormalizedPosting | string {
     filled(r.job_apply_link) ??
     filled(r.job_google_link);
   if (url === undefined) return `result without a link: ${r.job_title ?? ''}`;
-  const posted =
-    filled(r.job_posted_at_datetime_utc) ??
-    (r.job_posted_at_timestamp == null ? undefined : r.job_posted_at_timestamp * 1000);
+  // An unparseable date would make the insert throw and fail the run on every poll, so it counts as missing.
+  const dated = (v: string | number | null | undefined): Date | undefined => {
+    const d = v === null || v === undefined ? undefined : new Date(v);
+    return d === undefined || Number.isNaN(d.getTime()) ? undefined : d;
+  };
+  const postedAt =
+    dated(filled(r.job_posted_at_datetime_utc)) ??
+    dated(r.job_posted_at_timestamp == null ? undefined : r.job_posted_at_timestamp * 1000);
   return {
     sourcePostingId: id,
     title: r.job_title ?? '',
     company: filled(r.employer_name),
     // "Musterstadt  •  über LinkedIn": the part before the first bullet is the place.
     location: filled(r.job_city) ?? filled(r.job_location?.split('•')[0]),
-    postedAt: posted === undefined ? undefined : new Date(posted),
+    postedAt,
     url,
     publisher,
     raw: r,
@@ -114,8 +119,6 @@ export function createJsearchSource({
   let unusable = new Set<number>();
   let requests = 0;
 
-  const scrub = (text: string): string => apiKeys.reduce((t, k) => t.split(k).join('[key]'), text);
-
   /** Sends one request with the current key, moving to the next key on a refusal. */
   const get = async (params: URLSearchParams): Promise<unknown> => {
     for (;;) {
@@ -143,17 +146,17 @@ export function createJsearchSource({
       const errors: string[] = [];
       const failures: string[] = [];
       // ponytail: one page per query and publisher, sequential, with the queries capped by Matching.
-      const runs = (await queries()).flatMap((q) =>
+      const searches = (await queries()).flatMap((q) =>
         (publishers.length > 0 ? publishers : [null]).map((publisher) => ({
           text: `${queryText(q)}${publisher === null ? '' : ` via ${publisher}`}`,
           radiusKm: q.location === undefined ? undefined : q.radiusKm,
         })),
       );
-      for (const [i, run] of runs.entries()) {
+      for (const [i, search] of searches.entries()) {
         try {
-          const params = new URLSearchParams({ query: run.text, country, date_posted: 'week' });
+          const params = new URLSearchParams({ query: search.text, country, date_posted: 'week' });
           if (language !== null) params.set('language', language);
-          if (run.radiusKm !== undefined) params.set('radius', String(run.radiusKm));
+          if (search.radiusKm !== undefined) params.set('radius', String(search.radiusKm));
           const body = responseSchema.parse(await get(params));
           for (const entry of body.data.jobs) {
             const parsed = resultSchema.safeParse(entry);
@@ -165,20 +168,22 @@ export function createJsearchSource({
           }
         } catch (err) {
           if (err instanceof KeysExhausted) throw err;
-          // The line names the search by position, never by its text, and never carries a key.
+          // The line names the search by position and gives a fixed reason: never the query text, never a key.
           const reason =
             err instanceof HttpFailure
               ? err.message
               : err instanceof z.ZodError
                 ? 'unusable response'
-                : scrub(err instanceof Error ? err.message : String(err));
+                : err instanceof Error && err.name === 'TimeoutError'
+                  ? 'timeout'
+                  : 'network error';
           const line = `search ${String(i + 1)} failed: ${reason}`;
           failures.push(line);
           errors.push(line);
         }
       }
       // Every search failing is a failed run, some failing is a run with errors.
-      if (runs.length > 0 && failures.length === runs.length) throw new Error(failures[0]);
+      if (searches.length > 0 && failures.length === searches.length) throw new Error(failures[0]);
       return { postings: [...postings.values()], errors };
     },
   };

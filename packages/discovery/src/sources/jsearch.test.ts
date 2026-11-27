@@ -255,6 +255,35 @@ describe('jsearch source', () => {
     });
   });
 
+  describe('posted date', () => {
+    it('drops an unparseable date time and falls back to the timestamp, keeping the posting', async () => {
+      const body = {
+        data: {
+          jobs: [
+            {
+              job_id: 'fixture-bad-date',
+              job_title: 'Beispiel Stelle',
+              job_google_link: 'https://www.google.com/search?q=x',
+              job_posted_at_datetime_utc: 'not-a-date',
+              job_posted_at_timestamp: 1783499400,
+            },
+            {
+              job_id: 'fixture-no-date',
+              job_title: 'Beispiel Stelle 2',
+              job_google_link: 'https://www.google.com/search?q=y',
+              job_posted_at_datetime_utc: 'not-a-date',
+            },
+          ],
+        },
+      };
+      const { postings, errors } = await build({
+        fetch: fakeFetch({ status: 200, body }).fetch,
+      }).fetch();
+      expect(errors).toEqual([]);
+      expect(postings.map((p) => p.postedAt)).toEqual([new Date(1783499400 * 1000), undefined]);
+    });
+  });
+
   describe('stats', () => {
     it('counts the requests sent and gives the position of the current key from 1', async () => {
       const { fetch } = fakeFetch(refused(429), ok);
@@ -298,6 +327,32 @@ describe('jsearch source', () => {
       expect(errors[1]).toMatch(/^search 2 failed: /);
     });
 
+    it('gives a fixed reason for a failure that is not an HTTP status, never the error text', async () => {
+      const failing = (name: string, message: string) =>
+        (() =>
+          Promise.reject(Object.assign(new Error(message), { name }))) as unknown as typeof fetch;
+      const lines = async (first: typeof fetch): Promise<string[]> => {
+        let n = 0;
+        const fetchImpl = ((...args: Parameters<typeof fetch>) => {
+          n += 1;
+          return n === 1
+            ? first(...args)
+            : Promise.resolve(new Response(JSON.stringify(emptyBody)));
+        }) as typeof fetch;
+        const { errors } = await build({
+          fetch: fetchImpl,
+          queries: () => Promise.resolve([{ keyword: 'secret query' }, { keyword: 'b' }]),
+        }).fetch();
+        return errors;
+      };
+      expect(
+        await lines(failing('TypeError', 'fetch failed for https://x.invalid/?query=secret+query')),
+      ).toEqual(['search 1 failed: network error']);
+      expect(
+        await lines(failing('TimeoutError', 'The operation was aborted due to timeout')),
+      ).toEqual(['search 1 failed: timeout']);
+    });
+
     it('never puts a key in an error line, even when the network error names it', async () => {
       let n = 0;
       const leaky = (() => {
@@ -310,8 +365,7 @@ describe('jsearch source', () => {
         fetch: leaky,
         queries: () => Promise.resolve([{ keyword: 'a' }, { keyword: 'b' }]),
       }).fetch();
-      expect(errors).toHaveLength(1);
-      expect(errors[0]).toMatch(/^search 1 failed: /);
+      expect(errors).toEqual(['search 1 failed: network error']);
       expect(errors.join('\n')).not.toContain('test-key');
     });
   });

@@ -161,6 +161,14 @@ describe('loadConfig', () => {
       expect(jsearch?.language).toBeNull();
     });
 
+    it('refuses any mixed with other publishers', () => {
+      for (const value of ['any,linkedin', 'linkedin, ANY']) {
+        expect(() => loadConfig({ ...valid, ...on, JSEARCH_PUBLISHERS: value })).toThrow(
+          'JSEARCH_PUBLISHERS',
+        );
+      }
+    });
+
     it.each(['', ' ', ',', ' , '])('refuses the empty publisher list %j', (value) => {
       expect(() => loadConfig({ ...valid, ...on, JSEARCH_PUBLISHERS: value })).toThrow(ConfigError);
       expect(() => loadConfig({ ...valid, ...on, JSEARCH_PUBLISHERS: value })).toThrow(

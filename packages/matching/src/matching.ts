@@ -52,7 +52,6 @@ export interface UpsertTargetInput {
   criteria?: CriteriaPatch;
 }
 
-/** One request's worth of search parameters for a Source that searches by text and place. */
 /** One text search: a keyword, a location or both, with the radius only when a location is set. */
 export interface TextQuery {
   keyword?: string;
@@ -60,6 +59,7 @@ export interface TextQuery {
   radiusKm?: number;
 }
 
+/** One request's worth of search parameters for a Source that searches by text and place. */
 export interface SearchQuery {
   was?: string;
   wo?: string;
