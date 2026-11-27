@@ -204,12 +204,22 @@ interface Incoming {
  * (on conflict do nothing) reselects and attaches to the winner, so concurrent runs cannot both create
  * the Job.
  */
+interface Placed {
+  jobId: string;
+  isNew: boolean;
+  /** True only when this call's own insert made the Job; a rule merge attached to an existing one. */
+  jobCreated: boolean;
+  /** With `withOthers`: the Job's other Postings, read in the same transaction that placed this one. */
+  others: SeenBefore[];
+}
+
 async function ingest(
   db: Db,
   userId: string,
   sourceId: string,
   p: Incoming,
-): Promise<{ jobId: string; isNew: boolean; jobCreated: boolean }> {
+  withOthers = false,
+): Promise<Placed> {
   const values = {
     title: p.title,
     company: p.company ?? null,
@@ -228,7 +238,7 @@ async function ingest(
   const ck = companyKey(p);
   const uk = urlKey(p.url);
 
-  return db.transaction(async (tx: Tx) => {
+  const place = async (tx: Tx): Promise<Omit<Placed, 'others'>> => {
     const touch = async (): Promise<string | undefined> =>
       (
         await tx
@@ -257,7 +267,7 @@ async function ingest(
         : undefined,
     );
     let jobId: string | undefined;
-    let spare = false;
+    let createdHere = false;
     let conflict: string[] = [];
     for (let attempt = 0; !jobId && attempt < MAX_ATTEMPTS; attempt += 1) {
       const found = keyMatch
@@ -276,12 +286,12 @@ async function ingest(
       } else if (hits.length > 1) {
         conflict = hits.map((h) => h.id); // keys disagree: merge nothing, record it below
         jobId = await newJob(tx, userId, p, { companyKey: null, urlKey: null });
-        spare = true;
+        createdHere = true;
       } else {
         const created = await newJob(tx, userId, p, { companyKey: ck, urlKey: uk });
         if (created) {
           jobId = created;
-          spare = true;
+          createdHere = true;
         } // else a concurrent run inserted a Job with our key first: select it on the next pass
       }
     }
@@ -295,8 +305,8 @@ async function ingest(
       .returning({ id: postings.id });
     const posting = inserted[0];
     if (!posting) {
-      // A concurrent run inserted this Posting first: drop our spare Job and update theirs.
-      if (spare) await tx.delete(jobs).where(eq(jobs.id, jobId));
+      // A concurrent run inserted this Posting first: drop our own new Job and update theirs.
+      if (createdHere) await tx.delete(jobs).where(eq(jobs.id, jobId));
       const theirs = await touch();
       if (!theirs) throw new DiscoveryError('posting vanished during insert');
       return { jobId: theirs, isNew: false, jobCreated: false };
@@ -304,8 +314,28 @@ async function ingest(
     if (conflict.length > 0) {
       await tx.insert(mergeConflicts).values({ userId, postingId: posting.id, jobIds: conflict });
     }
-    // True only when this call's own insert made the Job; a rule merge attached to an existing one.
-    return { jobId, isNew: true, jobCreated: spare };
+    return { jobId, isNew: true, jobCreated: createdHere };
+  };
+
+  return db.transaction(async (tx: Tx) => {
+    const placed = await place(tx);
+    if (!withOthers) return { ...placed, others: [] };
+    const others = await tx
+      .select({
+        sourceId: postings.sourceId,
+        publisher: postings.publisher,
+        firstSeenAt: postings.firstSeenAt,
+      })
+      .from(postings)
+      .where(
+        and(
+          eq(postings.userId, userId),
+          eq(postings.jobId, placed.jobId),
+          or(ne(postings.sourceId, sourceId), ne(postings.sourcePostingId, p.sourcePostingId)),
+        ),
+      )
+      .orderBy(asc(postings.firstSeenAt), asc(postings.id));
+    return { ...placed, others };
   });
 }
 
@@ -377,29 +407,20 @@ export function createDiscovery(db: Db, sources: Source[], logger?: Logger): Dis
         }
         sourcePostingId = site.id;
       }
-      const { jobId, jobCreated } = await ingest(db, userId, sourceId, {
-        sourcePostingId,
-        title: input.title,
-        company: input.company ?? null,
-        location: input.city ?? null,
-        url: input.url,
-        raw: input,
-      });
-      const others = await db
-        .select({
-          sourceId: postings.sourceId,
-          publisher: postings.publisher,
-          firstSeenAt: postings.firstSeenAt,
-        })
-        .from(postings)
-        .where(
-          and(
-            eq(postings.userId, userId),
-            eq(postings.jobId, jobId),
-            or(ne(postings.sourceId, sourceId), ne(postings.sourcePostingId, sourcePostingId)),
-          ),
-        )
-        .orderBy(asc(postings.firstSeenAt), asc(postings.id));
+      const { jobId, jobCreated, others } = await ingest(
+        db,
+        userId,
+        sourceId,
+        {
+          sourcePostingId,
+          title: input.title,
+          company: input.company ?? null,
+          location: input.city ?? null,
+          url: input.url,
+          raw: input,
+        },
+        true,
+      );
       return { jobId, created: jobCreated, seenBefore: others };
     },
 

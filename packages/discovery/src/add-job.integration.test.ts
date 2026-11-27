@@ -181,6 +181,40 @@ describe('add_job source and seen-before answer', () => {
     expect(all.jobs).toHaveLength(2);
   });
 
+  it('concurrent adds of one unknown job make one Job and exactly one created answer', async () => {
+    const user = freshUser();
+    const same = Array.from({ length: 6 }, () =>
+      d.addJob(user, {
+        ...input,
+        source: 'linkedin',
+        url: 'https://www.linkedin.com/jobs/view/7712345678',
+      }),
+    );
+    const answers = await Promise.all(same);
+    expect(answers.filter((a) => a.created)).toHaveLength(1);
+    expect(new Set(answers.map((a) => a.jobId)).size).toBe(1);
+    expect(answers.every((a) => a.seenBefore.length === 0)).toBe(true);
+    expect((await d.listJobs(user, {})).jobs).toHaveLength(1);
+  });
+
+  it('a manual and a linkedin add of the same job at once make one Job, one created, and the other names it', async () => {
+    const user = freshUser();
+    const [manual, linkedin] = await Promise.all([
+      d.addJob(user, { ...input, url: 'https://www.linkedin.com/jobs/view/koch-8812345678' }),
+      d.addJob(user, {
+        ...input,
+        source: 'linkedin',
+        url: 'https://de.linkedin.com/jobs/view/8812345678',
+      }),
+    ]);
+    expect([manual.created, linkedin.created].filter(Boolean)).toHaveLength(1);
+    expect(manual.jobId).toBe(linkedin.jobId);
+    const [creator, joiner] = manual.created ? [manual, linkedin] : [linkedin, manual];
+    expect(creator.seenBefore.length).toBeLessThanOrEqual(1);
+    expect(joiner.seenBefore).toHaveLength(1);
+    expect((await d.listJobs(user, {})).jobs).toHaveLength(1);
+  });
+
   it('listJobs by url never shows another user a Job', async () => {
     const owner = freshUser();
     await d.addJob(owner, { ...input, url: 'https://example.invalid/private' });

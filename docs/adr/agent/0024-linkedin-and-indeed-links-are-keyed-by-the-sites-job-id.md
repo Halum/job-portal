@@ -4,4 +4,4 @@ A LinkedIn or Indeed job link reached through a Source, a browser search or a pa
 
 `urlKey` calls it first and builds the key from `linkedin.com/jobs/view/<id>` or `indeed.com/viewjob?jk=<id>`, then applies its usual normalisation. Every other URL keeps exactly the key it had. Stored keys are not backfilled, so a link added by hand before this change may become a second Job, which split or AI merge resolves (spec #28, Out of Scope 6).
 
-`add_job` will use the same function to take the site job id as the source posting id (ticket #31), so the two never disagree on what a job link is.
+`add_job` uses the same function to take the site job id as the source posting id (ticket #31), so the two never disagree on what a job link is.

@@ -11,6 +11,7 @@ import { createApiServer } from '@job-portal/api';
 import { loadConfig } from '@job-portal/config';
 import { createLogger } from '@job-portal/shared';
 import { createFakeGmail, type FakeGmail } from '@job-portal/mail/testing';
+import { CAREER_EDIT_REASONS, MASTER_KINDS } from '@job-portal/documents';
 import { composeApp, type App } from './compose';
 import { startWorker, type WorkerHandle } from './worker';
 
@@ -315,17 +316,20 @@ describe('worker cycle through the real MCP endpoint', () => {
     expect(linkedin.created).toBe(false);
     expect(linkedin.seenBefore).toMatchObject([{ sourceId: 'manual', publisher: null }]);
 
+    const totalBefore = (await call<{ jobs: unknown[] }>('list_jobs', { limit: 200 })).jobs.length;
     const found = await call<{ jobs: { id: string; postings: unknown[] }[] }>('list_jobs', {
       url: 'https://www.linkedin.com/jobs/view/some-other-slug-4012345678?trk=x',
     });
     expect(found.jobs.map((j) => j.id)).toEqual([manual.jobId]);
     expect(found.jobs[0]?.postings).toHaveLength(2);
+    const totalAfter = (await call<{ jobs: unknown[] }>('list_jobs', { limit: 200 })).jobs.length;
+    expect(totalAfter).toBe(totalBefore);
   });
 
   it('every backticked snake_case tool name in any skill file is a registered tool', async () => {
     const registered = new Set((await client.listTools()).tools.map((t) => t.name));
     // Enum values the skills quote (document kinds, a revision reason); everything else must be a tool.
-    const values = new Set(['master_resume', 'master_cover_letter', 'user_edit']);
+    const values = new Set<string>([...MASTER_KINDS, ...CAREER_EDIT_REASONS]);
     const dir = new URL('../../../skills/', import.meta.url);
     const files = readdirSync(dir)
       .map((name) => new URL(`${name}/SKILL.md`, dir))
