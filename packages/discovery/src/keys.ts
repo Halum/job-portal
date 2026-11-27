@@ -1,3 +1,5 @@
+import { siteJobId } from './site-job';
+
 /** Dedupe keys. Two Postings of one job get the same key; a null key never matches anything. */
 
 const LEGAL_TOKENS = new Set([
@@ -81,7 +83,10 @@ export function titleOverlap(a: string, b: string): number {
   return both / (x.size + y.size - both);
 }
 
-/** The URL without scheme, www, fragment, tracking parameters and trailing slash; parameters sorted. */
+/**
+ * The URL without scheme, www, fragment, tracking parameters and trailing slash; parameters sorted.
+ * A LinkedIn or Indeed job link is first reduced to the site's own job id.
+ */
 export function urlKey(raw: string): string | null {
   let url: URL;
   try {
@@ -90,6 +95,14 @@ export function urlKey(raw: string): string | null {
     return null;
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  const site = siteJobId(raw);
+  if (site) {
+    url = new URL(
+      site.site === 'linkedin'
+        ? `https://linkedin.com/jobs/view/${site.id}`
+        : `https://indeed.com/viewjob?jk=${site.id}`,
+    );
+  }
   const params = [...url.searchParams]
     .filter(([k]) => !TRACKING_PARAM.test(k))
     .sort(([a], [b]) => a.localeCompare(b))
