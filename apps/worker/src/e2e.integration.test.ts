@@ -1,6 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redis';
@@ -292,6 +293,52 @@ describe('worker cycle through the real MCP endpoint', () => {
       counts: [{ kind: 'ai_fit_rejection', model: 'vendor/model', agreed: 0, disagreed: 1 }],
     });
   }, 90_000);
+
+  it('a manual add then a linkedin add of the same job is one Job: created false, seenBefore names manual', async () => {
+    const input = { title: 'Beispiel Spüler', company: 'Beispiel Firma Z', city: 'Musterstadt' };
+    const manual = await call<{ jobId: string; created: boolean; seenBefore: unknown[] }>(
+      'add_job',
+      { ...input, url: 'https://www.linkedin.com/jobs/view/beispiel-spueler-4012345678' },
+    );
+    expect(manual).toMatchObject({ created: true, seenBefore: [] });
+
+    const linkedin = await call<{
+      jobId: string;
+      created: boolean;
+      seenBefore: { sourceId: string; publisher: string | null; firstSeenAt: string }[];
+    }>('add_job', {
+      ...input,
+      source: 'linkedin',
+      url: 'https://de.linkedin.com/jobs/view/4012345678',
+    });
+    expect(linkedin.jobId).toBe(manual.jobId);
+    expect(linkedin.created).toBe(false);
+    expect(linkedin.seenBefore).toMatchObject([{ sourceId: 'manual', publisher: null }]);
+
+    const found = await call<{ jobs: { id: string; postings: unknown[] }[] }>('list_jobs', {
+      url: 'https://www.linkedin.com/jobs/view/some-other-slug-4012345678?trk=x',
+    });
+    expect(found.jobs.map((j) => j.id)).toEqual([manual.jobId]);
+    expect(found.jobs[0]?.postings).toHaveLength(2);
+  });
+
+  it('every backticked snake_case tool name in any skill file is a registered tool', async () => {
+    const registered = new Set((await client.listTools()).tools.map((t) => t.name));
+    // Enum values the skills quote (document kinds, a revision reason); everything else must be a tool.
+    const values = new Set(['master_resume', 'master_cover_letter', 'user_edit']);
+    const dir = new URL('../../../skills/', import.meta.url);
+    const files = readdirSync(dir)
+      .map((name) => new URL(`${name}/SKILL.md`, dir))
+      .filter((file) => existsSync(file));
+    expect(files.length).toBeGreaterThan(0);
+    const unknown = files.flatMap((file) =>
+      [...readFileSync(file, 'utf8').matchAll(/`([a-z]+(?:_[a-z]+)+)`/g)]
+        .map((m) => m[1] ?? '')
+        .filter((name) => !registered.has(name) && !values.has(name))
+        .map((name) => `${fileURLToPath(file)}: ${name}`),
+    );
+    expect(unknown).toEqual([]);
+  });
 
   it('the skill file names every tool the MCP server registers', async () => {
     const { tools } = await client.listTools();

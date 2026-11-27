@@ -1,8 +1,9 @@
-import { and, asc, eq, gt, gte, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import type { Db, DbTx } from '@job-portal/db';
 import type { Logger } from '@job-portal/shared';
 import type { Source } from './source';
 import { companyKey, urlKey } from './keys';
+import { siteJobId } from './site-job';
 import {
   jobs,
   mergeConflicts,
@@ -80,6 +81,8 @@ export interface ListJobsOptions {
   discoveryState?: DiscoveryState;
   /** Only these Jobs (another module's filter result); null or undefined means no restriction. */
   jobIds?: string[] | null;
+  /** Only the Job with a Posting on this link's URL key (LinkedIn and Indeed links by site job id). */
+  url?: string;
 }
 
 export interface Discovery {
@@ -96,8 +99,12 @@ export interface Discovery {
    * Shortlisted ones, never Dismissed or Expired.
    */
   listMatchable: (userId: string, ids?: string[]) => Promise<MatchableJobRow[]>;
-  /** A manual Posting (source `manual`) through the same dedupe; adding the same URL again is a no-op. */
-  addJob: (userId: string, input: AddJobInput) => Promise<{ jobId: string }>;
+  /**
+   * A hand-added Posting (source `manual`, `linkedin` or `indeed`) through the same dedupe; adding the same
+   * job again is a no-op. `created` is true only when this call made the Job; `seenBefore` lists the Job's
+   * other Postings, earliest first.
+   */
+  addJob: (userId: string, input: AddJobInput) => Promise<AddJobResult>;
   /**
    * Moves Postings of a Job into a new Job with null keys and records a never-merge pair per Posting.
    * Refuses to empty the Job. `splitCount` is the user's total splits.
@@ -125,11 +132,29 @@ export interface Discovery {
   ) => Promise<void>;
 }
 
+export const ADD_JOB_SOURCES = ['manual', 'linkedin', 'indeed'] as const;
+
+export type AddJobSource = (typeof ADD_JOB_SOURCES)[number];
+
 export interface AddJobInput {
   title: string;
   company?: string | null;
   city?: string | null;
   url: string;
+  /** Where the job was found; default manual. linkedin and indeed need a job link of that site. */
+  source?: AddJobSource;
+}
+
+export interface SeenBefore {
+  sourceId: string;
+  publisher: string | null;
+  firstSeenAt: Date;
+}
+
+export interface AddJobResult {
+  jobId: string;
+  created: boolean;
+  seenBefore: SeenBefore[];
 }
 
 const DEFAULT_LIMIT = 50;
@@ -184,7 +209,7 @@ async function ingest(
   userId: string,
   sourceId: string,
   p: Incoming,
-): Promise<{ jobId: string; isNew: boolean }> {
+): Promise<{ jobId: string; isNew: boolean; jobCreated: boolean }> {
   const values = {
     title: p.title,
     company: p.company ?? null,
@@ -214,7 +239,7 @@ async function ingest(
       )[0]?.jobId;
 
     const seen = await touch();
-    if (seen) return { jobId: seen, isNew: false }; // seen before: no new Job
+    if (seen) return { jobId: seen, isNew: false, jobCreated: false }; // seen before: no new Job
 
     const keyMatch = or(
       ck ? eq(jobs.companyKey, ck) : undefined,
@@ -274,12 +299,13 @@ async function ingest(
       if (spare) await tx.delete(jobs).where(eq(jobs.id, jobId));
       const theirs = await touch();
       if (!theirs) throw new DiscoveryError('posting vanished during insert');
-      return { jobId: theirs, isNew: false };
+      return { jobId: theirs, isNew: false, jobCreated: false };
     }
     if (conflict.length > 0) {
       await tx.insert(mergeConflicts).values({ userId, postingId: posting.id, jobIds: conflict });
     }
-    return { jobId, isNew: true };
+    // True only when this call's own insert made the Job; a rule merge attached to an existing one.
+    return { jobId, isNew: true, jobCreated: spare };
   });
 }
 
@@ -342,15 +368,39 @@ export function createDiscovery(db: Db, sources: Source[], logger?: Logger): Dis
     async addJob(userId, input) {
       const key = urlKey(input.url);
       if (!key) throw new DiscoveryError('url must be an absolute http or https URL');
-      const { jobId } = await ingest(db, userId, MANUAL_SOURCE, {
-        sourcePostingId: key,
+      const sourceId = input.source ?? MANUAL_SOURCE;
+      let sourcePostingId = key;
+      if (sourceId !== MANUAL_SOURCE) {
+        const site = siteJobId(input.url);
+        if (site?.site !== sourceId) {
+          throw new DiscoveryError(`url is not a ${sourceId} job link`);
+        }
+        sourcePostingId = site.id;
+      }
+      const { jobId, jobCreated } = await ingest(db, userId, sourceId, {
+        sourcePostingId,
         title: input.title,
         company: input.company ?? null,
         location: input.city ?? null,
         url: input.url,
         raw: input,
       });
-      return { jobId };
+      const others = await db
+        .select({
+          sourceId: postings.sourceId,
+          publisher: postings.publisher,
+          firstSeenAt: postings.firstSeenAt,
+        })
+        .from(postings)
+        .where(
+          and(
+            eq(postings.userId, userId),
+            eq(postings.jobId, jobId),
+            or(ne(postings.sourceId, sourceId), ne(postings.sourcePostingId, sourcePostingId)),
+          ),
+        )
+        .orderBy(asc(postings.firstSeenAt), asc(postings.id));
+      return { jobId, created: jobCreated, seenBefore: others };
     },
 
     async splitJob(userId, jobId, postingIds) {
@@ -441,9 +491,11 @@ export function createDiscovery(db: Db, sources: Source[], logger?: Logger): Dis
 
     async listJobs(
       userId,
-      { limit = DEFAULT_LIMIT, cursor, discoveredSince, discoveryState, jobIds },
+      { limit = DEFAULT_LIMIT, cursor, discoveredSince, discoveryState, jobIds, url },
     ) {
       if (jobIds && jobIds.length === 0) return { jobs: [], nextCursor: null };
+      const wantedKey = url === undefined ? undefined : urlKey(url);
+      if (wantedKey === null) return { jobs: [], nextCursor: null };
       const size = Math.min(Math.max(limit, 1), MAX_LIMIT);
       const rows = await db
         .select()
@@ -458,6 +510,15 @@ export function createDiscovery(db: Db, sources: Source[], logger?: Logger): Dis
             // ponytail: every candidate id is a bind parameter (Postgres ceiling about 65k); upgrade:
             // page the candidates first and pass one page of ids.
             jobIds ? inArray(jobs.id, jobIds) : undefined,
+            wantedKey
+              ? inArray(
+                  jobs.id,
+                  db
+                    .select({ id: postings.jobId })
+                    .from(postings)
+                    .where(and(eq(postings.userId, userId), eq(postings.urlKey, wantedKey))),
+                )
+              : undefined,
           ),
         )
         .orderBy(asc(jobs.id))
