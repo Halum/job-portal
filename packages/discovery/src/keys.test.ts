@@ -104,4 +104,34 @@ describe('urlKey', () => {
     expect(urlKey('not a url')).toBeNull();
     expect(urlKey('')).toBeNull();
   });
+
+  it('gives every LinkedIn link to one job the key linkedin.com/jobs/view/<id>', () => {
+    const want = 'linkedin.com/jobs/view/1234567890';
+    for (const url of [
+      'https://www.linkedin.com/jobs/view/alpha-developer-at-beispiel-1234567890?trk=public_jobs',
+      'https://de.linkedin.com/jobs/view/1234567890/',
+      'https://www.linkedin.com/comm/jobs/view/1234567890?refId=abc',
+      'https://www.linkedin.com/jobs/search/?keywords=alpha&currentJobId=1234567890',
+    ]) {
+      expect(urlKey(url)).toBe(want);
+    }
+  });
+
+  it('gives every Indeed link to one job the key indeed.com/viewjob?jk=<id>', () => {
+    const want = 'indeed.com/viewjob?jk=0123456789abcdef';
+    for (const url of [
+      'https://de.indeed.com/viewjob?jk=0123456789abcdef&from=serp',
+      'https://www.indeed.co.uk/viewjob?jk=0123456789abcdef',
+      'https://de.indeed.com/jobs?q=alpha&vjk=0123456789abcdef',
+    ]) {
+      expect(urlKey(url)).toBe(want);
+    }
+  });
+
+  it('keeps the usual key for LinkedIn and Indeed links that name no job', () => {
+    expect(urlKey('https://www.linkedin.com/jobs/search/?keywords=alpha')).toBe(
+      'linkedin.com/jobs/search?keywords=alpha',
+    );
+    expect(urlKey('https://de.indeed.com/jobs?q=alpha')).toBe('de.indeed.com/jobs?q=alpha');
+  });
 });

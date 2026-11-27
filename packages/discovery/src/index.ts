@@ -11,6 +11,7 @@ export * from './sources/bundesagentur';
 export * from './sources/ats';
 export * from './sources/board-url';
 export * from './rate-limit';
+export * from './site-job';
 
 export const discoveryMigrations: ModuleMigrations = {
   name: 'discovery',
