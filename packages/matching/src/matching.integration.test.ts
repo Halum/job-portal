@@ -271,6 +271,65 @@ describe('matching against real Postgres', () => {
     });
   });
 
+  describe('textQueries', () => {
+    it('gives keyword and location pairs of active Targets, radius only with a location, never saved URLs', async () => {
+      const user = '00000000-0000-4000-8000-0000000000a1';
+      await matching.updateGlobalDefaults(user, { radiusKm: 7, locations: ['Köln'] });
+      await matching.upsertTarget(user, { name: 'a', criteria: { keywords: ['alpha', 'beta'] } });
+      await matching.upsertTarget(user, {
+        name: 'b',
+        criteria: {
+          keywords: ['alpha'],
+          radiusKm: 0,
+          bundesagenturSearches: [
+            'https://www.arbeitsagentur.de/jobsuche/suche?was=gamma&wo=Musterstadt',
+          ],
+        },
+      });
+      await matching.upsertTarget(user, { name: 'c', paused: true, criteria: { keywords: ['x'] } });
+      expect(await matching.textQueries(user)).toEqual([
+        { keyword: 'alpha', location: 'Köln', radiusKm: 7 },
+        { keyword: 'beta', location: 'Köln', radiusKm: 7 },
+        { keyword: 'alpha', location: 'Köln', radiusKm: 0 },
+      ]);
+
+      await matching.updateGlobalDefaults(user, { locations: null, radiusKm: 9 });
+      await matching.upsertTarget(user, { name: 'd', criteria: { locations: ['Musterstadt'] } });
+      expect(await matching.textQueries(user)).toEqual([
+        { keyword: 'alpha' },
+        { keyword: 'beta' },
+        { location: 'Musterstadt', radiusKm: 9 },
+      ]);
+    });
+
+    it('lists a pair once, skips a Target with neither, and is empty for a user with no Targets', async () => {
+      const user = '00000000-0000-4000-8000-0000000000a2';
+      await matching.upsertTarget(user, {
+        name: 'a',
+        criteria: { keywords: ['alpha'], radiusKm: null },
+      });
+      await matching.upsertTarget(user, {
+        name: 'b',
+        criteria: { keywords: ['alpha'], radiusKm: null },
+      });
+      await matching.upsertTarget(user, { name: 'c', criteria: {} });
+      expect(await matching.textQueries(user)).toEqual([{ keyword: 'alpha' }]);
+      expect(await matching.textQueries('00000000-0000-4000-8000-0000000000a3')).toEqual([]);
+    });
+
+    it('returns at most MAX_QUERIES pairs', async () => {
+      const user = '00000000-0000-4000-8000-0000000000a4';
+      await matching.upsertTarget(user, {
+        name: 'many',
+        criteria: {
+          keywords: Array.from({ length: 50 }, (_, i) => `w${String(i)}`),
+          locations: ['Köln', 'Berlin'],
+        },
+      });
+      expect(await matching.textQueries(user)).toHaveLength(MAX_QUERIES);
+    });
+  });
+
   describe('Global defaults edit', () => {
     const GD = '00000000-0000-4000-8000-0000000000dd';
 

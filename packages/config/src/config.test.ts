@@ -17,7 +17,14 @@ describe('loadConfig', () => {
       host: '127.0.0.1',
       port: 3000,
       logLevel: 'info',
-      sources: { bundesagentur: null, bambase: null, greenhouse: null, lever: null, ashby: null },
+      sources: {
+        bundesagentur: null,
+        bambase: null,
+        greenhouse: null,
+        lever: null,
+        ashby: null,
+        jsearch: null,
+      },
       prerankTopN: 20,
       boardRequestsPerSecond: 2,
       ai: null,
@@ -97,6 +104,94 @@ describe('loadConfig', () => {
     });
   });
 
+  describe('jsearch source', () => {
+    const on = { JSEARCH_API_KEYS: 'test-key-1', JSEARCH_INTERVAL_MINUTES: '720' };
+
+    it('is off without an interval or without a key, and empty values count as unset', () => {
+      expect(loadConfig(valid).sources.jsearch).toBeNull();
+      expect(loadConfig({ ...valid, JSEARCH_API_KEYS: 'test-key-1' }).sources.jsearch).toBeNull();
+      expect(loadConfig({ ...valid, JSEARCH_INTERVAL_MINUTES: '720' }).sources.jsearch).toBeNull();
+      expect(
+        loadConfig({ ...valid, JSEARCH_API_KEYS: ' , ', JSEARCH_INTERVAL_MINUTES: '720' }).sources
+          .jsearch,
+      ).toBeNull();
+      expect(
+        loadConfig({ ...valid, JSEARCH_API_KEYS: 'test-key-1', JSEARCH_INTERVAL_MINUTES: '' })
+          .sources.jsearch,
+      ).toBeNull();
+    });
+
+    it('defaults to linkedin and indeed, country de and no language', () => {
+      expect(loadConfig({ ...valid, ...on }).sources.jsearch).toEqual({
+        intervalMinutes: 720,
+        apiKeys: ['test-key-1'],
+        publishers: ['linkedin', 'indeed'],
+        country: 'de',
+        language: null,
+      });
+    });
+
+    it('reads several keys trimmed with empty entries dropped, publishers, country and language', () => {
+      expect(
+        loadConfig({
+          ...valid,
+          JSEARCH_INTERVAL_MINUTES: '60',
+          JSEARCH_API_KEYS: ' test-key-1, ,test-key-2 ,',
+          JSEARCH_PUBLISHERS: 'LinkedIn, glassdoor',
+          JSEARCH_COUNTRY: 'AT',
+          JSEARCH_LANGUAGE: 'de',
+        }).sources.jsearch,
+      ).toEqual({
+        intervalMinutes: 60,
+        apiKeys: ['test-key-1', 'test-key-2'],
+        publishers: ['linkedin', 'glassdoor'],
+        country: 'at',
+        language: 'de',
+      });
+    });
+
+    it('treats the value any as no publisher filter and an empty language as unset', () => {
+      const jsearch = loadConfig({
+        ...valid,
+        ...on,
+        JSEARCH_PUBLISHERS: 'any',
+        JSEARCH_LANGUAGE: '',
+      }).sources.jsearch;
+      expect(jsearch?.publishers).toEqual([]);
+      expect(jsearch?.language).toBeNull();
+    });
+
+    it.each(['', ' ', ',', ' , '])('refuses the empty publisher list %j', (value) => {
+      expect(() => loadConfig({ ...valid, ...on, JSEARCH_PUBLISHERS: value })).toThrow(ConfigError);
+      expect(() => loadConfig({ ...valid, ...on, JSEARCH_PUBLISHERS: value })).toThrow(
+        'JSEARCH_PUBLISHERS',
+      );
+    });
+
+    it.each([
+      ['JSEARCH_INTERVAL_MINUTES', '0'],
+      ['JSEARCH_COUNTRY', 'deu'],
+      ['JSEARCH_LANGUAGE', 'german'],
+    ])('rejects %s=%s', (name, value) => {
+      expect(() => loadConfig({ ...valid, ...on, [name]: value })).toThrow(name);
+    });
+
+    it('never echoes a key in an error', () => {
+      const secret = 'test-key-secret-9';
+      try {
+        loadConfig({
+          ...valid,
+          JSEARCH_API_KEYS: secret,
+          JSEARCH_INTERVAL_MINUTES: '0',
+          JSEARCH_PUBLISHERS: '',
+        });
+        expect.unreachable();
+      } catch (err) {
+        expect(String(err)).not.toContain(secret);
+      }
+    });
+  });
+
   describe('prerank default', () => {
     it('defaults to 20, reads an override, and needs an integer of at least 1', () => {
       expect(loadConfig(valid).prerankTopN).toBe(20);
@@ -125,6 +220,7 @@ describe('loadConfig', () => {
         greenhouse: null,
         lever: null,
         ashby: null,
+        jsearch: null,
       });
     });
 

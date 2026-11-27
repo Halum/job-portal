@@ -53,6 +53,13 @@ export interface UpsertTargetInput {
 }
 
 /** One request's worth of search parameters for a Source that searches by text and place. */
+/** One text search: a keyword, a location or both, with the radius only when a location is set. */
+export interface TextQuery {
+  keyword?: string;
+  location?: string;
+  radiusKm?: number;
+}
+
 export interface SearchQuery {
   was?: string;
   wo?: string;
@@ -187,6 +194,11 @@ export interface Matching {
   listNewTags: (userId: string, since: Date) => Promise<NewTag[]>;
   /** Search parameters for the active Targets: one per keyword and location, none for a Target that sets neither. */
   searchQueries: (userId: string) => Promise<SearchQuery[]>;
+  /**
+   * The keyword and location pairs of the active Targets for text-search Sources (JSearch): saved URL searches
+   * never included, a radius only with a location, a pair once, at most MAX_QUERIES.
+   */
+  textQueries: (userId: string) => Promise<TextQuery[]>;
 }
 
 const DEFAULT_TOP_N = 20;
@@ -684,6 +696,26 @@ export function createMatching(
         }
       }
       // ponytail: first MAX_QUERIES in Target name order; a fair split per Target if someone needs more than that.
+      return [...seen.values()].slice(0, MAX_QUERIES);
+    },
+
+    async textQueries(userId) {
+      const seen = new Map<string, TextQuery>();
+      for (const { resolved: c } of await activeTargets(userId)) {
+        const words = c.keywords ?? [];
+        const places = c.locations ?? [];
+        for (const keyword of words.length > 0 ? words : [undefined]) {
+          for (const location of places.length > 0 ? places : [undefined]) {
+            if (keyword === undefined && location === undefined) continue; // nothing to search for
+            const q: TextQuery = {
+              ...(keyword === undefined ? {} : { keyword }),
+              ...(location === undefined ? {} : { location }),
+              ...(location !== undefined && c.radiusKm !== null ? { radiusKm: c.radiusKm } : {}),
+            };
+            seen.set(JSON.stringify(Object.entries(q).sort()), q);
+          }
+        }
+      }
       return [...seen.values()].slice(0, MAX_QUERIES);
     },
   };

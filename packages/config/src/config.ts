@@ -23,6 +23,40 @@ const httpUrl = z.string().refine((v) => {
   }
 }, 'must be an http or https URL');
 
+// JSEARCH_API_KEYS is a secret: split without ever echoing the value in an error.
+const keyList = z.preprocess(
+  (v) =>
+    typeof v === 'string'
+      ? v
+          .split(',')
+          .map((k) => k.trim())
+          .filter((k) => k !== '')
+      : v,
+  z.array(z.string()).optional(),
+);
+
+// Unset means linkedin and indeed, `any` means no publisher filter, an empty list is a mistake.
+const DEFAULT_PUBLISHERS = ['linkedin', 'indeed'];
+const publisherList = z
+  .string()
+  .optional()
+  .transform((raw, ctx): string[] => {
+    if (raw === undefined) return DEFAULT_PUBLISHERS;
+    const list = raw
+      .split(',')
+      .map((p) => p.trim().toLowerCase())
+      .filter((p) => p !== '');
+    if (list.length === 0)
+      ctx.addIssue({ code: 'custom', message: 'must name at least one publisher, or any' });
+    return list.length === 1 && list[0] === 'any' ? [] : list;
+  });
+// An ISO 3166 country or ISO 639 language code, lower case.
+const isoCode = (what: string) =>
+  z
+    .string()
+    .regex(/^[a-zA-Z]{2}$/, `must be a two-letter ${what} code`)
+    .transform((v) => v.toLowerCase());
+
 const envSchema = z
   .object({
     DATABASE_URL: z.string().min(1),
@@ -39,6 +73,13 @@ const envSchema = z
     BUNDESAGENTUR_INTERVAL_MINUTES: optionalInterval,
     // Bambase needs no search criteria, so it is scheduled when its interval is set (empty counts as unset).
     BAMBASE_INTERVAL_MINUTES: optionalInterval,
+    // JSearch (LinkedIn, Indeed and more through Google for Jobs): scheduled when the interval is set and at
+    // least one API key is. The keys are secrets; several keys let the Source switch to the next one when one is out of quota.
+    JSEARCH_INTERVAL_MINUTES: optionalInterval,
+    JSEARCH_API_KEYS: keyList,
+    JSEARCH_PUBLISHERS: publisherList,
+    JSEARCH_COUNTRY: z.preprocess(emptyToUndefined, isoCode('country').default('de')),
+    JSEARCH_LANGUAGE: z.preprocess(emptyToUndefined, isoCode('language').optional()),
     // How many postings per Target per run the prerank passes on when neither the Target nor the Global defaults set it.
     PRERANK_TOP_N: z.coerce.number().int().min(1).default(20),
     // Company boards: each ATS is scheduled when its interval is set. Only marked boards of the
@@ -151,6 +192,7 @@ export interface Config {
     greenhouse: IntervalConfig | null;
     lever: IntervalConfig | null;
     ashby: IntervalConfig | null;
+    jsearch: JsearchConfig | null;
   };
   /** Minutes between Gone cold checks, an integer of at least 1. */
   goneColdIntervalMinutes: number;
@@ -176,6 +218,17 @@ export interface Config {
   alertThreshold: number;
   /** null means no webhook is configured and nothing is sent. */
   notifications: NotificationsConfig | null;
+}
+
+export interface JsearchConfig extends IntervalConfig {
+  /** At least one. Secrets, named by position everywhere else. */
+  apiKeys: string[];
+  /** Lower-case publisher names, one search per publisher, empty meaning no publisher filter. */
+  publishers: string[];
+  /** Lower-case ISO country code. */
+  country: string;
+  /** Lower-case ISO language code, null when the search sends none. */
+  language: string | null;
 }
 
 export interface GmailConfig {
@@ -238,6 +291,16 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       greenhouse: interval(e.GREENHOUSE_INTERVAL_MINUTES),
       lever: interval(e.LEVER_INTERVAL_MINUTES),
       ashby: interval(e.ASHBY_INTERVAL_MINUTES),
+      jsearch:
+        e.JSEARCH_INTERVAL_MINUTES === undefined || (e.JSEARCH_API_KEYS ?? []).length === 0
+          ? null
+          : {
+              intervalMinutes: e.JSEARCH_INTERVAL_MINUTES,
+              apiKeys: e.JSEARCH_API_KEYS ?? [],
+              publishers: e.JSEARCH_PUBLISHERS,
+              country: e.JSEARCH_COUNTRY,
+              language: e.JSEARCH_LANGUAGE ?? null,
+            },
     },
     goneColdIntervalMinutes: e.GONE_COLD_INTERVAL_MINUTES,
     prerankTopN: e.PRERANK_TOP_N,

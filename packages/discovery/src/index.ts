@@ -9,6 +9,7 @@ export * from './source';
 export * from './sources/bambase';
 export * from './sources/bundesagentur';
 export * from './sources/ats';
+export * from './sources/jsearch';
 export * from './sources/board-url';
 export * from './rate-limit';
 export * from './site-job';
