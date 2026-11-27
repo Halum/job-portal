@@ -2,7 +2,8 @@
 
 Terms name things in code, database, tests and issues. Source of truth: the spec in GitHub issue #3.
 
-- **Source**: a place postings come from (bundesagentur, bambase, greenhouse, lever, ashby, manual), implemented as one module behind the Source interface.
+- **Source**: a place postings come from (bundesagentur, bambase, greenhouse, lever, ashby, jsearch, linkedin, indeed, manual), implemented as one module behind the Source interface.
+- **Publisher**: the site a JSearch Posting was listed on, as JSearch names it (for example LinkedIn, Indeed or a company site); stored on the Posting, null for every other Source.
 - **Posting**: one raw listing from one Source, identified by source id plus the Source's own posting id.
 - **Job**: the deduplicated thing the user tracks, made of one or more Postings.
 - **Rule merge**: automatic attachment of a Posting to an existing Job when its company key or URL key matches exactly one Job.

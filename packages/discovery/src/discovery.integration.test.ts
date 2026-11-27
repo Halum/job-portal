@@ -6,10 +6,16 @@ import { createDiscovery, discoveryMigrations, type Discovery, type Source } fro
 const USER = '00000000-0000-4000-8000-000000000001';
 const OTHER_USER = '00000000-0000-4000-8000-000000000002';
 
+interface FakePosting {
+  id: string;
+  title: string;
+  publisher?: string;
+}
+
 function fakeSource(
-  postings: { id: string; title: string }[],
+  postings: FakePosting[],
   errors: string[] = [],
-): Source & { set: (p: { id: string; title: string }[]) => void } {
+): Source & { set: (p: FakePosting[]) => void } {
   let current = postings;
   return {
     id: 'fake',
@@ -24,6 +30,7 @@ function fakeSource(
           company: 'Beispiel Firma',
           location: 'Musterstadt',
           url: `https://jobs.example.invalid/${p.id}`,
+          ...(p.publisher === undefined ? {} : { publisher: p.publisher }),
           raw: { id: p.id },
         })),
         errors,
@@ -125,6 +132,28 @@ describe('discovery against real Postgres', () => {
 
   it('scopes every query by user', async () => {
     expect((await discovery.listJobs(OTHER_USER, {})).jobs).toEqual([]);
+  });
+
+  it('keeps the Publisher of a Posting, updates it on a re-fetch, and leaves it null otherwise', async () => {
+    source.set([
+      { id: 'pub-1', title: 'With publisher', publisher: 'LinkedIn' },
+      { id: 'pub-2', title: 'Without publisher' },
+    ]);
+    await discovery.poll(USER, 'fake');
+    const find = async (title: string) => {
+      const { jobs } = await discovery.listJobs(USER, {});
+      const job = jobs.find((j) => j.title === title);
+      return discovery.getJob(USER, job?.id ?? '');
+    };
+    expect((await find('With publisher'))?.postings[0]?.publisher).toBe('LinkedIn');
+    expect((await find('Without publisher'))?.postings[0]?.publisher).toBeNull();
+
+    source.set([
+      { id: 'pub-1', title: 'With publisher', publisher: 'Indeed' },
+      { id: 'pub-2', title: 'Without publisher' },
+    ]);
+    await discovery.poll(USER, 'fake');
+    expect((await find('With publisher'))?.postings[0]?.publisher).toBe('Indeed');
   });
 
   it('refuses an unknown source', async () => {

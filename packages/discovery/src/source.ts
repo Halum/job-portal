@@ -7,6 +7,8 @@ export interface NormalizedPosting {
   location?: string;
   postedAt?: Date;
   url: string;
+  /** The site the posting was listed on, for Sources that aggregate other sites; other Sources omit it. */
+  publisher?: string;
   /** The full payload as the Source gave it, stored as is. */
   raw: unknown;
 }
