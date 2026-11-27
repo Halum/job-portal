@@ -380,6 +380,58 @@ describe('MCP endpoint over real HTTP', () => {
     await client.close();
   });
 
+  it('add_job answers created and seenBefore, takes a source, and list_jobs finds a Job by url', async () => {
+    const client = await connect();
+    const input = { title: 'Koch', company: 'Beispiel GmbH Linkedin', city: 'Musterstadt' };
+    const manual = await call(client, 'add_job', {
+      ...input,
+      url: 'https://www.linkedin.com/jobs/view/koch-bei-firma-3901234567',
+    });
+    expect(manual.out).toMatchObject({ created: true, seenBefore: [] });
+
+    const again = await call(client, 'add_job', {
+      ...input,
+      source: 'linkedin',
+      url: 'https://de.linkedin.com/jobs/view/3901234567/',
+    });
+    const answer = again.out as {
+      jobId: string;
+      created: boolean;
+      seenBefore: { sourceId: string; publisher: string | null; firstSeenAt: string }[];
+    };
+    expect(answer).toMatchObject({
+      jobId: (manual.out as { jobId: string }).jobId,
+      created: false,
+      seenBefore: [{ sourceId: 'manual', publisher: null }],
+    });
+    expect(new Date(answer.seenBefore[0]?.firstSeenAt ?? '').toISOString()).toBe(
+      answer.seenBefore[0]?.firstSeenAt,
+    );
+
+    const found = await call(client, 'list_jobs', {
+      url: 'https://uk.linkedin.com/jobs/view/other-slug-3901234567?trk=x',
+    });
+    expect((found.out as { jobs: { id: string }[] }).jobs.map((j) => j.id)).toEqual([answer.jobId]);
+    const none = await call(client, 'list_jobs', {
+      url: 'https://www.linkedin.com/jobs/view/3999999999',
+    });
+    expect((none.out as { jobs: unknown[] }).jobs).toEqual([]);
+    await client.close();
+  });
+
+  it('add_job refuses a linkedin or indeed source with a URL of another site', async () => {
+    const client = await connect();
+    for (const [source, url] of [
+      ['linkedin', 'https://example.invalid/jobs/1'],
+      ['indeed', 'https://www.linkedin.com/jobs/view/3901234567'],
+    ] as const) {
+      const res = await call(client, 'add_job', { title: 'Koch', source, url });
+      expect(res.isError).toBe(true);
+      expect(res.text).toContain(`not a ${source} job link`);
+    }
+    await client.close();
+  });
+
   it('add_job refuses a URL that is not http(s)', async () => {
     const client = await connect();
     const outcome = await client

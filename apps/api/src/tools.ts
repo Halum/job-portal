@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { userSchema, type User } from '@job-portal/accounts';
 import {
   ADD_JOB_LIMITS,
+  ADD_JOB_SOURCES,
   DISCOVERY_STATES,
   DiscoveryError,
   type AiMerge,
@@ -64,6 +65,8 @@ const postingSchema = z.object({
   firstSeenAt: isoDate,
   lastSeenAt: isoDate,
 });
+
+const jobUrl = z.url({ protocol: /^https?$/ }).max(ADD_JOB_LIMITS.url);
 
 const trackingSchema = z.object({
   discoveryState: z.enum(DISCOVERY_STATES),
@@ -299,6 +302,11 @@ export function registerTools(
         applyByBefore: dayInput
           .optional()
           .describe('Only Jobs with an apply-by date on or before this day.'),
+        url: jobUrl
+          .optional()
+          .describe(
+            'A job link: only the Job that has a Posting on the same URL key (LinkedIn and Indeed links by the site job id, so another host or slug still matches). A read-only lookup, it adds nothing.',
+          ),
       },
       outputSchema: { jobs: z.array(jobSchema), nextCursor: z.string().nullable() },
     },
@@ -312,6 +320,7 @@ export function registerTools(
       applicationStatus,
       discoveredSince,
       applyByBefore,
+      url,
     }) => {
       if ((minScore !== undefined || tagged !== undefined) && targetId === undefined) {
         return {
@@ -342,6 +351,7 @@ export function registerTools(
         cursor,
         discoveryState,
         jobIds,
+        url,
         discoveredSince: discoveredSince ? new Date(discoveredSince) : undefined,
       });
       const states = await tracker.getStates(
@@ -413,18 +423,32 @@ export function registerTools(
     'add_job',
     {
       description:
-        'Add a job by hand as a Posting with source manual. It goes through the same dedupe, so a later copy from a board merges with it. Adding the same URL again returns the same Job.',
+        "Add a job by hand as a Posting. source is manual (default), linkedin or indeed; linkedin and indeed need a job link of that site and are refused otherwise. It goes through the same dedupe, so a later copy from a board merges with it, and adding the same job again returns the same Job. The answer says whether this call created the Job and lists the Job's other Postings (source, publisher, first seen, earliest first) in seenBefore, so you can tell which Sources already had it.",
       inputSchema: {
         title: z.string().min(1).max(ADD_JOB_LIMITS.title),
         company: z.string().min(1).max(ADD_JOB_LIMITS.company).optional(),
         city: z.string().min(1).max(ADD_JOB_LIMITS.city).optional(),
-        url: z.url({ protocol: /^https?$/ }).max(ADD_JOB_LIMITS.url),
+        url: jobUrl,
+        source: z.enum(ADD_JOB_SOURCES).optional().describe('Default manual.'),
       },
-      outputSchema: { jobId: z.string() },
+      outputSchema: {
+        jobId: z.string(),
+        created: z.boolean().describe('True only when this call made a new Job.'),
+        seenBefore: z
+          .array(postingSchema.pick({ sourceId: true, publisher: true, firstSeenAt: true }))
+          .describe("The Job's other Postings, earliest first; empty for a new Job."),
+      },
     },
     async (input) => {
       try {
-        const out = await discovery.addJob(user.id, input);
+        const added = await discovery.addJob(user.id, input);
+        const out = {
+          ...added,
+          seenBefore: added.seenBefore.map((s) => ({
+            ...s,
+            firstSeenAt: s.firstSeenAt.toISOString(),
+          })),
+        };
         return { content: [text(out)], structuredContent: out };
       } catch (err) {
         return failure(err, 'add_job failed');

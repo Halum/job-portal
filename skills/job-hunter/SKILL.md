@@ -13,9 +13,9 @@ Never invent a job, a status, a date or a score: read it with a tool. Ids are UU
 
 ## Jobs
 
-- `list_jobs`: the stored Jobs with their postings and tracking. Filters apply before paging. Use `targetId` for the candidates of one Target, `minScore` or `tagged` with it to keep the good ones.
+- `list_jobs`: the stored Jobs with their postings and tracking. Filters apply before paging. Use `targetId` for the candidates of one Target, `minScore` or `tagged` with it to keep the good ones. Pass `url` (a job link) to ask whether a job is already known: it returns the Job with a Posting on that link's URL key (LinkedIn and Indeed links match by the site job id, so another host, slug or tracking parameter still matches) and adds nothing. Use it before `add_job` when the user only wants to know.
 - `get_job`: one Job in full: all postings, tracking, Timeline, notes and, per Target, the AI score, reasons, red flags and tag. Read it before saying anything about a single job.
-- `add_job`: add a job the user found by hand (title, URL, optional company and city). The same URL again returns the same Job.
+- `add_job`: add a job the user found by hand (title, URL, optional company and city). Pass `source` `linkedin` or `indeed` when the job came from that site (default `manual`); the URL must then be a job link of that site, otherwise it is refused. The same job again returns the same Job. The answer is `{ jobId, created, seenBefore }`: `created` is true only when this call made a new Job, and `seenBefore` lists the Job's other Postings as `{ sourceId, publisher, firstSeenAt }`, earliest first, empty for a new Job. Tell the user which Sources already had the job and when, so they see how complete and fresh the scheduled Sources are.
 - `split_job`: undo a wrong merge by moving postings (ids from `get_job`) into a new Job. Ask the user first: merges never come back on their own.
 
 ## Tracking and notes
