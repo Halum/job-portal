@@ -1,0 +1,1 @@
+ALTER TABLE "discovery"."postings" ADD COLUMN "publisher" text;

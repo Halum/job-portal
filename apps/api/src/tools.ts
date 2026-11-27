@@ -56,6 +56,10 @@ const postingSchema = z.object({
   company: z.string().nullable(),
   location: z.string().nullable(),
   url: z.string(),
+  publisher: z
+    .string()
+    .nullable()
+    .describe('The site the posting was listed on; null unless an aggregating Source set it'),
   postedAt: isoDate.nullable(),
   firstSeenAt: isoDate,
   lastSeenAt: isoDate,

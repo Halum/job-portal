@@ -150,10 +150,14 @@ describe('MCP endpoint over real HTTP', () => {
   it('list_jobs returns the stored Jobs with their postings, paged by cursor', async () => {
     const client = await connect();
     const first = (await client.callTool({ name: 'list_jobs', arguments: { limit: 3 } }))
-      .structuredContent as { jobs: { postings: unknown[] }[]; nextCursor: string | null };
+      .structuredContent as {
+      jobs: { postings: { publisher: string | null }[] }[];
+      nextCursor: string | null;
+    };
     expect(first.jobs).toHaveLength(3);
     expect(first.nextCursor).not.toBeNull();
     expect(first.jobs[0]?.postings).toHaveLength(1);
+    expect(first.jobs[0]?.postings[0]).toMatchObject({ publisher: null });
 
     const second = (
       await client.callTool({
@@ -189,7 +193,13 @@ describe('MCP endpoint over real HTTP', () => {
     expect(found.structuredContent).toMatchObject({
       job: {
         id,
-        postings: [{ sourceId: 'bundesagentur', raw: { stellenangebotsTitel: jobs[0]?.title } }],
+        postings: [
+          {
+            sourceId: 'bundesagentur',
+            publisher: null,
+            raw: { stellenangebotsTitel: jobs[0]?.title },
+          },
+        ],
       },
     });
 

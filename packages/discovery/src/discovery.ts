@@ -50,6 +50,7 @@ export interface PostingView {
   company: string | null;
   location: string | null;
   url: string;
+  publisher: string | null;
   postedAt: Date | null;
   firstSeenAt: Date;
   lastSeenAt: Date;
@@ -151,6 +152,7 @@ const postingColumns = {
   company: postings.company,
   location: postings.location,
   url: postings.url,
+  publisher: postings.publisher,
   postedAt: postings.postedAt,
   firstSeenAt: postings.firstSeenAt,
   lastSeenAt: postings.lastSeenAt,
@@ -166,6 +168,7 @@ interface Incoming {
   company?: string | null;
   location?: string | null;
   url: string;
+  publisher?: string | null;
   postedAt?: Date | null;
   raw: unknown;
 }
@@ -187,6 +190,7 @@ async function ingest(
     company: p.company ?? null,
     location: p.location ?? null,
     url: p.url,
+    publisher: p.publisher ?? null,
     urlKey: urlKey(p.url),
     postedAt: p.postedAt ?? null,
     raw: p.raw,
