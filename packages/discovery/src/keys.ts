@@ -84,7 +84,7 @@ export function titleOverlap(a: string, b: string): number {
 }
 
 /**
- * The URL without scheme, www, fragment, tracking parameters and trailing slash; parameters sorted.
+ * The URL without scheme, www, fragment, tracking parameters and trailing slash, with parameters sorted.
  * A LinkedIn or Indeed job link is first reduced to the site's own job id.
  */
 export function urlKey(raw: string): string | null {

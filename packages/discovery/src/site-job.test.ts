@@ -31,6 +31,26 @@ describe('siteJobId, LinkedIn', () => {
   });
 });
 
+describe('siteJobId, LinkedIn edge cases', () => {
+  it('reads a long run of digits followed by a letter in linear time', () => {
+    const url = `https://www.linkedin.com/jobs/view/${'1'.repeat(50000)}x`;
+    const start = performance.now();
+    expect(siteJobId(url)).toBeNull();
+    expect(performance.now() - start).toBeLessThan(100);
+  });
+
+  it('does not read currentJobId from a path that only starts with /jobs', () => {
+    expect(siteJobId('https://www.linkedin.com/jobsearch?currentJobId=1234567890')).toBeNull();
+  });
+
+  it('reads currentJobId when a /jobs/view/ path carries no id', () => {
+    expect(siteJobId('https://www.linkedin.com/jobs/view/?currentJobId=1234567890')).toEqual({
+      site: 'linkedin',
+      id: '1234567890',
+    });
+  });
+});
+
 describe('siteJobId, Indeed', () => {
   it.each([
     ['https://www.indeed.com/viewjob?jk=0123456789abcdef', '0123456789abcdef'],
@@ -42,6 +62,13 @@ describe('siteJobId, Indeed', () => {
     ['https://www.indeed.com.au/viewjob?vjk=0123456789abcdef', '0123456789abcdef'],
   ])('reads %s', (url, id) => {
     expect(siteJobId(url)).toEqual({ site: 'indeed', id });
+  });
+
+  it('lowercases the job key so its case never makes a second key', () => {
+    expect(siteJobId('https://de.indeed.com/viewjob?jk=ABCDEF0123456789')).toEqual({
+      site: 'indeed',
+      id: 'abcdef0123456789',
+    });
   });
 
   it('prefers jk over vjk', () => {
