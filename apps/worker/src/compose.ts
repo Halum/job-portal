@@ -16,6 +16,7 @@ import {
   createAiMerge,
   createDiscovery,
   type Discovery,
+  type JsearchStats,
 } from '@job-portal/discovery';
 import { createDocuments, type Documents } from '@job-portal/documents';
 import { createMatching, type Matching } from '@job-portal/matching';
@@ -48,6 +49,8 @@ export interface App {
   goneCold: GoneColdCheck;
   /** The Sources as scheduled, one entry per configured Source. */
   scheduled: ScheduledSource[];
+  /** JSearch request count and current key position (from 1), null when JSearch is not configured. */
+  jsearchStats: (() => JsearchStats) | null;
   close: () => Promise<void>;
 }
 
@@ -106,7 +109,7 @@ export async function composeApp(
     },
   });
   const watchlist = createWatchlist(db);
-  const { sources, scheduled } = buildSources(config, {
+  const { sources, scheduled, jsearchStats } = buildSources(config, {
     matching,
     watchlist,
     fetch: limiter.fetch,
@@ -203,6 +206,7 @@ export async function composeApp(
     pipeline,
     goneCold,
     scheduled,
+    jsearchStats,
     close: async () => {
       limiter.close();
       await handle.close();

@@ -1,0 +1,79 @@
+{
+  "status": "OK",
+  "request_id": "fixture-request-1",
+  "data": {
+    "jobs": [
+      {
+        "job_id": "fixture-job-1",
+        "job_title": "Beispiel Stelle A (m/w/d)",
+        "employer_name": "Beispiel Firma A",
+        "job_publisher": "LinkedIn",
+        "job_apply_link": "https://careers.example.invalid/a",
+        "apply_options": [
+          {
+            "publisher": "Beispiel Karriereseite",
+            "apply_link": "https://careers.example.invalid/a",
+            "is_direct": true
+          },
+          {
+            "publisher": "LinkedIn",
+            "apply_link": "https://de.linkedin.com/jobs/view/beispiel-stelle-a-at-beispiel-firma-a-1000000001",
+            "is_direct": false
+          }
+        ],
+        "job_google_link": "https://www.google.com/search?q=fixture-job-1",
+        "job_location": "Musterstadt  •  über LinkedIn",
+        "job_city": "Musterstadt",
+        "job_country": "DE",
+        "job_posted_at_datetime_utc": "2026-07-09T08:30:00.000Z",
+        "job_posted_at_timestamp": 1783585800,
+        "job_is_remote": false,
+        "job_description": "Placeholder description A."
+      },
+      {
+        "job_id": "fixture-job-2",
+        "job_title": "Beispiel Stelle B",
+        "employer_name": "Beispiel Firma B",
+        "job_publisher": "Indeed",
+        "job_apply_link": "https://de.indeed.example.invalid/viewjob?jk=0000000000000002",
+        "apply_options": [
+          {
+            "publisher": "Beispiel Portal",
+            "apply_link": "https://portal.example.invalid/b",
+            "is_direct": false
+          }
+        ],
+        "job_google_link": "https://www.google.com/search?q=fixture-job-2",
+        "job_location": "Beispielburg  •  über Indeed",
+        "job_city": null,
+        "job_country": "DE",
+        "job_posted_at_datetime_utc": null,
+        "job_posted_at_timestamp": 1783499400,
+        "job_is_remote": false,
+        "job_description": "Placeholder description B."
+      },
+      {
+        "job_id": "fixture-job-3",
+        "job_title": "Beispiel Stelle C",
+        "employer_name": "Beispiel Firma C",
+        "job_publisher": "Glassdoor",
+        "job_apply_link": null,
+        "apply_options": [],
+        "job_google_link": "https://www.google.com/search?q=fixture-job-3",
+        "job_location": "Deutschland",
+        "job_city": "",
+        "job_country": "DE",
+        "job_posted_at_datetime_utc": "2026-07-08T10:00:00.000Z",
+        "job_posted_at_timestamp": 1783504800,
+        "job_is_remote": true,
+        "job_description": "Placeholder description C."
+      },
+      {
+        "job_title": "Beispiel Stelle ohne Kennung",
+        "employer_name": "Beispiel Firma D",
+        "job_publisher": "LinkedIn",
+        "job_apply_link": "https://example.invalid/d"
+      }
+    ]
+  }
+}

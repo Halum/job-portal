@@ -8,6 +8,9 @@ import {
   createAtsSource,
   createBambaseSource,
   createBundesagenturSource,
+  createJsearchSource,
+  JSEARCH,
+  type JsearchStats,
   type Source,
 } from '@job-portal/discovery';
 import type { Matching } from '@job-portal/matching';
@@ -20,16 +23,16 @@ import type { ScheduledSource } from './worker';
 export function buildSources(
   config: Pick<Config, 'sources'>,
   deps: {
-    matching: Pick<Matching, 'searchQueries'>;
+    matching: Pick<Matching, 'searchQueries' | 'textQueries'>;
     /** The marked directory boards, narrowed by the user's Watchlist. */
     watchlist: Pick<Watchlist, 'listBoards'>;
     /** The rate-limited fetch every ATS board request goes through (shared through Redis). */
     fetch: typeof fetch;
     userId: string;
-    /** Replaces the network for the Bundesagentur and bambase requests (tests and dry runs). */
+    /** Replaces the network for the Bundesagentur, bambase and JSearch requests (tests and dry runs). */
     directFetch?: typeof fetch;
   },
-): { sources: Source[]; scheduled: ScheduledSource[] } {
+): { sources: Source[]; scheduled: ScheduledSource[]; jsearchStats: (() => JsearchStats) | null } {
   const sources: Source[] = [];
   const scheduled: ScheduledSource[] = [];
   const { bundesagentur, bambase } = config.sources;
@@ -47,6 +50,21 @@ export function buildSources(
     sources.push(createBambaseSource(deps.directFetch ? { fetch: deps.directFetch } : {}));
     scheduled.push({ sourceId: BAMBASE, intervalMinutes: bambase.intervalMinutes });
   }
+  let jsearchStats: (() => JsearchStats) | null = null;
+  const { jsearch } = config.sources;
+  if (jsearch) {
+    const source = createJsearchSource({
+      apiKeys: jsearch.apiKeys,
+      publishers: jsearch.publishers,
+      country: jsearch.country,
+      language: jsearch.language,
+      queries: () => deps.matching.textQueries(deps.userId),
+      ...(deps.directFetch ? { fetch: deps.directFetch } : {}),
+    });
+    sources.push(source);
+    jsearchStats = source.stats;
+    scheduled.push({ sourceId: JSEARCH, intervalMinutes: jsearch.intervalMinutes });
+  }
   // Company boards: only marked boards of the Board directory (narrowed by the Watchlist) are fetched.
   for (const ats of ATS_IDS) {
     const source = config.sources[ats];
@@ -59,5 +77,5 @@ export function buildSources(
     );
     scheduled.push({ sourceId: ats, intervalMinutes: source.intervalMinutes });
   }
-  return { sources, scheduled };
+  return { sources, scheduled, jsearchStats };
 }
