@@ -3,7 +3,10 @@
 Terms name things in code, database, tests and issues. Source of truth: the spec in GitHub issue #3.
 
 - **Source**: a place postings come from (bundesagentur, bambase, greenhouse, lever, ashby, jsearch, linkedin, indeed, manual), implemented as one module behind the Source interface.
-- **Publisher**: the site a JSearch Posting was listed on, as JSearch names it (for example LinkedIn, Indeed or a company site); stored on the Posting, null for every other Source.
+- **Publisher**: the site a Posting was listed on, as JSearch names it (for example LinkedIn, Indeed or a company site), or LinkedIn or Indeed for a Posting found through that site's dedicated API; stored on the Posting, null for every other Source.
+- **Slot**: one API (jsearch, linkedin, indeed) and one key position, the unit the JSearch Source rotates over. Each API has its own quota per key.
+- **Pool**: the slots one search rotates over, by its publisher: linkedin (JSearch and LinkedIn slots), indeed (JSearch and Indeed slots), any other publisher or none (JSearch slots only).
+- **Request log**: one row per request the JSearch Source sent (time, API, key position, publisher, query, HTTP status or fixed failure reason, jobs returned, never the key), table `discovery.request_log`. The next slot of each pool is read from it.
 - **Posting**: one raw listing from one Source, identified by source id plus the Source's own posting id.
 - **Job**: the deduplicated thing the user tracks, made of one or more Postings.
 - **Rule merge**: automatic attachment of a Posting to an existing Job when its company key or URL key matches exactly one Job.

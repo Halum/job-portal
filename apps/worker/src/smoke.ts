@@ -42,8 +42,11 @@ try {
     );
   }
   if (app.jsearchStats) {
-    const { requests, keyPosition } = app.jsearchStats();
-    console.log(`jsearch: ${String(requests)} requests, ended on key ${String(keyPosition)}`);
+    const { requests, slots } = app.jsearchStats();
+    console.log(`jsearch: ${String(requests)} requests`);
+    for (const { api, keyPosition, requests: n } of slots) {
+      console.log(`  ${api} key ${String(keyPosition)}: ${String(n)}`);
+    }
   }
   // No mail poll: it would claim real replies in the ledger and change real statuses, and the Telegram line would never be sent.
   console.log('mail: not polled by the smoke run');

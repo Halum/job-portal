@@ -13,6 +13,7 @@ export * from './sources/jsearch';
 export * from './sources/board-url';
 export * from './rate-limit';
 export * from './site-job';
+export { createRequestLog, type LoggedRequest } from './request-log';
 
 export const discoveryMigrations: ModuleMigrations = {
   name: 'discovery',

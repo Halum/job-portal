@@ -15,6 +15,7 @@ import {
   connectRateLimiter,
   createAiMerge,
   createDiscovery,
+  createRequestLog,
   type Discovery,
   type JsearchStats,
 } from '@job-portal/discovery';
@@ -49,7 +50,7 @@ export interface App {
   goneCold: GoneColdCheck;
   /** The Sources as scheduled, one entry per configured Source. */
   scheduled: ScheduledSource[];
-  /** JSearch request count and current key position (from 1), null when JSearch is not configured. */
+  /** JSearch request counts per API and key position (from 1), null when JSearch is not configured. */
   jsearchStats: (() => JsearchStats) | null;
   close: () => Promise<void>;
 }
@@ -114,6 +115,7 @@ export async function composeApp(
     watchlist,
     fetch: limiter.fetch,
     userId: user.id,
+    requestLog: createRequestLog(db),
     ...(fetchImpl ? { directFetch: fetchImpl } : {}),
   });
   // Discovery snapshots its Sources, so it is created only now, with every one of them in the list.

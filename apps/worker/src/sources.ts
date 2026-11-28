@@ -10,6 +10,7 @@ import {
   createBundesagenturSource,
   createJsearchSource,
   JSEARCH,
+  type RequestLog,
   type JsearchStats,
   type Source,
 } from '@job-portal/discovery';
@@ -29,6 +30,8 @@ export function buildSources(
     /** The rate-limited fetch every ATS board request goes through (shared through Redis). */
     fetch: typeof fetch;
     userId: string;
+    /** Where the JSearch Source records every request and reads its round-robin position back. */
+    requestLog: RequestLog;
     /** Replaces the network for the Bundesagentur, bambase and JSearch requests (tests and dry runs). */
     directFetch?: typeof fetch;
   },
@@ -55,6 +58,7 @@ export function buildSources(
   if (jsearch) {
     const source = createJsearchSource({
       apiKeys: jsearch.apiKeys,
+      requestLog: deps.requestLog,
       publishers: jsearch.publishers,
       country: jsearch.country,
       language: jsearch.language,
