@@ -3,9 +3,45 @@ import type { FetchResult, NormalizedPosting, Source } from '../source';
 
 export const JSEARCH = 'jsearch';
 
-const API_URL = 'https://api.openwebninja.com/jsearch/search-v2';
+const API_URLS = {
+  jsearch: 'https://api.openwebninja.com/jsearch/search-v2',
+  linkedin: 'https://api.openwebninja.com/realtime-linkedin-data/search',
+  indeed: 'https://api.openwebninja.com/realtime-indeed-data/search',
+} as const;
 const REQUEST_TIMEOUT_MS = 30_000;
-/** A key that gets one of these answers is out of quota or refused; the request moves to the next key. */
+export type ApiId = keyof typeof API_URLS;
+/** The slots a search rotates over: its own API's slots plus the JSearch ones. The pool `jsearch` is every other publisher. */
+export type SlotPool = ApiId;
+
+/** The pool of a search by its publisher: linkedin and indeed have a dedicated API, any other publisher or none does not. */
+export function poolOf(publisher: string | null): SlotPool {
+  const p = publisher?.toLowerCase();
+  return p === 'linkedin' || p === 'indeed' ? p : 'jsearch';
+}
+
+/** One request sent, as the request log keeps it. Never carries the key. */
+export interface RequestLogEntry {
+  api: ApiId;
+  /** The key position, counted from 1. */
+  keyPosition: number;
+  publisher: string | null;
+  /** The query text sent. */
+  query: string;
+  /** The HTTP status, null when no answer came. */
+  status: number | null;
+  /** A fixed reason when the request failed without an HTTP status or the body was unusable, else null. */
+  failure: string | null;
+  jobsReturned: number;
+}
+
+/** Where the Source records every request. The round-robin position of each pool is read back from it. */
+export interface RequestLog {
+  record(entry: RequestLogEntry): Promise<void>;
+  /** The slot the newest request of this pool used, null when the pool has none yet. */
+  lastSlot(pool: SlotPool): Promise<{ api: ApiId; keyPosition: number } | null>;
+}
+
+/** A key that gets one of these answers is out of quota or refused, so the search moves to the next slot. */
 const KEY_REFUSED = new Set([429, 401, 403]);
 
 /** One text search; the same shape Matching's `textQueries` hands out (Discovery never imports Matching). */
@@ -16,10 +52,12 @@ export interface JsearchQuery {
 }
 
 export interface JsearchOptions {
-  /** At least one. Secrets: named by position in every message, never written out. */
+  /** At least one. Secrets: named by position in every message, never written out. One key serves all three APIs. */
   apiKeys: string[];
+  requestLog: RequestLog;
   /** One search per query and publisher with ` via <publisher>` appended. Empty means one search without a publisher. */
   publishers: string[];
+  /** Two-letter country code: JSearch and Indeed take it as is, LinkedIn gets the country name in its location. */
   country: string;
   language?: string | null;
   /** The searches to run, read on every fetch (the active Targets' keyword and location pairs). */
@@ -51,6 +89,12 @@ const responseSchema = z.object({ data: z.object({ jobs: z.array(z.unknown()) })
 const filled = (v: string | null | undefined): string | undefined =>
   v === null || v === undefined || v.trim() === '' ? undefined : v.trim();
 
+// An unparseable date would make the insert throw and fail the run on every poll, so it counts as missing.
+const dated = (v: string | number | null | undefined): Date | undefined => {
+  const d = v === null || v === undefined ? undefined : new Date(v);
+  return d === undefined || Number.isNaN(d.getTime()) ? undefined : d;
+};
+
 /** The text of one search; Google for Jobs reads it like a person's query. */
 function queryText({ keyword, location }: JsearchQuery): string {
   if (keyword !== undefined && location !== undefined) return `${keyword} in ${location}`;
@@ -66,11 +110,6 @@ function normalize(r: Result): NormalizedPosting | string {
     filled(r.job_apply_link) ??
     filled(r.job_google_link);
   if (url === undefined) return `result without a link: ${r.job_title ?? ''}`;
-  // An unparseable date would make the insert throw and fail the run on every poll, so it counts as missing.
-  const dated = (v: string | number | null | undefined): Date | undefined => {
-    const d = v === null || v === undefined ? undefined : new Date(v);
-    return d === undefined || Number.isNaN(d.getTime()) ? undefined : d;
-  };
   const postedAt =
     dated(filled(r.job_posted_at_datetime_utc)) ??
     dated(r.job_posted_at_timestamp == null ? undefined : r.job_posted_at_timestamp * 1000);
@@ -87,97 +126,260 @@ function normalize(r: Result): NormalizedPosting | string {
   };
 }
 
-/** Every key was refused on one request; the run stops and the Pipeline alerts `source:jsearch`. */
+// The dedicated APIs answer `data` as the list itself, JSearch as `data.jobs`.
+const dedicatedResultSchema = z.looseObject({
+  job_uid: optionalText,
+  job_title: optionalText,
+  employer_name: optionalText,
+  job_location: optionalText,
+  job_city: optionalText,
+  job_posted_at_datetime_utc: optionalText,
+  job_posted_at_timestamp: z.number().nullish(),
+});
+const dedicatedResponseSchema = z.object({ data: z.array(z.unknown()) });
+
+function normalizeDedicated(
+  api: 'linkedin' | 'indeed',
+  country: string,
+  r: z.infer<typeof dedicatedResultSchema>,
+): NormalizedPosting | string {
+  const uid = filled(r.job_uid);
+  if (uid === undefined) return `result without job_uid: ${r.job_title ?? ''}`;
+  const host = country === 'us' ? 'www' : country;
+  return {
+    sourcePostingId: `${api}:${uid}`,
+    title: r.job_title ?? '',
+    company: filled(r.employer_name),
+    location: filled(r.job_city) ?? filled(r.job_location?.split('•')[0]),
+    postedAt:
+      dated(filled(r.job_posted_at_datetime_utc)) ??
+      dated(r.job_posted_at_timestamp == null ? undefined : r.job_posted_at_timestamp * 1000),
+    // The same link a person would open, so the job also merges with the JSearch posting of it (ADR agent 0024).
+    url:
+      api === 'linkedin'
+        ? `https://www.linkedin.com/jobs/view/${uid}`
+        : `https://${host}.indeed.com/viewjob?jk=${uid}`,
+    publisher: api === 'linkedin' ? 'LinkedIn' : 'Indeed',
+    raw: r,
+  };
+}
+
+interface Slot {
+  api: ApiId;
+  keyPosition: number;
+}
+const slotName = (s: Slot): string => `${s.api}:${String(s.keyPosition)}`;
+
+/** Every slot of the pool was refused on one search. The run stops and the Pipeline alerts `source:jsearch`. */
 class KeysExhausted extends Error {
   override name = 'KeysExhausted';
 }
 
 class HttpFailure extends Error {
   override name = 'HttpFailure';
-  constructor(readonly status: number) {
-    super(`HTTP ${String(status)}`);
+  /** Status 0 means no answer came, and `reason` then names why. */
+  constructor(
+    readonly status: number,
+    reason?: string,
+  ) {
+    super(reason ?? `HTTP ${String(status)}`);
   }
 }
 
+/** The request log could not be read or written: a database fault, not a failed search. */
+class LogFailure extends Error {
+  override name = 'LogFailure';
+}
+
 export interface JsearchStats {
-  /** Requests sent since the Source was built, retries on another key included. */
+  /** Requests sent since the Source was built, retries on another slot included. */
   requests: number;
-  /** The key the next request starts on, counted from 1. */
-  keyPosition: number;
+  /** Every slot of the APIs in use with its request count. The key position counts from 1. */
+  slots: { api: ApiId; keyPosition: number; requests: number }[];
+}
+
+interface Search {
+  keyword?: string;
+  location?: string;
+  radiusKm?: number;
+  publisher: string | null;
+  /** The JSearch query text. */
+  text: string;
 }
 
 export function createJsearchSource({
   apiKeys,
+  requestLog,
   publishers,
   country,
   language = null,
   queries,
   fetch: fetchImpl = fetch,
 }: JsearchOptions): Source & { stats: () => JsearchStats } {
-  // The current key survives between runs until the process restarts. The unusable set is per fetch.
-  let current = 0;
-  let unusable = new Set<number>();
+  const countryName =
+    new Intl.DisplayNames(['en'], { type: 'region' }).of(country.toUpperCase()) ?? country;
+  const dedicated = [...new Set(publishers.map((p) => poolOf(p)))].filter((p) => p !== 'jsearch');
+  const keyPositions = apiKeys.map((_, i) => i + 1);
+  const slotsOf = (api: ApiId): Slot[] => keyPositions.map((keyPosition) => ({ api, keyPosition }));
+  /** The slots a search of this pool rotates over: JSearch key 1 to n, then the pool's own API key 1 to n. */
+  const poolSlots = (pool: SlotPool): Slot[] =>
+    pool === 'jsearch' ? slotsOf('jsearch') : [...slotsOf('jsearch'), ...slotsOf(pool)];
+  const counts = new Map<string, number>();
   let requests = 0;
+  /** Slots refused during this fetch, shared by every pool: a refused key is refused for its whole API. */
+  let unusable = new Set<string>();
 
-  /** Sends one request with the current key, moving to the next key on a refusal. */
-  const get = async (params: URLSearchParams): Promise<unknown> => {
-    for (;;) {
-      requests += 1;
-      const res = await fetchImpl(`${API_URL}?${params.toString()}`, {
-        headers: { 'x-api-key': apiKeys[current] ?? '' },
+  const params = (s: Search, api: ApiId): URLSearchParams => {
+    const p = new URLSearchParams();
+    if (api === 'jsearch') {
+      p.set('query', s.text);
+      p.set('country', country);
+      p.set('date_posted', 'week');
+      if (language !== null) p.set('language', language);
+      if (s.location !== undefined && s.radiusKm !== undefined) p.set('radius', String(s.radiusKm));
+      return p;
+    }
+    p.set('query', s.keyword ?? 'jobs');
+    if (api === 'linkedin') {
+      // LinkedIn has no country parameter and a radius needs a geo id we do not have.
+      p.set('location', s.location === undefined ? countryName : `${s.location}, ${countryName}`);
+    } else {
+      if (s.location !== undefined) p.set('location', s.location);
+      p.set('country', country);
+      if (language !== null) p.set('language', language);
+      if (s.location !== undefined && s.radiusKm !== undefined) p.set('radius', String(s.radiusKm));
+    }
+    p.set('date_posted', 'week');
+    return p;
+  };
+
+  /** Sends one request on one slot and logs it. Returns the list of results or throws. */
+  const send = async (s: Search, slot: Slot): Promise<unknown[]> => {
+    const query = params(s, slot.api);
+    requests += 1;
+    counts.set(slotName(slot), (counts.get(slotName(slot)) ?? 0) + 1);
+    const entry = (over: Partial<RequestLogEntry>): RequestLogEntry => ({
+      api: slot.api,
+      keyPosition: slot.keyPosition,
+      publisher: s.publisher,
+      // The Target query as searched (keyword, place and publisher), the same text for every API.
+      query: s.text,
+      status: null,
+      failure: null,
+      jobsReturned: 0,
+      ...over,
+    });
+    const log = async (e: RequestLogEntry): Promise<void> => {
+      try {
+        await requestLog.record(e);
+      } catch {
+        throw new LogFailure('request log write failed');
+      }
+    };
+    let res: Response;
+    try {
+      res = await fetchImpl(`${API_URLS[slot.api]}?${query.toString()}`, {
+        headers: { 'x-api-key': apiKeys[slot.keyPosition - 1] ?? '' },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
-      if (res.ok) return res.json();
-      if (!KEY_REFUSED.has(res.status)) throw new HttpFailure(res.status);
-      unusable.add(current);
-      const next = apiKeys.findIndex((_, i) => !unusable.has(i) && i > current);
-      const wrapped = apiKeys.findIndex((_, i) => !unusable.has(i));
-      if (next === -1 && wrapped === -1) throw new KeysExhausted('every API key was refused');
-      current = next === -1 ? wrapped : next;
+    } catch (err) {
+      const failure =
+        err instanceof Error && err.name === 'TimeoutError' ? 'timeout' : 'network error';
+      await log(entry({ failure }));
+      throw new HttpFailure(0, failure);
+    }
+    if (!res.ok) {
+      await log(entry({ status: res.status }));
+      throw new HttpFailure(res.status);
+    }
+    try {
+      const body: unknown = await res.json();
+      const list =
+        slot.api === 'jsearch'
+          ? responseSchema.parse(body).data.jobs
+          : dedicatedResponseSchema.parse(body).data;
+      await log(entry({ status: res.status, jobsReturned: list.length }));
+      return list;
+    } catch (err) {
+      if (err instanceof LogFailure) throw err;
+      await log(entry({ status: res.status, failure: 'unusable response' }));
+      throw new HttpFailure(res.status, 'unusable response');
+    }
+  };
+
+  /** Runs one search on the next usable slot of its pool, moving on after each refusal. */
+  const run = async (s: Search): Promise<{ api: ApiId; list: unknown[] }> => {
+    const pool = poolOf(s.publisher);
+    const slots = poolSlots(pool);
+    let last: { api: ApiId; keyPosition: number } | null;
+    try {
+      last = await requestLog.lastSlot(pool);
+    } catch {
+      throw new LogFailure('request log read failed');
+    }
+    let at =
+      last === null
+        ? -1
+        : slots.findIndex((x) => x.api === last.api && x.keyPosition === last.keyPosition);
+    for (;;) {
+      let next: Slot | undefined;
+      for (let step = 1; step <= slots.length && next === undefined; step += 1) {
+        const candidate = slots[(at + step + slots.length) % slots.length];
+        if (candidate !== undefined && !unusable.has(slotName(candidate))) next = candidate;
+      }
+      if (next === undefined) throw new KeysExhausted('every API key was refused');
+      try {
+        return { api: next.api, list: await send(s, next) };
+      } catch (err) {
+        if (!(err instanceof HttpFailure && KEY_REFUSED.has(err.status))) throw err;
+        unusable.add(slotName(next));
+        at = slots.findIndex((x) => x.api === next.api && x.keyPosition === next.keyPosition);
+      }
     }
   };
 
   return {
     id: JSEARCH,
-    stats: () => ({ requests, keyPosition: current + 1 }),
+    stats: () => ({
+      requests,
+      slots: ['jsearch' as const, ...dedicated].flatMap((api) =>
+        slotsOf(api).map((s) => ({ ...s, requests: counts.get(slotName(s)) ?? 0 })),
+      ),
+    }),
     async fetch(): Promise<FetchResult> {
       unusable = new Set();
       const postings = new Map<string, NormalizedPosting>();
       const errors: string[] = [];
       const failures: string[] = [];
       // ponytail: one page per query and publisher, sequential, with the queries capped by Matching.
-      const searches = (await queries()).flatMap((q) =>
+      const searches: Search[] = (await queries()).flatMap((q) =>
         (publishers.length > 0 ? publishers : [null]).map((publisher) => ({
+          ...q,
+          publisher,
           text: `${queryText(q)}${publisher === null ? '' : ` via ${publisher}`}`,
-          radiusKm: q.location === undefined ? undefined : q.radiusKm,
         })),
       );
       for (const [i, search] of searches.entries()) {
         try {
-          const params = new URLSearchParams({ query: search.text, country, date_posted: 'week' });
-          if (language !== null) params.set('language', language);
-          if (search.radiusKm !== undefined) params.set('radius', String(search.radiusKm));
-          const body = responseSchema.parse(await get(params));
-          for (const entry of body.data.jobs) {
-            const parsed = resultSchema.safeParse(entry);
-            const posting = parsed.success
-              ? normalize(parsed.data)
-              : 'result in an unexpected shape';
+          const { api, list } = await run(search);
+          for (const entry of list) {
+            let posting: NormalizedPosting | string;
+            if (api === 'jsearch') {
+              const parsed = resultSchema.safeParse(entry);
+              posting = parsed.success ? normalize(parsed.data) : 'result in an unexpected shape';
+            } else {
+              const parsed = dedicatedResultSchema.safeParse(entry);
+              posting = parsed.success
+                ? normalizeDedicated(api, country.toLowerCase(), parsed.data)
+                : 'result in an unexpected shape';
+            }
             if (typeof posting === 'string') errors.push(posting);
             else postings.set(posting.sourcePostingId, posting);
           }
         } catch (err) {
-          if (err instanceof KeysExhausted) throw err;
+          if (err instanceof KeysExhausted || err instanceof LogFailure) throw err;
           // The line names the search by position and gives a fixed reason: never the query text, never a key.
-          const reason =
-            err instanceof HttpFailure
-              ? err.message
-              : err instanceof z.ZodError
-                ? 'unusable response'
-                : err instanceof Error && err.name === 'TimeoutError'
-                  ? 'timeout'
-                  : 'network error';
-          const line = `search ${String(i + 1)} failed: ${reason}`;
+          const line = `search ${String(i + 1)} failed: ${err instanceof HttpFailure ? err.message : 'network error'}`;
           failures.push(line);
           errors.push(line);
         }

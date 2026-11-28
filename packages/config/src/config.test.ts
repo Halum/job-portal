@@ -105,18 +105,20 @@ describe('loadConfig', () => {
   });
 
   describe('jsearch source', () => {
-    const on = { JSEARCH_API_KEYS: 'test-key-1', JSEARCH_INTERVAL_MINUTES: '720' };
+    const on = { OPENWEBNINJA_API_KEYS: 'test-key-1', JSEARCH_INTERVAL_MINUTES: '720' };
 
     it('is off without an interval or without a key, and empty values count as unset', () => {
       expect(loadConfig(valid).sources.jsearch).toBeNull();
-      expect(loadConfig({ ...valid, JSEARCH_API_KEYS: 'test-key-1' }).sources.jsearch).toBeNull();
+      expect(
+        loadConfig({ ...valid, OPENWEBNINJA_API_KEYS: 'test-key-1' }).sources.jsearch,
+      ).toBeNull();
       expect(loadConfig({ ...valid, JSEARCH_INTERVAL_MINUTES: '720' }).sources.jsearch).toBeNull();
       expect(
-        loadConfig({ ...valid, JSEARCH_API_KEYS: ' , ', JSEARCH_INTERVAL_MINUTES: '720' }).sources
-          .jsearch,
+        loadConfig({ ...valid, OPENWEBNINJA_API_KEYS: ' , ', JSEARCH_INTERVAL_MINUTES: '720' })
+          .sources.jsearch,
       ).toBeNull();
       expect(
-        loadConfig({ ...valid, JSEARCH_API_KEYS: 'test-key-1', JSEARCH_INTERVAL_MINUTES: '' })
+        loadConfig({ ...valid, OPENWEBNINJA_API_KEYS: 'test-key-1', JSEARCH_INTERVAL_MINUTES: '' })
           .sources.jsearch,
       ).toBeNull();
     });
@@ -136,7 +138,7 @@ describe('loadConfig', () => {
         loadConfig({
           ...valid,
           JSEARCH_INTERVAL_MINUTES: '60',
-          JSEARCH_API_KEYS: ' test-key-1, ,test-key-2 ,',
+          OPENWEBNINJA_API_KEYS: ' test-key-1, ,test-key-2 ,',
           JSEARCH_PUBLISHERS: 'LinkedIn, glassdoor',
           JSEARCH_COUNTRY: 'AT',
           JSEARCH_LANGUAGE: 'de',
@@ -189,7 +191,7 @@ describe('loadConfig', () => {
       try {
         loadConfig({
           ...valid,
-          JSEARCH_API_KEYS: secret,
+          OPENWEBNINJA_API_KEYS: secret,
           JSEARCH_INTERVAL_MINUTES: '0',
           JSEARCH_PUBLISHERS: '',
         });

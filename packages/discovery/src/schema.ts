@@ -1,6 +1,8 @@
 import {
   type AnyPgColumn,
+  bigint,
   index,
+  integer,
   jsonb,
   pgSchema,
   text,
@@ -125,4 +127,29 @@ export const mergeChecks = discoverySchema.table(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique('merge_checks_pair').on(t.userId, t.jobA, t.jobB)],
+);
+
+export const API_IDS = ['jsearch', 'linkedin', 'indeed'] as const;
+
+/**
+ * One row per request a Source sent to a paid API: which API and key position ran which query, and what came back.
+ * Never the key. Not per user: the keys belong to the installation. The newest row of a pool is where its round robin goes on.
+ */
+export const requestLog = discoverySchema.table(
+  'request_log',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+    api: text('api', { enum: API_IDS }).notNull(),
+    /** Counted from 1, the position in the configured key list. */
+    keyPosition: integer('key_position').notNull(),
+    publisher: text('publisher'),
+    query: text('query').notNull(),
+    /** The HTTP status, null when no answer came. */
+    status: integer('status'),
+    /** A fixed reason (timeout, network error, unusable response), null when none applies. */
+    failure: text('failure'),
+    jobsReturned: integer('jobs_returned').notNull().default(0),
+  },
+  (t) => [index('request_log_publisher_idx').on(t.publisher, t.id)],
 );

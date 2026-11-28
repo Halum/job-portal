@@ -61,6 +61,21 @@ const bambase = fixture('bambase-jobs.html');
 
 // JSearch lists one job on LinkedIn; the test later adds the same LinkedIn job by hand from another host.
 const JSEARCH_LINKEDIN_ID = '4098765432';
+// The LinkedIn API lists the same job under its own id: both postings end as one Job (ADR agent 0024).
+const linkedinApi = JSON.stringify({
+  status: 'OK',
+  data: [
+    {
+      job_uid: JSEARCH_LINKEDIN_ID,
+      job_title: 'Beispiel Hilfskraft (m/w/d)',
+      employer_name: 'Beispiel Firma Y',
+      job_publisher: 'LinkedIn',
+      job_location: 'Musterstadt, Deutschland',
+      job_city: 'Musterstadt',
+      job_posted_at_datetime_utc: '2026-07-09T08:30:00.000Z',
+    },
+  ],
+});
 const jsearch = JSON.stringify({
   data: {
     jobs: [
@@ -94,8 +109,8 @@ describe('worker cycle through the real MCP endpoint', () => {
   let gmail: FakeGmail;
   const webhook: { topicId: string; kind: string; text: string }[] = [];
   const aiPrompts: string[] = [];
-  /** The API key of every JSearch request. */
-  const jsearchKeys: string[] = [];
+  /** The API and key of every OpenWeb Ninja request. */
+  const apiRequests: { api: string; key: string }[] = [];
   /** The Job the scripted mail classifier names; set before the worker starts. */
   let appliedJobId = '';
 
@@ -124,8 +139,11 @@ describe('worker cycle through the real MCP endpoint', () => {
       return Promise.resolve(new Response(bundesagentur));
     if (url.hostname.endsWith('bambase.de')) return Promise.resolve(new Response(bambase));
     if (url.hostname === 'api.openwebninja.com') {
-      jsearchKeys.push(new Headers(init?.headers).get('x-api-key') ?? '');
-      return Promise.resolve(new Response(jsearch));
+      const api = url.pathname.split('/')[1] ?? '';
+      apiRequests.push({ api, key: new Headers(init?.headers).get('x-api-key') ?? '' });
+      return Promise.resolve(
+        new Response(api === 'realtime-linkedin-data' ? linkedinApi : jsearch),
+      );
     }
     if (url.hostname === 'openrouter.ai') {
       const { messages } = JSON.parse(bodyText(init)) as { messages: { content: string }[] };
@@ -167,7 +185,8 @@ describe('worker cycle through the real MCP endpoint', () => {
       BUNDESAGENTUR_INTERVAL_MINUTES: '1',
       BAMBASE_INTERVAL_MINUTES: '1',
       JSEARCH_INTERVAL_MINUTES: '1',
-      JSEARCH_API_KEYS: 'test-key-1,test-key-2',
+      OPENWEBNINJA_API_KEYS: 'test-key-1',
+      JSEARCH_PUBLISHERS: 'linkedin',
       AI_RUNNER: 'openrouter',
       OPENROUTER_API_KEY: 'placeholder-key',
       OPENROUTER_MODEL: 'vendor/model',
@@ -277,7 +296,8 @@ describe('worker cycle through the real MCP endpoint', () => {
 
     // Prerank and score: two candidates, one tagged and one below the threshold with its Review item.
     const history = await call<{ runs: RunOut[]; aiTotals: object }>('get_run_history');
-    expect(history.runs.map((r) => r.fetched).sort((x, y) => x - y)).toEqual([1, 6, 12]);
+    // The JSearch run fetched two postings: one from JSearch and one from the LinkedIn API, merged into one Job.
+    expect(history.runs.map((r) => r.fetched).sort((x, y) => x - y)).toEqual([2, 6, 12]);
     expect(history.runs.reduce((n, r) => n + r.scored, 0)).toBe(2);
     expect(history.runs.reduce((n, r) => n + r.aiRejections, 0)).toBe(1);
     expect(history.aiTotals).toMatchObject({ calls: 3, failures: 0 }); // two scores and one mail
@@ -329,9 +349,11 @@ describe('worker cycle through the real MCP endpoint', () => {
   }, 90_000);
 
   it('a JSearch posting is one Job with the LinkedIn job added by hand: created false, seenBefore names jsearch with its publisher', async () => {
-    // The scheduled JSearch run searched the Target's keyword and location once per configured publisher.
-    expect(jsearchKeys.length).toBeGreaterThan(0);
-    expect(new Set(jsearchKeys)).toEqual(new Set(['test-key-1']));
+    // The Target has two keywords: the scheduled run searched JSearch key 1, then the LinkedIn API key 1.
+    expect(apiRequests).toEqual([
+      { api: 'jsearch', key: 'test-key-1' },
+      { api: 'realtime-linkedin-data', key: 'test-key-1' },
+    ]);
 
     const added = await call<{
       jobId: string;
@@ -344,15 +366,22 @@ describe('worker cycle through the real MCP endpoint', () => {
       url: `https://www.linkedin.com/jobs/view/${JSEARCH_LINKEDIN_ID}?trk=x`,
     });
     expect(added.created).toBe(false);
-    expect(added.seenBefore).toEqual([
-      { sourceId: 'jsearch', publisher: 'LinkedIn', firstSeenAt: expect.any(String) as string },
-    ]);
+    const seen = {
+      sourceId: 'jsearch',
+      publisher: 'LinkedIn',
+      firstSeenAt: expect.any(String) as string,
+    };
+    expect(added.seenBefore).toEqual([seen, seen]);
     const { jobs } = await call<{ jobs: { id: string; postings: { sourceId: string }[] }[] }>(
       'list_jobs',
       { url: `https://de.linkedin.com/jobs/view/${JSEARCH_LINKEDIN_ID}` },
     );
     expect(jobs.map((j) => j.id)).toEqual([added.jobId]);
-    expect(jobs[0]?.postings.map((p) => p.sourceId).sort()).toEqual(['jsearch', 'linkedin']);
+    expect(jobs[0]?.postings.map((p) => p.sourceId).sort()).toEqual([
+      'jsearch',
+      'jsearch',
+      'linkedin',
+    ]);
   });
 
   it('a manual add then a linkedin add of the same job is one Job: created false, seenBefore names manual', async () => {

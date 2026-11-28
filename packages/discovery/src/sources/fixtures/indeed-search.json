@@ -1,0 +1,39 @@
+{
+  "status": "OK",
+  "request_id": "fixture-request-2",
+  "parameters": {
+    "query": "koch"
+  },
+  "data": [
+    {
+      "job_id": "Zml4dHVyZS1pbi0x",
+      "job_uid": "00000000000000a1",
+      "job_title": "Beispiel Stelle I1 (m/w/d)",
+      "employer_name": "Beispiel Firma I",
+      "job_publisher": "Beispiel Karriereseite",
+      "job_apply_link": "https://careers.example.invalid/stelle-i1",
+      "job_location": "Musterstadt",
+      "job_city": "Musterstadt",
+      "job_posted_at_datetime_utc": "2026-07-08T10:00:00.000Z"
+    },
+    {
+      "job_id": "Zml4dHVyZS1pbi0y",
+      "job_uid": "00000000000000a2",
+      "job_title": "Beispiel Stelle I2",
+      "employer_name": "Beispiel Firma J",
+      "job_publisher": "Indeed",
+      "job_apply_link": "https://de.indeed.example.invalid/viewjob?jk=00000000000000a2",
+      "job_location": "Beispielburg",
+      "job_city": "Beispielburg",
+      "job_posted_at_datetime_utc": "2026-07-07T10:00:00.000Z"
+    },
+    {
+      "job_id": "Zml4dHVyZS1pbi0z",
+      "job_uid": "",
+      "job_title": "Beispiel Stelle I ohne Kennung",
+      "employer_name": "Beispiel Firma K",
+      "job_publisher": "Indeed",
+      "job_apply_link": "https://de.indeed.example.invalid/viewjob?jk=x"
+    }
+  ]
+}

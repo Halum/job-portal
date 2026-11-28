@@ -23,7 +23,7 @@ const httpUrl = z.string().refine((v) => {
   }
 }, 'must be an http or https URL');
 
-// JSEARCH_API_KEYS is a secret: split without ever echoing the value in an error.
+// OPENWEBNINJA_API_KEYS is a secret (one key serves JSearch and the LinkedIn and Indeed APIs): split without ever echoing the value in an error.
 const keyList = z.preprocess(
   (v) =>
     typeof v === 'string'
@@ -76,9 +76,9 @@ const envSchema = z
     // Bambase needs no search criteria, so it is scheduled when its interval is set (empty counts as unset).
     BAMBASE_INTERVAL_MINUTES: optionalInterval,
     // JSearch (LinkedIn, Indeed and more through Google for Jobs): scheduled when the interval is set and at
-    // least one API key is. The keys are secrets; several keys let the Source switch to the next one when one is out of quota.
+    // least one API key is. The keys are secrets, and one key serves JSearch and the LinkedIn and Indeed APIs. Each search rotates over the key slots of its pool.
     JSEARCH_INTERVAL_MINUTES: optionalInterval,
-    JSEARCH_API_KEYS: keyList,
+    OPENWEBNINJA_API_KEYS: keyList,
     JSEARCH_PUBLISHERS: publisherList,
     JSEARCH_COUNTRY: z.preprocess(emptyToUndefined, isoCode('country').default('de')),
     JSEARCH_LANGUAGE: z.preprocess(emptyToUndefined, isoCode('language').optional()),
@@ -279,7 +279,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     throw new ConfigError(`Invalid environment: ${issues}`);
   }
   const e = result.data;
-  const jsearchKeys = e.JSEARCH_API_KEYS ?? [];
+  const jsearchKeys = e.OPENWEBNINJA_API_KEYS ?? [];
   return {
     databaseUrl: e.DATABASE_URL,
     redisUrl: e.REDIS_URL,

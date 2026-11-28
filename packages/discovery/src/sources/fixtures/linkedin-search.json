@@ -1,0 +1,40 @@
+{
+  "status": "OK",
+  "request_id": "fixture-request-1",
+  "parameters": {
+    "query": "koch"
+  },
+  "data": [
+    {
+      "job_id": "Zml4dHVyZS1saS0x",
+      "job_uid": "1000000001",
+      "job_title": "Beispiel Stelle L1 (m/w/d)",
+      "employer_name": "Beispiel Firma L",
+      "job_publisher": "LinkedIn",
+      "job_apply_link": "https://www.linkedin.com/jobs/view/1000000001",
+      "job_location": "Musterstadt, Deutschland",
+      "job_city": "Musterstadt",
+      "job_posted_at_datetime_utc": "2026-07-09T08:30:00.000Z"
+    },
+    {
+      "job_id": "Zml4dHVyZS1saS0y",
+      "job_uid": "1000000002",
+      "job_title": "Beispiel Stelle L2",
+      "employer_name": "Beispiel Firma M",
+      "job_publisher": "LinkedIn",
+      "job_apply_link": "https://www.linkedin.com/jobs/view/1000000002",
+      "job_location": "Beispielburg, Deutschland",
+      "job_city": null,
+      "job_posted_at_datetime_utc": null,
+      "job_posted_at_timestamp": 1783499400
+    },
+    {
+      "job_id": "Zml4dHVyZS1saS0z",
+      "job_uid": null,
+      "job_title": "Beispiel Stelle ohne Kennung",
+      "employer_name": "Beispiel Firma N",
+      "job_publisher": "LinkedIn",
+      "job_apply_link": "https://www.linkedin.com/jobs/view/x"
+    }
+  ]
+}

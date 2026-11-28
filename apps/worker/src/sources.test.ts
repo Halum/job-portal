@@ -7,6 +7,7 @@ const deps = {
   watchlist: { listBoards: () => Promise.resolve([]) },
   fetch: () => Promise.reject(new Error('no network in tests')),
   userId: '00000000-0000-4000-8000-000000000001',
+  requestLog: { record: () => Promise.resolve(), lastSlot: () => Promise.resolve(null) },
 };
 
 const base = {
@@ -26,7 +27,7 @@ describe('buildSources', () => {
       LEVER_INTERVAL_MINUTES: '60',
       ASHBY_INTERVAL_MINUTES: '60',
       JSEARCH_INTERVAL_MINUTES: '720',
-      JSEARCH_API_KEYS: 'test-key-1',
+      OPENWEBNINJA_API_KEYS: 'test-key-1',
     });
     const { sources, scheduled, jsearchStats } = buildSources(config, deps);
     const known = new Set(sources.map((s) => s.id));
@@ -35,11 +36,21 @@ describe('buildSources', () => {
     );
     expect(scheduled.find((s) => s.sourceId === 'jsearch')?.intervalMinutes).toBe(720);
     for (const { sourceId } of scheduled) expect(known.has(sourceId)).toBe(true);
-    expect(jsearchStats?.()).toEqual({ requests: 0, keyPosition: 1 });
+    expect(jsearchStats?.()).toEqual({
+      requests: 0,
+      slots: [
+        { api: 'jsearch', keyPosition: 1, requests: 0 },
+        { api: 'linkedin', keyPosition: 1, requests: 0 },
+        { api: 'indeed', keyPosition: 1, requests: 0 },
+      ],
+    });
   });
 
   it('builds no JSearch Source without an interval or without a key', () => {
-    for (const env of [{ JSEARCH_API_KEYS: 'test-key-1' }, { JSEARCH_INTERVAL_MINUTES: '720' }]) {
+    for (const env of [
+      { OPENWEBNINJA_API_KEYS: 'test-key-1' },
+      { JSEARCH_INTERVAL_MINUTES: '720' },
+    ]) {
       const { sources, scheduled, jsearchStats } = buildSources(
         loadConfig({ ...base, ...env }),
         deps,
@@ -55,7 +66,7 @@ describe('buildSources', () => {
     const config = loadConfig({
       ...base,
       JSEARCH_INTERVAL_MINUTES: '720',
-      JSEARCH_API_KEYS: 'test-key-1',
+      OPENWEBNINJA_API_KEYS: 'test-key-1',
       JSEARCH_PUBLISHERS: 'any',
     });
     const { sources } = buildSources(config, {
