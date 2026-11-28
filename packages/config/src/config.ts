@@ -76,7 +76,7 @@ const envSchema = z
     // Bambase needs no search criteria, so it is scheduled when its interval is set (empty counts as unset).
     BAMBASE_INTERVAL_MINUTES: optionalInterval,
     // JSearch (LinkedIn, Indeed and more through Google for Jobs): scheduled when the interval is set and at
-    // least one API key is. The keys are secrets; several keys let the Source switch to the next one when one is out of quota.
+    // least one API key is. The keys are secrets, and one key serves JSearch and the LinkedIn and Indeed APIs. Each search rotates over the key slots of its pool.
     JSEARCH_INTERVAL_MINUTES: optionalInterval,
     OPENWEBNINJA_API_KEYS: keyList,
     JSEARCH_PUBLISHERS: publisherList,

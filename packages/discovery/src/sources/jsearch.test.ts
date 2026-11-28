@@ -700,7 +700,7 @@ describe('request log', () => {
     expect(dedicatedLog.entries[1]).toMatchObject({
       api: 'indeed',
       keyPosition: 1,
-      query: 'koch',
+      query: 'koch in Musterstadt via indeed',
       jobsReturned: 3,
       status: 200,
     });
@@ -742,6 +742,62 @@ describe('request log', () => {
         requestLog,
         queries: () => Promise.resolve(letters(2)),
       }).fetch(),
-    ).rejects.toThrow('database is down');
+    ).rejects.toThrow('request log write failed');
+  });
+
+  it('puts neither the query text nor the database error in the failure of an unwritable or unreadable log', async () => {
+    const leaky = new Error('Failed query: insert ... params: secret query a');
+    const queries = () => Promise.resolve([{ keyword: 'secret query a' }]);
+    const unwritable: RequestLog = {
+      record: () => Promise.reject(leaky),
+      lastSlot: () => Promise.resolve(null),
+    };
+    const unreadable: RequestLog = {
+      record: () => Promise.resolve(),
+      lastSlot: () => Promise.reject(leaky),
+    };
+    for (const requestLog of [unwritable, unreadable]) {
+      const failure = await build({ fetch: fakeFetch(ok).fetch, requestLog, queries })
+        .fetch()
+        .then(
+          () => null,
+          (err: unknown) => err,
+        );
+      expect(failure).toBeInstanceOf(Error);
+      expect(String(failure)).toMatch(/^LogFailure: request log (write|read) failed$/);
+      expect(String(failure)).not.toContain('secret query');
+    }
+  });
+});
+
+describe('rotation of both pools across two fetches', () => {
+  it('moves the linkedin and indeed pools each through jsearch 1, 2 and their own API 1, 2, resuming across fetches', async () => {
+    const requestLog = memoryLog();
+    const over = {
+      requestLog,
+      publishers: ['linkedin', 'indeed'],
+      queries: () => Promise.resolve(letters(3)),
+    };
+    const first = fakeFetch(ok);
+    await build({ fetch: first.fetch, ...over }).fetch();
+    const second = fakeFetch(ok);
+    await build({ fetch: second.fetch, ...over }).fetch();
+    // Searches run a/linkedin, a/indeed, b/linkedin, b/indeed, c/linkedin, c/indeed in each fetch.
+    expect(slotsOf(first.calls)).toEqual([
+      'jsearch:test-key-1',
+      'jsearch:test-key-1',
+      'jsearch:test-key-2',
+      'jsearch:test-key-2',
+      'linkedin:test-key-1',
+      'indeed:test-key-1',
+    ]);
+    expect(slotsOf(second.calls)).toEqual([
+      'linkedin:test-key-2',
+      'indeed:test-key-2',
+      'jsearch:test-key-1',
+      'jsearch:test-key-1',
+      'jsearch:test-key-2',
+      'jsearch:test-key-2',
+    ]);
   });
 });

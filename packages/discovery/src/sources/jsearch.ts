@@ -262,7 +262,8 @@ export function createJsearchSource({
       api: slot.api,
       keyPosition: slot.keyPosition,
       publisher: s.publisher,
-      query: query.get('query') ?? '',
+      // The Target query as searched (keyword, place and publisher), the same text for every API.
+      query: s.text,
       status: null,
       failure: null,
       jobsReturned: 0,
@@ -271,8 +272,8 @@ export function createJsearchSource({
     const log = async (e: RequestLogEntry): Promise<void> => {
       try {
         await requestLog.record(e);
-      } catch (err) {
-        throw new LogFailure(err instanceof Error ? err.message : 'request log write failed');
+      } catch {
+        throw new LogFailure('request log write failed');
       }
     };
     let res: Response;
@@ -313,8 +314,8 @@ export function createJsearchSource({
     let last: { api: ApiId; keyPosition: number } | null;
     try {
       last = await requestLog.lastSlot(pool);
-    } catch (err) {
-      throw new LogFailure(err instanceof Error ? err.message : 'request log read failed');
+    } catch {
+      throw new LogFailure('request log read failed');
     }
     let at =
       last === null
